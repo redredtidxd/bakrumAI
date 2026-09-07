@@ -58,8 +58,27 @@
             return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
         };
     }
+    // SEMILLA GLOBAL DEL MUNDO: mezclada en hash2, cambia TODO el laberinto
+    // manteniendo la determinismo (misma semilla -> mismo mundo infinito).
+    let WORLD_SEED = (Math.random() * 0xFFFFFFFF) >>> 0;
+
+    function setWorldSeed(seed) {
+        WORLD_SEED = (seed >>> 0) || 1;
+    }
+
+    // Convierte una semilla de texto (campo personalizado) en un entero
+    function stringSeed(str) {
+        let h = 2166136261 >>> 0;
+        for (let i = 0; i < str.length; i++) {
+            h ^= str.charCodeAt(i);
+            h = Math.imul(h, 16777619) >>> 0;
+        }
+        return h >>> 0;
+    }
+
     function hash2(x, z) {
         let h = (x * 374761393 + z * 668265263) | 0;
+        h = (h ^ WORLD_SEED) >>> 0;
         h = (h ^ (h >>> 13)) | 0;
         h = Math.imul(h, 1274126177) | 0;
         return (h ^ (h >>> 16)) >>> 0;
@@ -87,6 +106,7 @@
             this.occupiedFurnitureBoxes = []; // muebles: centros ocupados (mundo)
             this.furnitureBoxes = [];         // muebles: cajas solidas (mundo, persistentes)
             this.dynamicFurniture = [];       // muebles con fisica (mundo)
+            this.furnitureMeshes = [];        // mallas de muebles en la escena (para reconstruir)
             this.collectedNoteIndices = new Set();
             this._lcx = undefined;
             this._lcz = undefined;
@@ -149,6 +169,30 @@
             this.rebuildUnions();
             this.placeChunkFurniture(ch);
             this.spawnChunkPickups(ch);
+            this.rebuildUnions();
+        }
+
+        // Regenera TODO el mundo con otra semilla (campo personalizado del
+        // menu inicial): descarga todos los chunks, retira los muebles de la
+        // escena y vuelve a generar alrededor del jugador.
+        rebuild(seed) {
+            setWorldSeed(seed);
+            for (const ch of [...this.chunks.values()]) this.unloadChunk(ch);
+            this.chunks.clear();
+            for (const m of this.furnitureMeshes) this.scene.remove(m);
+            this.furnitureMeshes = [];
+            this.wallBoxes = [];
+            this.lamps = [];
+            this.pickups = [];
+            this.pickupData = [];
+            this.walkableCells = [];
+            this.occupiedFurnitureBoxes = [];
+            this.furnitureBoxes = [];
+            this.dynamicFurniture = [];
+            this.collectedNoteIndices = new Set();
+            this._lcx = undefined;
+            this._lcz = undefined;
+            this.update(this._playerPos);
             this.rebuildUnions();
         }
 
@@ -298,6 +342,12 @@
 
             // ---- 3) Conectividad garantizada: nada queda inaccesible ----
             this.connectChunk(ch);
+
+            // ---- 3b) Pilares de salas y salones: se colocan DESPUES de
+            // conectar (ni los pasillos de union ni los puentes pueden
+            // borrarlos: antes las salas quedaban a menudo sin pilar) y antes
+            // del retoque de paredes finas, que solo toca muros ----
+            for (const room of ch.rooms) this.placeRoomPillars(ch, room);
 
             // ---- 3b) Paredes finas: los macizos se reducen a 1 celda ----
             this.thinWalls(ch);
@@ -484,19 +534,6 @@
                 }
                 rects.push({ x: rx, z: rz, w, h });
                 ch.rooms.push({ x: rx, z: rz, w, h });
-
-                // Pilares CENTRALES dispersos (bloquean la vista de la
-                // entidad): finos, pocos, y nunca a menos de 2 celdas de una
-                // pared (solo salas de 4+ celdas, sin rejillas repetitivas)
-                if (w >= 4 && h >= 4) {
-                    let px = rx + Math.ceil(w / 2) - 1;
-                    while (px <= rx + w - Math.floor(w / 2) - 1) {
-                        for (let pz = rz + Math.ceil(h / 2) - 1; pz <= rz + h - Math.floor(h / 2) - 1; pz += 3) {
-                            if (r() < 0.8) ch.grid[px][pz] = 3;
-                        }
-                        px += 3;
-                    }
-                }
             }
             // Repeticion limitada: hileras de salas identicas (backrooms)
             this.repeatStructure(ch, rects);
@@ -510,6 +547,32 @@
             if (r() < 0.7) this.addStub(ch);
         }
 
+        // Pilares CENTRALES dispersos (bloquean la vista de la entidad): finos,
+        // sin rejillas repetitivas y nunca a menos de 2 celdas de una pared.
+        // Toda sala amplia (4+ celdas) garantiza pilares: es raro que una zona
+        // con espacio quede completamente despejada, y las grandes suelen
+        // llevar varios.
+        placeRoomPillars(ch, room) {
+            const { x: rx, z: rz, w, h } = room;
+            if (w < 4 || h < 4) return;
+            const r = ch.rng;
+            const cands = [];
+            for (let px = rx + Math.ceil(w / 2) - 1; px <= rx + w - Math.ceil(w / 2); px++) {
+                for (let pz = rz + Math.ceil(h / 2) - 1; pz <= rz + h - Math.ceil(h / 2); pz++) {
+                    cands.push([px, pz]);
+                }
+            }
+            for (let i = cands.length - 1; i > 0; i--) {
+                const j = Math.floor(r() * (i + 1));
+                [cands[i], cands[j]] = [cands[j], cands[i]];
+            }
+            const guaranteed = Math.min(2, cands.length);
+            for (let i = 0; i < cands.length; i++) {
+                if (i >= guaranteed && r() >= 0.65) continue;
+                ch.grid[cands[i][0]][cands[i][1]] = 3;
+            }
+        }
+
         carveHall(ch) {
             const N = CHUNK_SIZE;
             const r = ch.rng;
@@ -521,17 +584,6 @@
                 for (let z = hz; z < hz + h; z++) ch.grid[x][z] = 2;
             }
             ch.rooms.push({ x: hx, z: hz, w, h });
-            // Pilares estructurales FINOS y DISPERSOS: separacion variable
-            // (2-4 celdas), filas desfasadas y menor probabilidad: los grandes
-            // salones dejan de repetir el mismo patron de pilares
-            let px = hx + 2;
-            while (px <= hx + w - 3) {
-                const off = r() < 0.5 ? 0 : 1;
-                for (let pz = hz + 2 + off; pz <= hz + h - 3; pz += 2 + Math.floor(r() * 3)) {
-                    if (r() < 0.6) ch.grid[px][pz] = 3;
-                }
-                px += 2 + Math.floor(r() * 3);
-            }
             // Divisor interior: un trozo de pared corto separa el salon sin
             // cerrarlo (deja paso por ambos lados): menos campo abierto
             if (w >= 6 && r() < 0.6) {
@@ -934,6 +986,18 @@
             };
             ch.wallFaceMap = new Map();
 
+            // ---- Paredes curvas ocasionales: de vez en cuando un tramo recto
+            // se convierte en UNA sola pared lisa que se arquea hacia un lado
+            // (una malla continua, NO dividida en celdas, con un arco dinamico
+            // de lado y amplitud aleatorios por chunk) ----
+            const curved = this.pickCurvedRuns(ch, wallKind, key);
+            const curvedCells = new Set();
+            for (const run of curved) {
+                const built = this.buildCurvedWall(ch, run, wallTMap, key);
+                for (const c of built.cells) curvedCells.add(key(c[0], c[1]));
+                ch.wallBoxes.push(...built.boxes);
+            }
+
             for (let x = 0; x < N; x++) {
                 for (let z = 0; z < N; z++) {
                     const posX = ox + (x + 0.5) * C;
@@ -944,6 +1008,7 @@
 
                     if (type === 1) {
                         const k = key(x, z);
+                        if (curvedCells.has(k)) continue;   // la pared curva ya se construyo
                         const kind = wallKind.get(k);
                         const T = wallTMap.get(k) || 0.8;
                         if (kind === 'border') {
@@ -1156,6 +1221,173 @@
             addInst(litL, Materials.lampLit);
         }
 
+        // Elige (de vez en cuando) UN tramo recto interior para convertirlo
+        // en pared curva. Los tramos se detectan como celdas contiguas del
+        // mismo kind ('x' corre en Z, 'z' corre en X) y deben tener los
+        // lados abiertos consistentes en toda su longitud para que el arco
+        // no se meta en ningun hueco raro.
+        pickCurvedRuns(ch, wallKind, key) {
+            const N = CHUNK_SIZE;
+            const g = ch.grid;
+            const r = ch.rng;
+            const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
+            // "De vez en cuando": ~1 de cada 4 chunks tiene una pared curva
+            if (r() >= 0.28) return [];
+
+            const runs = [];
+            const visited = new Set();
+            for (let x = 2; x < N - 2; x++) {
+                for (let z = 2; z < N - 2; z++) {
+                    const k = key(x, z);
+                    if (visited.has(k)) continue;
+                    const kind = wallKind.get(k);
+                    if (kind !== 'x' && kind !== 'z') continue;
+                    const cells = [[x, z]];
+                    visited.add(k);
+                    const q = [[x, z]];
+                    while (q.length) {
+                        const [cx, cz] = q.pop();
+                        for (const [dx, dz] of kind === 'x' ? [[0, 1], [0, -1]] : [[1, 0], [-1, 0]]) {
+                            const nk = key(cx + dx, cz + dz);
+                            if (wallKind.get(nk) === kind && !visited.has(nk)) {
+                                visited.add(nk);
+                                cells.push([cx + dx, cz + dz]);
+                                q.push([cx + dx, cz + dz]);
+                            }
+                        }
+                    }
+                    if (cells.length < 3) continue;
+                    // Lados abiertos consistentes en todo el tramo
+                    let wAll = true, wAny = false, eAll = true, eAny = false;
+                    for (const [cx, cz] of cells) {
+                        const w = kind === 'x' ? open(cx - 1, cz) : open(cx, cz - 1);
+                        const e = kind === 'x' ? open(cx + 1, cz) : open(cx, cz + 1);
+                        wAll = wAll && w; wAny = wAny || w;
+                        eAll = eAll && e; eAny = eAny || e;
+                    }
+                    if (wAny !== wAll || eAny !== eAll) continue;
+                    runs.push({ kind, cells });
+                }
+            }
+            if (!runs.length) return [];
+            // Un solo tramo curvo por chunk
+            return [runs[Math.floor(r() * runs.length)]];
+        }
+
+        // Construye la pared curva: una malla unica de seccion rectangular
+        // (grosor T) barrida a lo largo de un arco suave sin(pi*t), enrasada
+        // en sus extremos con las paredes rectas vecinas. El arco se abre
+        // hacia el lado abierto del pasillo (o a un lado al azar si la pared
+        // es un tabique libre) y su amplitud se limita para que el paso nunca
+        // quede por debajo de ~1,2 m. Devuelve las celdas sustituidas y las
+        // cajas de colision (una por celda, centradas en la curva).
+        buildCurvedWall(ch, run, wallTMap, key) {
+            const C = CELL_SIZE;
+            const H = WALL_HEIGHT;
+            const N = CHUNK_SIZE;
+            const ox = ch.cx * N * C;
+            const oz = ch.cz * N * C;
+            const g = ch.grid;
+            const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
+            const kind = run.kind;
+            const cells = run.cells.slice().sort(kind === 'x' ? (a, b) => a[1] - b[1] : (a, b) => a[0] - b[0]);
+            const first = cells[0], last = cells[cells.length - 1];
+            const T = wallTMap.get(key(first[0], first[1])) || 0.8;
+
+            // Extension del tramo en el mundo: de borde de celda a borde de
+            // celda (la pared curva ocupa exactamente las celdas que sustituye)
+            const along0 = kind === 'x' ? oz + first[1] * C : ox + first[0] * C;
+            const along1 = kind === 'x' ? oz + (last[1] + 1) * C : ox + (last[0] + 1) * C;
+            const fixed0 = kind === 'x' ? ox + (first[0] + 0.5) * C : oz + (first[1] + 0.5) * C;
+
+            // Lado del arco: hacia el pasillo abierto (o al azar si esta libre)
+            let wOpen = false, eOpen = false;
+            for (const [cx, cz] of cells) {
+                wOpen = wOpen || (kind === 'x' ? open(cx - 1, cz) : open(cx, cz - 1));
+                eOpen = eOpen || (kind === 'x' ? open(cx + 1, cz) : open(cx, cz + 1));
+            }
+            let dir;
+            if (wOpen && !eOpen) dir = -1;
+            else if (eOpen && !wOpen) dir = 1;
+            else dir = ch.rng() < 0.5 ? -1 : 1;
+            const cap = C - T / 2 - 1.2;   // el paso nunca baja de ~1,2 m
+            const B = Math.min(cap, (0.30 + ch.rng() * 0.40) * C);
+
+            // Muestras a lo largo del tramo (~0,5 m) para que el arco se vea liso
+            const n = Math.max(6, Math.ceil((along1 - along0) / 0.5));
+            const pos = [], uv = [], idx = [];
+            const vert = (x, y, z, u, vv) => { pos.push(x, y, z); uv.push(u, vv); return pos.length / 3 - 1; };
+            const quad = (a, b, c, d) => { idx.push(a, b, c, a, c, d); };
+
+            // Barrido: cada muestra es una seccion rectangular de grosor T
+            const edges = [];
+            for (let i = 0; i <= n; i++) {
+                const t = i / n;
+                const along = along0 + t * (along1 - along0);
+                const off = dir * B * Math.sin(Math.PI * t);
+                if (kind === 'x') {
+                    const f = fixed0 + off;
+                    edges.push([[f - T / 2, along], [f + T / 2, along]]);
+                } else {
+                    const f = fixed0 + off;
+                    edges.push([[along, f - T / 2], [along, f + T / 2]]);
+                }
+            }
+            const alongU = (along1 - along0) / C;   // textura ~1 vez por celda
+            for (let i = 0; i < n; i++) {
+                const A = edges[i], Bb = edges[i + 1];
+                const u0 = (i / n) * alongU, u1 = ((i + 1) / n) * alongU;
+                // Laterales (+T/2 y -T/2)
+                const a = vert(A[1][0], 0, A[1][1], u0, 0), b = vert(Bb[1][0], 0, Bb[1][1], u1, 0);
+                const c = vert(Bb[1][0], H, Bb[1][1], u1, H / C), d = vert(A[1][0], H, A[1][1], u0, H / C);
+                quad(a, b, c, d);
+                const e = vert(A[0][0], 0, A[0][1], u0, 0), f = vert(Bb[0][0], 0, Bb[0][1], u1, 0);
+                const gg = vert(Bb[0][0], H, Bb[0][1], u1, H / C), h = vert(A[0][0], H, A[0][1], u0, H / C);
+                quad(h, gg, f, e);
+                // Techo y suelo
+                quad(d, c, gg, h);
+                quad(a, e, f, b);
+            }
+            // Tapas de los extremos, enrasadas con las paredes rectas vecinas
+            {
+                const A = edges[0];
+                const a = vert(A[0][0], 0, A[0][1], 0, 0), b = vert(A[1][0], 0, A[1][1], T / C, 0);
+                const c = vert(A[1][0], H, A[1][1], T / C, H / C), d = vert(A[0][0], H, A[0][1], 0, H / C);
+                quad(a, b, c, d);
+                const E = edges[n];
+                const e = vert(E[0][0], 0, E[0][1], 0, 0), f = vert(E[1][0], 0, E[1][1], T / C, 0);
+                const gg = vert(E[1][0], H, E[1][1], T / C, H / C), h = vert(E[0][0], H, E[0][1], 0, H / C);
+                quad(f, e, h, gg);
+            }
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+            geo.setIndex(idx);
+            geo.computeVertexNormals();
+            const mat = Materials.wall.clone();
+            mat.side = THREE.DoubleSide;
+            const mesh = new THREE.Mesh(geo, mat);
+            this.scene.add(mesh);
+            ch.meshes.push(mesh);
+
+            // Colision: una caja por celda sustituida, centrada en la curva
+            // (el parametro t se calcula en coordenadas de MUNDO: sin el
+            // desplazamiento del chunk las cajas se descuadraban del arco)
+            const boxes = [];
+            for (const [cx, cz] of cells) {
+                const cellAlong = kind === 'x' ? oz + (cz + 0.5) * C : ox + (cx + 0.5) * C;
+                const t = (cellAlong - along0) / (along1 - along0);
+                const off = dir * B * Math.sin(Math.PI * t);
+                if (kind === 'x') {
+                    boxes.push({ minX: fixed0 + off - T / 2, maxX: fixed0 + off + T / 2, minZ: oz + cz * C, maxZ: oz + (cz + 1) * C });
+                } else {
+                    boxes.push({ minX: ox + cx * C, maxX: ox + (cx + 1) * C, minZ: fixed0 + off - T / 2, maxZ: fixed0 + off + T / 2 });
+                }
+            }
+            return { cells, boxes };
+        }
+
         // ================================================================
         //  MUEBLES (permanecen en el mundo aunque el chunk se descargue)
         // ================================================================
@@ -1199,6 +1431,7 @@
                             desk.position.set(deskX, 0, deskZ);
                             snapToFloor(desk, 0);
                             this.scene.add(desk);
+                            this.furnitureMeshes.push(desk);
                             this.dynamicFurniture.push({ mesh: desk, x: deskX, z: deskZ });
                             this.occupiedFurnitureBoxes.push({ x: deskX, z: deskZ, radius: 0.95 });
                         }
@@ -1211,6 +1444,7 @@
                             chair.position.set(chairX, 0, chairZ);
                             snapToFloor(chair, 0);
                             this.scene.add(chair);
+                            this.furnitureMeshes.push(chair);
                             this.dynamicFurniture.push({ mesh: chair, x: chairX, z: chairZ });
                             this.occupiedFurnitureBoxes.push({ x: chairX, z: chairZ, radius: 0.55 });
                         }
@@ -1304,7 +1538,6 @@
             const group = built.group;
             group.position.set(cx, 0, cz);
             group.rotation.y = yaw;
-            this.scene.add(group);
             snapToFloor(group, 0);
 
             group.updateMatrixWorld(true);
@@ -1320,12 +1553,15 @@
                 this.scene.remove(group);
                 return null;
             }
+            this.scene.add(group);
+            this.furnitureMeshes.push(group);
             this.occupiedFurnitureBoxes.push({ x: bx, z: bz, radius: occupiedRadius * 0.9 });
             this.furnitureBoxes.push({
                 minX: bb.min.x - 0.04, maxX: bb.max.x + 0.04,
                 minZ: bb.min.z - 0.04, maxZ: bb.max.z + 0.04
             });
             const debris = this.scatterDebris(built.debris, bx, bz, yaw);
+            this.furnitureMeshes.push(...debris);
             group.userData.cabinet = Object.assign({}, style, { x: bx, z: bz, yaw });
             return group;
         }
@@ -1609,12 +1845,13 @@
                 if (gx === 0 && gz === -1) want.push({ type: 'battery' });
                 if (gx === 1 && gz === 1) want.push({ type: 'chalk', color: '#ff3333', colorName: 'ROJO' });
 
-                // Reparto aleatorio de recursos por el infinito
-                if (r() < 0.06) want.push({ type: 'camera' });
-                if (r() < 0.13) want.push({ type: 'chalk' });
-                if (r() < 0.16) want.push({ type: 'almond' });
-                if (r() < 0.20) want.push({ type: 'battery' });
-                if (r() < 0.20) want.push({ type: 'note' });
+                // Reparto aleatorio de recursos por el infinito (densidad
+                // aumentada: antes aparecian muy pocos objetos por chunk)
+                if (r() < 0.10) want.push({ type: 'camera' });
+                if (r() < 0.20) want.push({ type: 'chalk' });
+                if (r() < 0.26) want.push({ type: 'almond' });
+                if (r() < 0.34) want.push({ type: 'battery' });
+                if (r() < 0.28) want.push({ type: 'note' });
 
                 const chalkColors = ['#ffffff', '#ff3333', '#111111'];
                 const chalkNames = ['BLANCO', 'ROJO', 'NEGRO'];

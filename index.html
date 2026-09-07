@@ -31,6 +31,7 @@
                 <div id="coords-label" class="coords-label">POS X:+0000.0 Y:+0001.6 Z:+0000.0</div>
                 <div class="sanity-label"><span>ESTABILIDAD MENTAL</span><span id="sanity-num">100%</span></div>
                 <div class="sanity-bar"><div id="sanity-fill" class="sanity-fill"></div></div>
+                <div id="seed-label" class="coords-label" style="margin-top: 5px; margin-bottom: 0; color: #756a47;">SEMILLA: --</div>
             </div>
         </div>
 
@@ -91,6 +92,10 @@
                 • <b>Recursos:</b> La linterna gasta PILA: busca pilas, tiza, agua de almendras y una cámara por el nivel.<br>
                 • <b>La Entidad:</b> Usa los pilares centrales de las salas para romper su campo de visión y escapar.
             </p>
+            <div style="margin-bottom: 16px;">
+                <label for="seed-input" style="font-size: 11px; letter-spacing: 2px; color: #8c8266; display: block; margin-bottom: 7px;">SEMILLA DEL MUNDO (OPCIONAL)</label>
+                <input type="text" id="seed-input" placeholder="Deja vacío para una semilla aleatoria" autocomplete="off" spellcheck="false" maxlength="32">
+            </div>
             <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
             <div style="margin-top: 18px; font-size: 12px;">
                 <label for="vol-slider">VOLUMEN:</label>

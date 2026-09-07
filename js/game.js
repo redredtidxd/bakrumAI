@@ -87,6 +87,12 @@
                 totalNotes: NOTE_POOL.length
             };
 
+            // Semilla del mundo: aleatoria por defecto (el campo del menu
+            // inicial permite fijar una y regenerar el mundo al empezar)
+            this.worldSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+            setWorldSeed(this.worldSeed);
+            this.updateSeedLabel();
+
             this.worldSystem = new WorldGridSystem(this.scene);
             this.chalkSystem = new ChalkDrawingSystem(this.scene, this.camera);
             this.entity = new BacteriophageEntity(this.scene);
@@ -318,9 +324,32 @@
             this.noiseCtx.putImageData(imgData, 0, 0);
         }
 
+        updateSeedLabel() {
+            const el = document.getElementById('seed-label');
+            if (el) el.textContent = 'SEMILLA: ' + this.worldSeed;
+        }
+
         initUI() {
             document.getElementById('btn-start').onclick = () => {
                 audio.init();
+
+                // Semilla personalizada: si el campo del menu trae una semilla
+                // distinta, se regenera TODO el mundo antes de empezar
+                const seedInput = document.getElementById('seed-input');
+                const seedText = seedInput ? seedInput.value.trim() : '';
+                if (seedText) {
+                    const seed = stringSeed(seedText);
+                    if (seed !== this.worldSeed) {
+                        this.worldSeed = seed;
+                        this.worldSystem.rebuild(seed);
+                        this.setupRandomSpawn();
+                        // Los cuerpos fisicos apuntaban a muebles del mundo viejo
+                        this.furnitureBodies = [];
+                        this.syncFurnitureBodies();
+                        this.updateSeedLabel();
+                    }
+                }
+
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
                 this.gameActive = true;
