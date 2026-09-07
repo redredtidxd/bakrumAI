@@ -1914,7 +1914,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     let px = rx + Math.ceil(w / 2) - 1;
                     while (px <= rx + w - Math.floor(w / 2) - 1) {
                         for (let pz = rz + Math.ceil(h / 2) - 1; pz <= rz + h - Math.floor(h / 2) - 1; pz += 3) {
-                            if (r() < 0.65) ch.grid[px][pz] = 3;
+                            if (r() < 0.8) ch.grid[px][pz] = 3;
                         }
                         px += 3;
                     }
@@ -1950,7 +1950,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             while (px <= hx + w - 3) {
                 const off = r() < 0.5 ? 0 : 1;
                 for (let pz = hz + 2 + off; pz <= hz + h - 3; pz += 2 + Math.floor(r() * 3)) {
-                    if (r() < 0.45) ch.grid[px][pz] = 3;
+                    if (r() < 0.6) ch.grid[px][pz] = 3;
                 }
                 px += 2 + Math.floor(r() * 3);
             }
