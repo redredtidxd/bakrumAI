@@ -1,0 +1,136 @@
+/* ==========================================================================
+       1. TEXTURAS PROCEDURALES CANVAS 2D
+       ========================================================================== */
+    const TextureGenerator = {
+        createWallpaperTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#b39d48';
+            ctx.fillRect(0, 0, 512, 512);
+
+            ctx.fillStyle = '#a38c3e';
+            for (let x = 0; x < 512; x += 16) {
+                ctx.fillRect(x + 6, 0, 3, 512);
+            }
+
+            const imgData = ctx.getImageData(0, 0, 512, 512);
+            const d = imgData.data;
+            for (let i = 0; i < d.length; i += 4) {
+                const noise = (Math.random() - 0.5) * 18;
+                d[i] = Math.min(255, Math.max(0, d[i] + noise));
+                d[i+1] = Math.min(255, Math.max(0, d[i+1] + noise));
+                d[i+2] = Math.min(255, Math.max(0, d[i+2] + noise * 0.6));
+            }
+            ctx.putImageData(imgData, 0, 0);
+
+            ctx.fillStyle = '#5c5442';
+            ctx.fillRect(0, 0, 512, 22);
+            ctx.fillStyle = '#363024';
+            ctx.fillRect(0, 20, 512, 4);
+
+            ctx.fillStyle = '#2c1f14';
+            ctx.fillRect(0, 470, 512, 4);
+            ctx.fillStyle = '#1a120a';
+            ctx.fillRect(0, 474, 512, 38);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        },
+
+        createCeilingTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#7a7663';
+            ctx.fillRect(0, 0, 512, 512);
+
+            ctx.strokeStyle = '#322f25';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(2, 2, 508, 508);
+            ctx.beginPath();
+            ctx.moveTo(256, 0); ctx.lineTo(256, 512);
+            ctx.moveTo(0, 256); ctx.lineTo(512, 256);
+            ctx.stroke();
+
+            ctx.fillStyle = '#4c493c';
+            for (let i = 0; i < 400; i++) {
+                ctx.fillRect(Math.random() * 504 + 4, Math.random() * 504 + 4, 2, 2);
+            }
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        },
+
+        createChalkBoxTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#7a6234';
+            ctx.fillRect(0, 0, 256, 256);
+            ctx.strokeStyle = '#241a0a';
+            ctx.lineWidth = 5;
+            ctx.strokeRect(6, 6, 244, 244);
+            ctx.fillStyle = '#54150f';
+            ctx.fillRect(14, 18, 228, 55);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 18px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText("NO. 12 DUSTLESS", 128, 44);
+            ctx.font = 'bold 13px Courier New';
+            ctx.fillText("CHALK STICKS", 128, 64);
+            ctx.fillStyle = '#171717';
+            ctx.font = '12px Courier New';
+            ctx.fillText("SCHOOL QUALITY", 128, 130);
+            ctx.fillText("VINTAGE FORMULA", 128, 160);
+
+            return new THREE.CanvasTexture(canvas);
+        },
+
+        createChalkDotTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            const rad = ctx.createRadialGradient(16, 16, 2, 16, 16, 16);
+            rad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            rad.addColorStop(0.5, 'rgba(255, 255, 255, 0.7)');
+            rad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = rad;
+            ctx.fillRect(0, 0, 32, 32);
+            return new THREE.CanvasTexture(canvas);
+        }
+    };
+
+    /* ==========================================================================
+       SUELO CON TEXTURA EXTERNA (assets/floor-texture.png)
+       La imagen viaja embebida en base64 (js/textures-data.js) para que el juego
+       funcione tambien abriendo index.html directamente desde el disco (file://).
+       Mientras el PNG se decodifica se usa un pixel de color medio como respaldo
+       (asi el suelo nunca se ve negro en el primer frame).
+       ========================================================================== */
+    const FloorCarpetTexture = new THREE.Texture();
+    FloorCarpetTexture.wrapS = THREE.RepeatWrapping;
+    FloorCarpetTexture.wrapT = THREE.RepeatWrapping;
+    {
+        const ph = document.createElement('canvas');
+        ph.width = 1;
+        ph.height = 1;
+        const pctx = ph.getContext('2d');
+        pctx.fillStyle = '#8c874a';
+        pctx.fillRect(0, 0, 1, 1);
+        FloorCarpetTexture.image = ph;
+        FloorCarpetTexture.needsUpdate = true;
+    }
+    const floorCarpetImg = new Image();
+    floorCarpetImg.onload = () => {
+        FloorCarpetTexture.image = floorCarpetImg;
+        FloorCarpetTexture.needsUpdate = true;
+    };
+    floorCarpetImg.src = FLOOR_TEXTURE_DATA_URL;

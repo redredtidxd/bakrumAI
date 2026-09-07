@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Backrooms: Nivel 0 - Las Oficinas Infinitas</title>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    <div id="vhs-overlay"></div>
+    <canvas id="noise-canvas"></canvas>
+    <div id="vignette"></div>
+    <div id="glitch-overlay"></div>
+    <div id="camera-flash"></div>
+    <div id="reticle"></div>
+    <div id="interact-prompt">PRESIONA [E]</div>
+    <div id="toast-box"></div>
+
+    <!-- HUD -->
+    <div id="hud">
+        <div class="hud-header">
+            <div>
+                <div class="rec-tag"><div class="rec-dot"></div> REC [TAPE-00]</div>
+                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS</div>
+            </div>
+            <div class="sanity-container">
+                <div id="coords-label" class="coords-label">POS X:+0000.0 Y:+0001.6 Z:+0000.0</div>
+                <div class="sanity-label"><span>ESTABILIDAD MENTAL</span><span id="sanity-num">100%</span></div>
+                <div class="sanity-bar"><div id="sanity-fill" class="sanity-fill"></div></div>
+            </div>
+        </div>
+
+        <div class="hud-footer">
+            <div>
+                <div class="flashlight-indicator">
+                    <div id="flashlight-status">🔦 LINTERNA: [ENCENDIDA] · PILA 100% (TECLA F)</div>
+                    <div class="battery-row">
+                        <span style="font-size:9px; letter-spacing:1px;">PILA</span>
+                        <div class="battery-meter"><div id="battery-fill" class="battery-fill"></div></div>
+                        <span id="battery-label" style="font-size:9px; min-width:44px; text-align:right;">100%</span>
+                    </div>
+                </div>
+                <div class="toolbelt">
+                    <div id="slot-1" class="tool-slot selected">
+                        <span class="tool-emoji">✏️</span>
+                        <span>TIZA</span>
+                        <span id="chalk-status-label" style="font-size: 10px; color:#888; margin-top:2px;">NO DISPONIBLE</span>
+                        <span id="chalk-color-label" style="font-size: 9px; color:#fff; opacity:0.3;">-</span>
+                        <div class="chalk-meter"><div id="chalk-fill" class="chalk-meter-fill"></div></div>
+                        <span class="tool-key">[1] / [Click Mant.]</span>
+                    </div>
+                    <div id="slot-2" class="tool-slot">
+                        <span class="tool-emoji">📷</span>
+                        <span>CÁMARA</span>
+                        <span id="camera-status-label" style="font-size: 10px; color:#888; margin-top:2px;">NO EQUIPADA</span>
+                        <span class="tool-key">[2] / [Click Flash]</span>
+                    </div>
+                    <div id="slot-3" class="tool-slot">
+                        <span class="tool-emoji">🥤</span>
+                        <span>AGUA ALM.</span>
+                        <span id="almond-count-label" style="font-size: 10px; color:#888; margin-top:2px;">0 BOT.</span>
+                        <span class="tool-key">[3] / [E] Beber</span>
+                    </div>
+                    <div id="slot-4" class="tool-slot">
+                        <span class="tool-emoji">📓</span>
+                        <span>CUADERNO</span>
+                        <span id="notes-count-label" style="font-size: 10px; color:#9c8f6e; margin-top:2px;">0 / 6 NOTAS</span>
+                        <span class="tool-key">[N] Abrir</span>
+                    </div>
+                </div>
+            </div>
+            <div style="text-align: right; font-size: 11px; color: #756a47;">
+                <div>[WASD] Moverse | [SHIFT] Correr | [F] Linterna</div>
+                <div>[CLICK IZQ.] Dibujar | [E] Interactuar / Beber</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANTALLA INICIAL -->
+    <div id="start-menu" class="overlay-screen">
+        <div class="menu-box">
+            <h1 class="menu-title">THE BACKROOMS</h1>
+            <p class="menu-subtitle">NIVEL 0 // LAS OFICINAS INFINITAS</p>
+            <p style="font-size: 12px; line-height: 1.8; margin-bottom: 25px; color: #a39879;">
+                Has caído en un laberinto claustrofóbico de pasillos monótonos y salas de oficina cerradas.<br><br>                    • <b>Estructura real:</b> Mundo INFINITO generado por trozos: pasillos estrechos, medianos y anchos, salas de cualquier tamaño, salones con pilares y zonas casi vacías.<br>
+                    • <b>Mobiliario con física:</b> Mesas y sillas empujables; los armarios destrozados se apoyan contra las paredes.<br>
+                • <b>Recursos:</b> La linterna gasta PILA: busca pilas, tiza, agua de almendras y una cámara por el nivel.<br>
+                • <b>La Entidad:</b> Usa los pilares centrales de las salas para romper su campo de visión y escapar.
+            </p>
+            <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
+            <div style="margin-top: 18px; font-size: 12px;">
+                <label for="vol-slider">VOLUMEN:</label>
+                <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="0.7" style="vertical-align:middle; accent-color:#bda052;">
+            </div>
+        </div>
+    </div>
+
+    <!-- CUADERNO -->
+    <div id="notebook-modal">
+        <h2 style="color: #592015; border-bottom: 2px solid #756446; padding-bottom: 6px; font-size: 16px; margin-left:25px;">DIARIO DE SUPERVIVENCIA</h2>
+        <div class="notebook-content" id="notebook-text">
+            <div class="note-entry">
+                <h4>// REGISTRO INICIAL</h4>
+                <p>Este nivel no termina. Las oficinas se repiten sin límite: pasillos de todos los anchos, salas enormes con pilares y tramos claustrofóbicos. Debo marcar mi camino con tiza y guardar pilas: la oscuridad es eterna.</p>
+            </div>
+        </div>
+        <div style="text-align: right;">
+            <button id="btn-close-notebook" class="btn" style="padding: 5px 16px; font-size: 11px; background:#362415; color:#fff;">CERRAR [N]</button>
+        </div>
+    </div>
+
+    <!-- PANTALLA GAME OVER -->
+    <div id="game-over-screen" class="overlay-screen" style="display: none;">
+        <div class="menu-box">
+            <h1 class="menu-title" style="color: #d11e1e; text-shadow: 0 0 15px rgba(209,30,30,0.7);">SEÑAL PERDIDA</h1>
+            <p id="game-over-reason" class="menu-subtitle" style="color: #888;">LA ENTIDAD TE ALCANZÓ</p>
+            <p style="font-size: 12px; color: #666; margin-bottom: 20px;">Tu señal se ha disuelto en la bruma del Nivel 0.</p>
+            <button id="btn-respawn" class="btn">REINTENTAR</button>
+        </div>
+    </div>
+
+    <script src="js/textures-data.js"></script>
+    <script src="js/textures.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/models.js"></script>
+    <script src="js/world.js"></script>
+    <script src="js/chalk.js"></script>
+    <script src="js/entity.js"></script>
+    <script src="js/game.js"></script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+.freebuff/
+_gen-*.js
+_all.js
+*.log
