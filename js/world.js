@@ -1217,24 +1217,41 @@
                     }
                 }
             }
-            // Tamanio de esquinas y FINALES de pared: el poste adopta el grosor
-            // de la pared/paredes que conecta (la mitad del grosor de la mas
-            // gruesa). Asi el final de una pared queda ENRASADO, del mismo
-            // tamano que el resto (antes era un cuadrado fijo de 1,05 m que se
-            // veia mas grande junto a paredes de 0,4-0,6 m).
+            // Tamanio de esquinas y FINALES de pared: cada EJE adopta el grosor
+            // de la pared que conecta por ese eje (antes se usaba el maximo de
+            // los dos, asi que junto a una pared fina el poste sobresalia como
+            // un cuadrado). Ahora la union es un rectangulo enrasado con las
+            // dos paredes, y un final de pared queda como un remate del mismo
+            // grosor que la propia pared. Los postes guardan {rx, rz} (medio
+            // grosor por eje); las paredes guardan un numero.
             for (let x = 1; x < N - 1; x++) {
                 for (let z = 1; z < N - 1; z++) {
                     const k = key(x, z);
                     if (wallKind.get(k) === 'post' && !wallTMap.has(k)) {
-                        let m = 0;
-                        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                        let mx = 0, mz = 0;
+                        for (const [dx, dz] of [[1, 0], [-1, 0]]) {
                             const nk = wallKind.get(key(x + dx, z + dz));
-                            if (nk === 'x' || nk === 'z') m = Math.max(m, wallTMap.get(key(x + dx, z + dz)) || 0);
+                            if (nk === 'x' || nk === 'z') mx = Math.max(mx, wallTMap.get(key(x + dx, z + dz)) || 0);
                         }
-                        wallTMap.set(k, m > 0 ? m / 2 : R_POST);
+                        for (const [dx, dz] of [[0, 1], [0, -1]]) {
+                            const nk = wallKind.get(key(x + dx, z + dz));
+                            if (nk === 'x' || nk === 'z') mz = Math.max(mz, wallTMap.get(key(x + dx, z + dz)) || 0);
+                        }
+                        // Sin pared en un eje, el remate es cuadrado del mismo
+                        // grosor del otro (enrasado); R_POST es solo respaldo
+                        const rx = mx > 0 ? mx / 2 : (mz > 0 ? mz / 2 : R_POST);
+                        const rz = mz > 0 ? mz / 2 : (mx > 0 ? mx / 2 : R_POST);
+                        wallTMap.set(k, { rx, rz });
                     }
                 }
             }
+            // Medio grosor de un poste en el eje pedido (los postes guardan
+            // {rx, rz}; las paredes y juntas guardan un numero)
+            const postHalf = (k, axis) => {
+                const v = wallTMap.get(k);
+                if (v && typeof v === 'object') return axis === 'x' ? v.rx : v.rz;
+                return v || 0.4;
+            };
             // Grosor de la junta entre chunks (misma semilla que edgeDoors:
             // el vecino genera exactamente la misma lamina en su lado)
             const edgeT = (side) => {
@@ -1250,7 +1267,7 @@
                 const nxc = ox + (nx + 0.5) * C;
                 // Los postes se tocan con un pequeno solape (5 cm) para que la
                 // union pared-poste quede sellada de verdad
-                if (nk === 'post') { const r = wallTMap.get(key(nx, nz)) || 0.4; return side === 'west' ? nxc - r + 0.05 : nxc + r - 0.05; }
+                if (nk === 'post') { const r = postHalf(key(nx, nz), 'x'); return side === 'west' ? nxc - r + 0.05 : nxc + r - 0.05; }
                 if (nk === 'border') {
                     if (nx === 0) return side === 'west' ? nxc - C / 2 : nxc - C / 2 + edgeT('west');
                     if (nx === N - 1) return side === 'west' ? nxc + C / 2 - edgeT('east') : nxc + C / 2;
@@ -1262,7 +1279,7 @@
                 const nzc = oz + (nz + 0.5) * C;
                 // Los postes se tocan con un pequeno solape (5 cm) para que la
                 // union pared-poste quede sellada de verdad
-                if (nk === 'post') { const r = wallTMap.get(key(nx, nz)) || 0.4; return side === 'north' ? nzc - r + 0.05 : nzc + r - 0.05; }
+                if (nk === 'post') { const r = postHalf(key(nx, nz), 'z'); return side === 'north' ? nzc - r + 0.05 : nzc + r - 0.05; }
                 if (nk === 'border') {
                     if (nz === 0) return side === 'north' ? nzc - C / 2 : nzc - C / 2 + edgeT('north');
                     if (nz === N - 1) return side === 'north' ? nzc + C / 2 - edgeT('south') : nzc + C / 2;
@@ -1347,10 +1364,12 @@
                                 return nk === 'x' || nk === 'z';
                             };
                             if (runNeighbor(1, 0) || runNeighbor(-1, 0) || runNeighbor(0, 1) || runNeighbor(0, -1)) {
-                                const rp = wallTMap.get(k) || R_POST;   // medio grosor del poste
-                                const jb = { minX: posX - rp, maxX: posX + rp, minZ: posZ - rp, maxZ: posZ + rp };
+                                const pr = wallTMap.get(k) || R_POST;
+                                const prx = typeof pr === 'object' ? pr.rx : pr;   // medio grosor en X
+                                const prz = typeof pr === 'object' ? pr.rz : pr;   // medio grosor en Z
+                                const jb = { minX: posX - prx, maxX: posX + prx, minZ: posZ - prz, maxZ: posZ + prz };
                                 dummy.position.set(posX, WALL_HEIGHT / 2, posZ);
-                                dummy.scale.set(rp * 2, WALL_HEIGHT, rp * 2);
+                                dummy.scale.set(prx * 2, WALL_HEIGHT, prz * 2);
                                 dummy.updateMatrix();
                                 wallT.push(dummy.matrix.clone());
                                 ch.wallBoxes.push(jb);
@@ -1401,26 +1420,26 @@
                                 return 0;
                             };
                             if (kind === 'x') {
-                                box.maxZ += extTo(pS, wallTMap.get(key(x, z + 1)) || 0.4, box.maxZ, posZ, g[x][N - 1] === 1);
-                                box.minZ -= extTo(pN, wallTMap.get(key(x, z - 1)) || 0.4, box.minZ, posZ, g[x][0] === 1);
+                                box.maxZ += extTo(pS, postHalf(key(x, z + 1), 'z'), box.maxZ, posZ, g[x][N - 1] === 1);
+                                box.minZ -= extTo(pN, postHalf(key(x, z - 1), 'z'), box.minZ, posZ, g[x][0] === 1);
                             } else {
-                                box.maxX += extTo(pE, wallTMap.get(key(x + 1, z)) || 0.4, box.maxX, posX, g[N - 1][z] === 1);
-                                box.minX -= extTo(pW, wallTMap.get(key(x - 1, z)) || 0.4, box.minX, posX, g[0][z] === 1);
+                                box.maxX += extTo(pE, postHalf(key(x + 1, z), 'x'), box.maxX, posX, g[N - 1][z] === 1);
+                                box.minX -= extTo(pW, postHalf(key(x - 1, z), 'x'), box.minX, posX, g[0][z] === 1);
                             }
                             // Extension LATERAL: si la lamina queda anclada en el
                             // borde opuesto de su celda y el poste esta centrado,
                             // aun hay hueco en el eje perpendicular. Se alarga la
                             // lamina hasta tocar la caja del poste.
                             if (kind === 'x') {
-                                const TpS = pS === 'post' ? (wallTMap.get(key(x, z + 1)) || 0.4) : 0;
-                                const TpN = pN === 'post' ? (wallTMap.get(key(x, z - 1)) || 0.4) : 0;
+                                const TpS = pS === 'post' ? postHalf(key(x, z + 1), 'z') : 0;
+                                const TpN = pN === 'post' ? postHalf(key(x, z - 1), 'z') : 0;
                                 if (TpS && box.maxX < posX - TpS) box.maxX = posX - TpS + 0.05;
                                 if (TpS && box.minX > posX + TpS) box.minX = posX + TpS - 0.05;
                                 if (TpN && box.maxX < posX - TpN) box.maxX = posX - TpN + 0.05;
                                 if (TpN && box.minX > posX + TpN) box.minX = posX + TpN - 0.05;
                             } else {
-                                const TpE = pE === 'post' ? (wallTMap.get(key(x + 1, z)) || 0.4) : 0;
-                                const TpW = pW === 'post' ? (wallTMap.get(key(x - 1, z)) || 0.4) : 0;
+                                const TpE = pE === 'post' ? postHalf(key(x + 1, z), 'x') : 0;
+                                const TpW = pW === 'post' ? postHalf(key(x - 1, z), 'x') : 0;
                                 if (TpE && box.maxZ < posZ - TpE) box.maxZ = posZ - TpE + 0.05;
                                 if (TpE && box.minZ > posZ + TpE) box.minZ = posZ + TpE - 0.05;
                                 if (TpW && box.maxZ < posZ - TpW) box.maxZ = posZ - TpW + 0.05;
@@ -1692,8 +1711,12 @@
             // justa en su borde y no se mete en el vano.
             const extFor = (nk, cx2, cz2) => {
                 // El poste adopta el grosor de su pared (wallTMap guarda su
-                // medio grosor): la curva se alarga hasta tocar su cara
-                if (nk === 'post') return Math.max(0.05, 1.45 - (wallTMap.get(key(cx2, cz2)) || 0.525));
+                // medio grosor por eje): la curva se alarga hasta tocar su cara
+                if (nk === 'post') {
+                    const h = wallTMap.get(key(cx2, cz2));
+                    const half = h && typeof h === 'object' ? (kind === 'x' ? h.rz : h.rx) : (h || 0.525);
+                    return Math.max(0.05, 1.45 - half);
+                }
                 if (nk === 'border' && g[cx2] && g[cx2][cz2] === 1) return 2.45;
                 return 0;
             };
@@ -1859,11 +1882,11 @@
                 [cands[i], cands[j]] = [cands[j], cands[i]];
             }
 
-            // Cantidad: 0-2 en chunks con salas/salones, ocasional en pasillos
+            // Cantidad: 1-3 en chunks con salas/salones, ocasional en pasillos
             let n = 0;
             if (ch.rooms.length > 0) {
-                if (rng() < 0.6) n = 1 + (rng() < 0.45 ? 1 : 0);
-            } else if (rng() < 0.25) {
+                if (rng() < 0.75) n = 1 + (rng() < 0.5 ? 1 : 0) + (rng() < 0.18 ? 1 : 0);
+            } else if (rng() < 0.3) {
                 n = 1;
             }
 
@@ -1873,9 +1896,11 @@
                 const wx = ox + (cx2 + 0.5) * C;
                 const wz = oz + (cz2 + 0.5) * C;
                 const shape = rng() < 0.45 ? 'trap' : 'rect';
-                const L = 1.8 + rng() * 2.8;             // 1,8-4,6 m de largo
+                const L = 1.2 + rng() * 6.8;             // 1,2-8 m: tabiques cortos y largos
                 const ang = (rng() - 0.5) * 2.6;         // hasta ~±75°
-                const T0 = shape === 'trap' ? 0.2 + rng() * 0.12 : 0.22 + rng() * 0.2;
+                // Grosor como el de las paredes rectas (0,4-1,2 m): el tabique
+                // inclinado se ve como una pared de verdad, no como un adorno
+                const T0 = shape === 'trap' ? 0.4 + rng() * 0.3 : 0.4 + rng() * 0.8;
                 const T1 = shape === 'trap' ? T0 + 0.3 + rng() * 0.35 : T0;
 
                 const pts = this.slabCorners(wx, wz, ang, L, T0, T1);
@@ -1954,13 +1979,17 @@
         // Prisma trapezoidal vertical: un extremo mas grueso que el otro
         // (como el tabique afinado del boceto). UVs: la textura se repite
         // cada celda a lo largo y en vertical.
+        // El prisma se genera CENTRADO en Y (y0..y1) igual que el BoxGeometry:
+        // la malla se coloca con position.y = H/2 y asienta en el suelo.
+        // (Antes las Y iban de 0 a H y el tabique quedaba colgando del techo.)
         trapezoidGeometry(L, H, T0, T1) {
             const pos = [], uv = [], idx = [];
             const hL = L / 2;
-            const A = [-T0 / 2, 0, -hL], B = [T0 / 2, 0, -hL];
-            const C = [-T1 / 2, 0, hL], D = [T1 / 2, 0, hL];
-            const E = [-T0 / 2, H, -hL], F = [T0 / 2, H, -hL];
-            const G = [-T1 / 2, H, hL], HH = [T1 / 2, H, hL];
+            const y0 = -H / 2, y1 = H / 2;
+            const A = [-T0 / 2, y0, -hL], B = [T0 / 2, y0, -hL];
+            const C = [-T1 / 2, y0, hL], D = [T1 / 2, y0, hL];
+            const E = [-T0 / 2, y1, -hL], F = [T0 / 2, y1, -hL];
+            const G = [-T1 / 2, y1, hL], HH = [T1 / 2, y1, hL];
             const vert = (p, u, v) => { pos.push(p[0], p[1], p[2]); uv.push(u, v); return pos.length / 3 - 1; };
             const tri = (a, b, c) => idx.push(a, b, c);
             const u0 = 0, u1 = L / CELL_SIZE, v0 = 0, v1 = H / CELL_SIZE;

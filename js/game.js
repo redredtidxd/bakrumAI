@@ -9,7 +9,7 @@
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.1.0';
+    const GAME_VERSION = '1.1.1';
 
     class BackroomsGame {
         constructor() {
