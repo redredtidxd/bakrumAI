@@ -209,6 +209,16 @@
             }
             const tx = Math.floor(targetPos.x / C), tz = Math.floor(targetPos.z / C);
             const endKey = tx + ',' + tz;
+            // ANTI-CONGELAMIENTO: la celda del jugador y la de la entidad
+            // SIEMPRE pertenecen al grafo, aunque su CENTRO quede tapado por
+            // un mueble o un tabique (el jugador esta de pie ahi, asi que es
+            // transitable de verdad). Sin esto, si un mueble cubria el centro
+            // de la celda del jugador, el BFS no encontraba destino, el
+            // camino quedaba vacio y la entidad se quedaba CLAVADA PARA
+            // SIEMPRE en estado CHASING ("el monstruo dejo de moverse
+            // permanentemente").
+            open.add(start);
+            open.add(endKey);
             if (!open.has(endKey)) { this.path = []; return; }
             const parent = new Map();
             parent.set(start, -1);
@@ -296,9 +306,21 @@
                                 this.pathTarget = null;
                             }
                         }
+                    } else {
+                        // Ya esta en el destino final: se limpia para que se
+                        // recalcule. Antes el destino viejo quedaba ahi para
+                        // siempre y la entidad se paraba en seco sin volver a
+                        // moverse ("el monstruo se quedo clavado").
+                        this.pathTarget = null;
                     }
                 }
-                this.pathTimer = Math.max(this.pathTimer, 0.5);   // no recalcular a cada frame
+                // IMPORTANTE: NO se sube aqui pathTimer. El suelo de 0,5 s
+                // dejaba el temporizador siempre por encima de cero cuando el
+                // camino estaba vacio y, como el recalculado solo ocurre al
+                // llegar a cero, la entidad se quedaba PARADA PARA SIEMPRE
+                // ("el monstruo dejo de moverse permanentemente"): el camino
+                // vacio nunca se recalculaba. Sin camino, el timer se agota y
+                // update() vuelve a calcular cada 0,7 s.
                 return;
             }
             const target = this.path[0];
@@ -474,11 +496,25 @@
                 if (canSeePlayer) {
                     this.lastKnownPos.copy(playerPos);
                     if (Math.random() < 0.01) audio.playMonsterRoar();
+                    this._chaseStuck = 0;
                 } else {
                     const toLast = Math.hypot(this.lastKnownPos.x - this.pos.x, this.lastKnownPos.z - this.pos.z);
                     if (toLast < 1.2) {
                         this.state = 'SEARCHING';
                         this.searchTimer = 5.0;
+                    } else if (!this.path.length && !this.pathTarget) {
+                        // Sin camino y sin destino alcanzable: en vez de
+                        // quedarse clavada para siempre persiguiendo un
+                        // recuerdo inalcanzable, se desorienta y vuelve a
+                        // vagar (redundancia anti-congelamiento).
+                        this._chaseStuck = (this._chaseStuck || 0) + dt;
+                        if (this._chaseStuck > 3) {
+                            this._chaseStuck = 0;
+                            this.state = 'SEARCHING';
+                            this.searchTimer = 4.0;
+                        }
+                    } else {
+                        this._chaseStuck = 0;
                     }
                 }
                 this.followPath(dt, walkableCells);

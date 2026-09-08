@@ -804,4 +804,94 @@
             right: 22px;
             bottom: 224px;
         }
+        #btn-touch-chat {
+            right: 154px;
+            bottom: 96px;
+        }
+
+        /* ================= CHAT DE SALA ================= */
+        #chat-ui {
+            position: absolute;
+            left: 24px;
+            bottom: 150px;
+            width: 320px;
+            max-width: 88vw;
+            z-index: 55;
+            display: none;
+            flex-direction: column;
+            background: linear-gradient(180deg, rgba(14, 12, 8, 0.94), rgba(8, 7, 5, 0.94));
+            border: 1px solid #574d32;
+            border-left: 3px solid #b39c58;
+            box-shadow: 0 4px 22px rgba(0, 0, 0, 0.7);
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #chat-ui.open {
+            display: flex;
+        }
+        .chat-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 10px;
+            font-size: 10px;
+            letter-spacing: 2px;
+            color: #cfc294;
+            border-bottom: 1px solid #2c2a1e;
+            background: rgba(30, 27, 18, 0.9);
+        }
+        .chat-hint {
+            color: #6f6446;
+            letter-spacing: 1px;
+        }
+        #chat-messages {
+            height: 190px;
+            overflow-y: auto;
+            padding: 8px 10px;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #d8c89d;
+        }
+        .chat-msg {
+            word-wrap: break-word;
+            margin-bottom: 3px;
+        }
+        .chat-name {
+            color: #e0bc62;
+            font-weight: bold;
+        }
+        #chat-input-row {
+            display: flex;
+            gap: 6px;
+            padding: 8px;
+            border-top: 1px solid #2c2a1e;
+        }
+        #chat-input {
+            flex: 1;
+            min-width: 0;
+            background: #0d0c08;
+            color: #d8c89d;
+            border: 1px solid #4a4028;
+            padding: 7px 9px;
+            font-size: 12px;
+            font-family: inherit;
+            outline: none;
+        }
+        #chat-input:focus {
+            border-color: #bda052;
+        }
+        body.touch-mode #chat-ui {
+            left: 50%;
+            transform: translateX(-50%);
+            bottom: 165px;
+            width: 92vw;
+        }
+        body.touch-mode #chat-messages {
+            height: 30vh;
+            touch-action: pan-y;
+            -webkit-overflow-scrolling: touch;
+        }
+        body.touch-mode #chat-input {
+            font-size: 14px;
+            padding: 10px;
+        }
     

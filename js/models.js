@@ -63,32 +63,28 @@
             panel(0.04, 0.02, 0.42, -0.20, -PH / 2 + PT + 0.005, 0);
             panel(0.04, 0.02, 0.42, 0.20, -PH / 2 + PT + 0.005, 0);
 
-            // Cajon HUECO (bandeja abierta por arriba): en las mesas de pie
-            // (variant 0) y en las CAIDAS DE LADO (variant 1), cuyo hueco
-            // queda mirando hacia arriba: el cajon se desliza hacia arriba al
-            // abrirlo. Las demas tumbadas (patas arriba / volcada) no tienen
-            // cajon que se abra: antes la bandeja se deslizaba en TODAS las
-            // variantes y en las mesas tumbadas se hundia en el suelo o salia
-            // flotando al aire (las mesas "flotantes" que se veian).
-            if (variant === 0 || variant === 1) {
-                const drawer = new THREE.Group();
-                const dp = (w, h, d, x, y, z) => {
-                    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
-                    m.position.set(x, y, z);
-                    drawer.add(m);
-                };
-                dp(0.36, 0.02, 0.5, 0, -0.07, 0);        // fondo (el objeto reposa aqui)
-                dp(0.36, 0.12, 0.02, 0, 0.01, 0.25);     // frontal (alto, cara del cajon)
-                dp(0.36, 0.06, 0.02, 0, -0.03, -0.25);   // trasera (baja)
-                dp(0.02, 0.09, 0.5, -0.17, -0.025, 0);   // lateral izquierdo
-                dp(0.02, 0.09, 0.5, 0.17, -0.025, 0);    // lateral derecho
-                const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), handleMat);
-                handle.position.set(0, 0.045, 0.265);
-                drawer.add(handle);
-                drawer.position.set(PX, PY - 0.02, 0);
-                group.add(drawer);
-                group.userData.drawer = { mesh: drawer, open: false };
-            }
+            // Cajon HUECO (bandeja abierta por arriba) en TODAS las mesas:
+            // tambien en las patas-arriba y volcadas (antes no tenian cajon
+            // y parecian "mesas bug" sin interaccion). El cajon se desliza en
+            // el eje local Z de la mesa, asi que en cualquier pose sale hacia
+            // un lado y el objeto que esconda se desliza con el, nunca cae.
+            const drawer = new THREE.Group();
+            const dp = (w, h, d, x, y, z) => {
+                const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
+                m.position.set(x, y, z);
+                drawer.add(m);
+            };
+            dp(0.36, 0.02, 0.5, 0, -0.07, 0);        // fondo (el objeto reposa aqui)
+            dp(0.36, 0.12, 0.02, 0, 0.01, 0.25);     // frontal (alto, cara del cajon)
+            dp(0.36, 0.06, 0.02, 0, -0.03, -0.25);   // trasera (baja)
+            dp(0.02, 0.09, 0.5, -0.17, -0.025, 0);   // lateral izquierdo
+            dp(0.02, 0.09, 0.5, 0.17, -0.025, 0);    // lateral derecho
+            const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), handleMat);
+            handle.position.set(0, 0.045, 0.265);
+            drawer.add(handle);
+            drawer.position.set(PX, PY - 0.02, 0);
+            group.add(drawer);
+            group.userData.drawer = { mesh: drawer, open: false };
 
             if (variant === 2) {
                 // Boca abajo: patas arriba, apoyada plana en la mesa

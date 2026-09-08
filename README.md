@@ -31,7 +31,7 @@ Juego de terror procedural estilo Backrooms en el navegador (Three.js).
 
 ## Versión
 
-La versión actual (`v1.8.0`) se muestra en el menú principal y en el HUD. Al hacer cambios:
+La versión actual (`v1.9.0`) se muestra en el menú principal y en el HUD. Al hacer cambios:
 
 1. Sube `GAME_VERSION` en `js/game.js` (p. ej. `1.5.0`).
 2. Actualiza el `?v=...` de los `<script>`/`<link>` de `index.html` al mismo número (así el navegador descarta la caché vieja y los jugadores ven la versión nueva sin Ctrl+F5).
@@ -56,11 +56,26 @@ Abre el juego desde el móvil y se activan los controles táctiles automáticame
 
 - **Cajones reales**: las mesas tienen un pedestal con un cajón hueco que se abre con **[E]**; a veces esconde un objeto que queda **dentro del cajón** (se desliza con él, nunca cae al suelo) y es reclamable por red como cualquier pickup.
 - **Puertas falsas (señuelos)**: a escala real (0,9 m sencillas, 1,6 m dobles, 2,05 m de alto), pegadas a las paredes, a veces entornadas o con grafiti: desde lejos parecen una salida que no existe. Deterministas por semilla.
-- **Flechas del suelo**: chevrones brillantes que apuntan el camino hacia esas puertas falsas desde 8-34 m de distancia, con línea de visión despejada (nunca apuntan a través de un muro).
-- **Salas de seguridad (FNAF)**: refugios raros (~1 de cada 24 chunks) con UNA puerta de metal que sube al techo, alimentada por pilas (se gasta con la puerta cerrada; [E] la abre/cierra y recarga con pilas de repuesto) y un monitor que retransmite en vivo las cámaras de seguridad generadas. Con la puerta cerrada la Entidad no puede verte ni alcanzarte. El estado de la puerta se comparte con la sala.
-- **Cámaras de seguridad**: raras, montadas en las paredes; giran la cabeza y encienden su LED rojo cuando te vigilan, y su imagen se ve en el monitor de las salas de seguridad.
+- **Flechas-grafiti en las paredes**: pintadas con spray (trazo doble desgastado, como un graffiti real) en las paredes con línea de visión despejada hacia las puertas falsas, apuntando el camino desde 5-30 m. Sustituyen a las antiguas flechas del suelo.
+- **Salas de seguridad (FNAF)**: refugios (~1 de cada 12 chunks) con UNA puerta de metal que sube al techo, alimentada por pilas (se gasta con la puerta cerrada; [E] la abre/cierra y recarga con pilas de repuesto) y un monitor que retransmite en vivo las cámaras de seguridad generadas. Con la puerta cerrada la Entidad no puede verte ni alcanzarte. El estado de la puerta se comparte con la sala.
+- **Cámaras de seguridad**: montadas en las paredes; giran la cabeza y encienden su LED rojo cuando te vigilan (y miran SIEMPRE hacia ti, nunca al lado contrario), y su imagen se ve en el monitor de las salas de seguridad.
 - **Pilas almacenables**: mantén **[I]** para recargar la linterna con las pilas de repuesto guardadas; úsalas también para dar energía a las puertas de metal.
 - **Callejones sin salida variados**: rectos, en L, anchos, con alcoba lateral o con habitación muerta al fondo (a veces con un pilar que obliga a rodearlo).
+
+## Novedades de v1.9.0
+
+- **Flechas del suelo → grafitis de pared**: las flechas que apuntaban a las puertas falsas ya no son chevrones brillantes en la moqueta: ahora son grafitis pintados con spray en las paredes (trazo doble desgastado, colores de tiza), siempre con línea de visión despejada hasta su puerta (hasta 3 por puerta, nunca a través de un muro).
+- **La Entidad ya no se congela para siempre**: había dos fallos: el grafo de celdas por el que navega excluía la celda del jugador (si estabas junto a un mueble no encontraba ruta y se quedaba clavada en modo persecución) y, con la ruta vacía, un temporizador nunca llegaba a cero y dejaba de recalcular. Ahora persigue y vaga sin parar, y se recupera del aturdimiento del flash de la cámara.
+- **Cámaras que te miran de verdad**: la cabeza de las cámaras de seguridad apuntaba al lado contrario al jugador (la orientación inicial y el giro usaban signos opuestos). Ahora te siguen con la cabeza y se clavan en el ángulo límite cuando pasas por detrás. Además son más comunes.
+- **Salas de seguridad más frecuentes** (antes ~1 de cada 24 chunks, ahora ~1 de cada 12) y con la puerta centrada correctamente en su hueco.
+- **Bombillas del techo rehechas**: tubo de neón con casquillos y cable colgante en vez de la losa luminosa plana; la mitad de bombillas rotas (parpadean) y las zonas iluminadas ya no quedan sobreexpuestas (luz amarilla más tenue y foco reducido).
+- **Zonas de todos los tamaños**: la generación mezcla zonas pequeñas, medianas y grandes y reduce las llanuras abiertas enormes.
+- **Cajones en todas las mesas**: todas las variantes de mesa tienen su pedestal con cajón hueco (antes algunas no tenían) y los muebles ya no se pueden atravesar andando (chocas contra mesas, sillas y armarios, y puedes empujarlos).
+- **Muebles y cajones globales para la sala**: abrir un cajón, coger lo que esconde o empujar una mesa se sincroniza por MQTT: todos los jugadores ven el mismo estado (antes cada uno veía los suyos).
+- **Mapa más fiel y compartido**: las paredes inclinadas se dibujan en el mapa con su ángulo real (antes como cuadrados), las salas de seguridad aparecen marcadas en los chunks lejanos, cada cierto tiempo el mapa te revela un punto especial aleatorio, y la niebla de guerra se comparte con toda la sala.
+- **Inventario de pilas**: las pilas de repuesto ya no se suman directamente a la linterna: se guardan como objeto (slot 🔋 con su número) y se recargan con **[I]**.
+- **Espectros con nombre**: la silueta de los otros jugadores a través de las paredes muestra su nombre encima y ya no atraviesa muebles (la Entidad tampoco).
+- **Chat del juego**: tecla **[T]** (o botón en móvil) abre el chat de la sala por MQTT.
 
 ## Novedades de v1.8.0
 

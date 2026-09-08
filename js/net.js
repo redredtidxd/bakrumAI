@@ -77,6 +77,16 @@
             // cerrado se comparte con la sala (la pila es de cada jugador)
             this.onDoorData = null;   // ({id, o}) => void
 
+            // MUEBLES GLOBALES: si alguien empuja una mesa/silla o abre un
+            // cajon, la sala entera lo ve. Las posiciones se publican en
+            // lotes a baja frecuencia; los cajones al momento.
+            this.onFurnitureData = null;   // (lista) => void
+            this.furnTimer = 0;
+            this._furnPub = new Map();     // fid -> {x, z, d} ultimo publicado
+
+            // CHAT DE SALA: mensajes de texto entre exploradores (MQTT)
+            this.onChatData = null;        // (nombre, texto) => void
+
             // Ultimo estado publicado (para mantener la presencia en segundo
             // plano si la pestana se minimiza) y reconexion automatica
             this._lastState = null;
@@ -193,6 +203,8 @@
             sub(this.chalkTopic());
             sub(this.mapTopic());
             sub(this.doorTopic());
+            sub(this.furnitureTopic());
+            sub(this.chatTopic());
             this.publishPresence();
             this.onToast('🛰 CONECTADO · sala ' + this.roomKey);
             // Pequena espera para recibir las presencias retenidas de los que
@@ -212,6 +224,9 @@
             this.snapshotDone = true;
             this.joined = true;
             this.updateHost();
+            // Nada mas entrar se comparte el mapa explorado hasta ahora: el
+            // mapa es GLOBAL, lo que cualquier jugador ha visto lo ve la sala
+            this.publishMap();
             const total = others.length + 1;
             this.onToast('👥 SALA ' + this.roomKey + ' · ' + total + '/' + this.MAX_PLAYERS + ' EXPLORADORES');
             for (const pid of others) {
@@ -264,6 +279,8 @@
         chalkTopic() { return 'br0/' + this.roomKey + '/chalk'; }
         mapTopic() { return 'br0/' + this.roomKey + '/map'; }
         doorTopic() { return 'br0/' + this.roomKey + '/doors'; }
+        furnitureTopic() { return 'br0/' + this.roomKey + '/furn'; }
+        chatTopic() { return 'br0/' + this.roomKey + '/chat'; }
 
         publishPresence() {
             if (!this.client || !this.connected) return;
@@ -301,6 +318,51 @@
             if (!this.client || !this.connected || !this.joined) return;
             try {
                 this.client.send(this.doorTopic(), JSON.stringify({ id, o: open ? 1 : 0 }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
+        // Un cajon de mesa se abrio: toda la sala lo ve (y el objeto que
+        // esconda, si lo habia, aparece para todos; quien lo coja lo reclama)
+        publishDrawer(fid) {
+            if (!this.client || !this.connected || !this.joined || !fid) return;
+            try {
+                this.client.send(this.furnitureTopic(), JSON.stringify({ f: [{ id: fid, d: 1 }] }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
+        // Muebles movidos (empujados) y cajones abiertos: lotes a ~1 Hz para
+        // que la sala vea las mesas/sillas en su sitio real sin saturar el
+        // broker. Se saltan los muebles que acaban de recibir una posicion
+        // remota (evita el ping-pong entre clientes).
+        publishFurniture(furnitureBodies) {
+            if (!this.client || !this.connected || !this.joined || !furnitureBodies) return;
+            const out = [];
+            const now = Date.now();
+            for (const b of furnitureBodies) {
+                if (!b || !b.fid) continue;
+                if (b._remoteAt && now - b._remoteAt < 1800) continue;
+                if (Math.hypot(b.mesh.position.x - this.camera.position.x, b.mesh.position.z - this.camera.position.z) > 55) continue;
+                const prev = this._furnPub.get(b.fid);
+                const drawerOpen = (b.mesh.userData && b.mesh.userData.drawer && b.mesh.userData.drawer.open) ? 1 : 0;
+                const x = Math.round(b.mesh.position.x * 100) / 100;
+                const z = Math.round(b.mesh.position.z * 100) / 100;
+                if (!prev || Math.abs(prev.x - x) > 0.06 || Math.abs(prev.z - z) > 0.06 || (prev.d || 0) !== drawerOpen) {
+                    out.push({ id: b.fid, x, z, d: drawerOpen });
+                    this._furnPub.set(b.fid, { x, z, d: drawerOpen });
+                    if (out.length >= 40) break;
+                }
+            }
+            if (!out.length) return;
+            try {
+                this.client.send(this.furnitureTopic(), JSON.stringify({ f: out }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
+        // Mensaje de chat de sala
+        publishChat(text) {
+            if (!this.client || !this.connected || !this.joined) return;
+            try {
+                this.client.send(this.chatTopic(), JSON.stringify({ p: this.pid, n: this.playerName, m: text }), 0, false);
             } catch (e) { /* noop */ }
         }
 
@@ -392,6 +454,25 @@
                 let d = {};
                 try { d = JSON.parse(m.payloadString); } catch (e) { return; }
                 if (d && d.id && this.onDoorData) this.onDoorData(d);
+                return;
+            }
+
+            // Muebles globales (br0/sala/furn): posiciones empujadas y
+            // cajones abiertos por otros jugadores
+            if (kind === 'furn') {
+                let d = {};
+                try { d = JSON.parse(m.payloadString); } catch (e) { return; }
+                if (d && Array.isArray(d.f) && this.onFurnitureData) this.onFurnitureData(d.f);
+                return;
+            }
+
+            // Chat de sala (br0/sala/chat): mensajes de texto entre jugadores
+            if (kind === 'chat') {
+                let d = {};
+                try { d = JSON.parse(m.payloadString); } catch (e) { return; }
+                if (d && d.p !== this.pid && d.m && this.onChatData) {
+                    this.onChatData(String(d.n || '?'), String(d.m).slice(0, 200));
+                }
                 return;
             }
 
@@ -541,30 +622,38 @@
             const group = model.group;
             const headY = model.headY;
 
+            // Etiqueta con el nombre sobre la cabeza (se anade ANTES de
+            // clonar el fantasma para que este tambien lleve el nombre)
+            const sprite = this.makeNameSprite(p.name);
+            sprite.position.y = headY + 0.44;
+            group.add(sprite);
+
             // FANTASMA X-RAY: clon del modelo con material que ignora la
-            // profundidad. Se muestra SOLO cuando un muro tapa al jugador
-            // (linea de vision bloqueada): asi nunca se pierde de vista a un
-            // companero entre las paredes, aunque el mapa falle o el pasillo
-            // de en medio no se haya explorado.
+            // profundidad. Se muestra SOLO cuando un muro o un MUEBLE tapa al
+            // jugador (linea de vision bloqueada): asi nunca se pierde de
+            // vista a un companero entre las paredes, pero tampoco se le ve
+            // "atravesar" mesas o armarios. Lleva su etiqueta de nombre:
+            // la silueta sola costaba de identificar.
             const ghost = group.clone();
             ghost.traverse((o) => {
                 if (o.isMesh) {
                     o.material = new THREE.MeshBasicMaterial({
                         color: col,
                         transparent: true,
-                        opacity: 0.22,
+                        opacity: 0.3,
                         depthTest: false,
                         depthWrite: false
                     });
+                } else if (o.isSprite) {
+                    o.material = o.material.clone();
+                    o.material.depthTest = false;
+                    o.material.depthWrite = false;
+                    o.material.transparent = true;
+                    o.material.opacity = 0.6;
                 }
             });
             ghost.visible = false;
             this.scene.add(ghost);
-
-            // Etiqueta con el nombre sobre la cabeza
-            const sprite = this.makeNameSprite(p.name);
-            sprite.position.y = headY + 0.44;
-            group.add(sprite);
 
             // Linterna del otro jugador: un foco suave para ver hacia donde mira
             const spot = new THREE.SpotLight(0xfff0b0, 1.7, 16, Math.PI / 6, 0.95, 2);
@@ -696,9 +785,12 @@
         // ----------------------------------------------------------------
         //  BUCLE POR FRAME
         // ----------------------------------------------------------------
-        update(dt, playerPos, yaw, pitch, flashlightOn, wallBoxes, entity) {
+        update(dt, playerPos, yaw, pitch, flashlightOn, wallBoxes, entity, furnitureBodies) {
             this.entity = entity;
             this._lastState = { x: playerPos.x, y: playerPos.y, z: playerPos.z, yaw, pitch, flashlightOn };
+            // Cajas ACTUALES de los muebles (no las de su spawn): el fantasma
+            // X-RAY se bloquea tambien con el mobiliario movido
+            const furnitureBoxes = furnitureBodies ? furnitureBodies.map(b => b.aabb).filter(Boolean) : null;
 
             if (this.connected && this.joined && !this.roomFull) {
                 // Estado propio ~12 Hz pero SOLO cuando hay movimiento real:
@@ -738,12 +830,19 @@
                     this.presenceTimer = 0;
                     this.publishPresence();
                 }
-                // Mapa compartido: snapshot periodico (~8 s) para que quien
+                // Mapa compartido: snapshot periodico (~5 s) para que quien
                 // entre tarde reciba todo lo explorado por la sala
                 this.mapTimer += dt;
-                if (this.mapTimer > 8) {
+                if (this.mapTimer > 5) {
                     this.mapTimer = 0;
                     this.publishMap();
+                }
+                // Muebles globales: lotes a ~1 Hz (posiciones empujadas y
+                // cajones abiertos visibles para toda la sala)
+                this.furnTimer += dt;
+                if (this.furnTimer > 1.0) {
+                    this.furnTimer = 0;
+                    this.publishFurniture(furnitureBodies);
                 }
                 // Dibujos de tiza compartidos: lotes pequenos (~10 msgs/s)
                 this.chalkTimer += dt;
@@ -833,16 +932,25 @@
                         r.sprite.material.opacity = o;
                         r.sprite.visible = o > 0.02;
                     }
-                    // Fantasma X-RAY: visible solo cuando un muro tapa al
-                    // jugador (la linea de vision de la camara al modelo pasa
-                    // por alguna caja de colision)
+                    // Fantasma X-RAY: visible solo cuando un muro o un MUEBLE
+                    // tapa al jugador (la linea de vision de la camara al
+                    // modelo pasa por alguna caja de colision). Los muebles
+                    // cuentan: antes la silueta se veia a traves de las mesas
+                    // y parecia que el jugador las atravesaba.
                     if (r.ghost) {
                         r.ghost.position.copy(r.group.position);
                         r.ghost.rotation.y = r.group.rotation.y;
-                        r.ghost.visible = !this.hasLOS(
+                        let blocked = !this.hasLOS(
                             this.camera.position.x, this.camera.position.z,
                             p.x, p.z, wallBoxes
                         );
+                        if (!blocked && furnitureBoxes) {
+                            blocked = !this.hasLOS(
+                                this.camera.position.x, this.camera.position.z,
+                                p.x, p.z, furnitureBoxes
+                            );
+                        }
+                        r.ghost.visible = blocked;
                     }
                 } else if (r.ghost) {
                     r.ghost.visible = false;

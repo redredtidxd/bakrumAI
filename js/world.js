@@ -200,39 +200,53 @@
     // Colores de pintura de las puertas falsas (señuelos)
     const DOOR_PAINTS = [0x6d7a8a, 0x8a7a5c, 0x5c6d8a, 0x7a5c5c, 0x5c7a6d, 0x8a8a6a];
 
-    // Textura de las flechas del suelo: UNA flecha clara con astil y punta
-    // (material basico -> se ve desde lejos, incluso en las zonas de apagon).
-    // Antes eran tres chevrones apilados que desde lejos parecian una "w"
-    // verde flotante en vez de una flecha. Una sola textura compartida.
-    let arrowTexCache = null;
-    function arrowTexture() {
-        if (arrowTexCache) return arrowTexCache;
+    // Textura de las FLECHAS-GRAFITI de las paredes: una flecha grande
+    // pintada a mano (contorno doble + grano de pintura), sin texto. Se usa
+    // en lugar de las antiguas flechas del suelo (que no parecian grafitis y
+    // habia que mirar al suelo para seguirlas). Material basico: se ve
+    // tambien en las zonas de apagon.
+    const wallArrowTexCache = new Map();
+    function wallArrowTexture(colorHex) {
+        let tex = wallArrowTexCache.get(colorHex);
+        if (tex) return tex;
         const canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 64;
+        canvas.width = 256;
+        canvas.height = 128;
         const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, 128, 64);
+        ctx.clearRect(0, 0, 256, 128);
+        const rng = mulberry32(0x5EED + (parseInt(colorHex.slice(1), 16) || 0));
         const draw = (w, style) => {
             ctx.lineWidth = w;
             ctx.strokeStyle = style;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.beginPath();
-            ctx.moveTo(12, 32);
-            ctx.lineTo(92, 32);
-            ctx.moveTo(68, 6);
-            ctx.lineTo(104, 32);
-            ctx.lineTo(68, 58);
+            ctx.moveTo(26, 64);
+            ctx.lineTo(196, 64);
+            ctx.moveTo(148, 22);
+            ctx.lineTo(214, 64);
+            ctx.lineTo(148, 106);
             ctx.stroke();
         };
-        draw(14, 'rgba(12, 14, 8, 0.9)');   // contorno oscuro (se lee sobre moqueta clara)
+        // Trazo doble desfasado: efecto spray/desgaste
         ctx.save();
-        ctx.shadowColor = 'rgba(215, 255, 90, 0.85)';
-        ctx.shadowBlur = 9;
-        draw(9, '#d7ff5a');                 // flecha brillante encima
+        ctx.translate((rng() - 0.5) * 3, (rng() - 0.5) * 3);
+        draw(22, 'rgba(10, 10, 8, 0.5)');
         ctx.restore();
-        arrowTexCache = new THREE.CanvasTexture(canvas);
-        return arrowTexCache;
+        ctx.save();
+        ctx.translate((rng() - 0.5) * 3, (rng() - 0.5) * 3);
+        draw(14, colorHex);
+        ctx.restore();
+        // Grano de pintura gastada
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = colorHex;
+        for (let i = 0; i < 140; i++) {
+            ctx.fillRect((rng() - 0.5) * 230, (rng() - 0.5) * 110, 1 + rng() * 1.8, 1 + rng() * 1.8);
+        }
+        ctx.globalAlpha = 1;
+        tex = new THREE.CanvasTexture(canvas);
+        wallArrowTexCache.set(colorHex, tex);
+        return tex;
     }
 
     // Textos de los grafitis-guia hacia las puertas falsas
@@ -530,7 +544,7 @@
             this.collectedNoteIndices = new Set();
             this.pickupById = new Map();      // id persistente -> datos del objeto
             this.claimedPickupIds = new Set(); // objetos reclamados por CUALQUIER jugador
-            this._arrowCells = new Set();     // flechas del suelo ya colocadas (dedup por celda)
+            this._arrowCells = new Set();     // flechas-grafiti de pared ya colocadas (dedup por celda+cara)
             this._arrowDoorCount = new Map(); // flechas colocadas por puerta (limite de 3)
             this._lcx = undefined;
             this._lcz = undefined;
@@ -656,9 +670,10 @@
             // desde cero (las resetea al empezar), asi no se duplican.
             // ch.wallBoxes NO se limpia aqui (antes el mapa caia a la
             // aproximacion por rejilla y dibujaba muros que no existian).
-            // Las flechas del suelo las limpia el chunk que las contiene:
-            // se liberan sus claves de dedup (celda y recuento de su puerta)
-            // para que al recargar se puedan volver a colocar sin apilarse.
+            // Las flechas-grafiti de las paredes las limpia el chunk que las
+            // contiene: se liberan sus claves de dedup (celda y recuento de
+            // su puerta) para que al recargar se puedan volver a colocar sin
+            // apilarse.
             const ak = ch.arrowKeys || [];
             const adk = ch.arrowDoorKeys || [];
             for (let i = 0; i < ak.length; i++) {
@@ -890,13 +905,14 @@
 
         // SALA DE SEGURIDAD (estilo FNAF): busca un bolsillo de pared con
         // EXACTAMENTE una celda abierta en el anillo (la futura boca de la
-        // puerta de metal) y lo convierte en habitacion sellada. Rara:
-        // ~1 de cada 24 chunks. La puerta en si la monta buildSecurityRoom.
+        // puerta de metal) y lo convierte en habitacion sellada. Antes era
+        // muy rara (~1 de cada 24 chunks); ahora un poco mas comun:
+        // ~1 de cada 15 chunks. La puerta en si la monta buildSecurityRoom.
         carveSecurityRoom(ch) {
             const N = CHUNK_SIZE;
             const g = ch.grid;
             const r = ch.rng;
-            if (r() >= 0.042) return;
+            if (r() >= 0.065) return;
             const sizes = [[3, 3], [3, 4], [4, 4]];
             const order = [0, 1, 2];
             for (let i = order.length - 1; i > 0; i--) {
@@ -946,10 +962,12 @@
         }
 
         rollRoomSize(r) {
+            // Zonas PEQUENAS, MEDIANAS y GRANDES bien repartidas: antes la
+            // mezcla dejaba demasiadas salas enormes con aire vacio.
             const roll = r();
-            if (roll < 0.35) return 3 + Math.floor(r() * 2);   // 3-4 pequena
-            if (roll < 0.8) return 4 + Math.floor(r() * 2);    // 4-5 mediana
-            return 5 + Math.floor(r() * 2);                    // 5-6 grande (menos campo abierto)
+            if (roll < 0.4) return 3 + Math.floor(r() * 2);   // 3-4 pequena (40%)
+            if (roll < 0.8) return 4 + Math.floor(r() * 2);   // 4-5 mediana (40%)
+            return 5 + Math.floor(r() * 2);                   // 5-6 grande (20%)
         }
 
         rollWidth(r) {
@@ -1237,8 +1255,9 @@
         carveHall(ch) {
             const N = CHUNK_SIZE;
             const r = ch.rng;
-            const w = 5 + Math.floor(r() * 3);   // salones 5-7 (antes 7-10): menos campo abierto
-            const h = 5 + Math.floor(r() * 3);
+            // Salones 4-6 (antes 5-7): menos campo abierto, mas mesas/pilares
+            const w = 4 + Math.floor(r() * 3);
+            const h = 4 + Math.floor(r() * 3);
             const hx = 1 + Math.floor(r() * (N - 2 - w));
             const hz = 1 + Math.floor(r() * (N - 2 - h));
             for (let x = hx; x < hx + w; x++) {
@@ -1462,6 +1481,10 @@
             // muros reales aunque el chunk este lejos.
             ch.wallBoxes = [];
             ch.slantedAABBs = [];
+            // Datos de los tabiques inclinados para que el MAPA los dibuje
+            // con su angulo real (no como cajas cuadradas): se conservan al
+            // descargar, igual que wallBoxes.
+            ch.slantedWalls = [];
 
             // RNG PROPIO DE CADA CONSTRUCCION. La rejilla (generateLayout)
             // se genera UNA sola vez por chunk, pero las MALLAS se
@@ -1504,7 +1527,8 @@
             this.scene.add(ceiling);
             ch.meshes.push(ceiling);
 
-            const wallT = [], cylT = [], offL = [], flickL = [], litL = [];
+            const wallT = [], cylT = [];
+            const frameT = [], offB = [], flickB = [], litB = [];   // lamparas: carcasa + tubo por estado
             const dummy = new THREE.Object3D();
 
             // ---- Paredes finas (0,4-1,2 m) en lugar de celdas macizas ----
@@ -1887,12 +1911,19 @@
                     }
 
                     if (type === 0 || type === 2) {
-                        // La tulipa cuelga 2 cm por debajo del techo: antes su
-                        // cara superior quedaba coplanar con el plano del techo
-                        // y el filo parpadeaba (z-fighting).
-                        dummy.position.set(posX, WALL_HEIGHT - 0.035, posZ);
-                        dummy.scale.set(1.6, 0.03, 0.6);
-                        dummy.updateMatrix();
+                        // LAMPARA DE TECHO REHECHA: soporte/carcasa de metal
+                        // (caja fina colgada del techo) + TUBO FLUORESCENTE
+                        // debajo (emisivo cuando esta encendido). Antes era
+                        // una sola caja plana pegada al techo que no parecia
+                        // una bombilla. Las fundidas cuelgan un poco torcidas.
+                        const frameM = new THREE.Matrix4();
+                        frameM.makeScale(1.5, 0.05, 0.5);
+                        frameM.setPosition(posX, WALL_HEIGHT - 0.07, posZ);
+                        frameT.push(frameM);
+
+                        const bulbM = new THREE.Matrix4();
+                        bulbM.makeScale(1, 1, 1);
+                        bulbM.setPosition(posX, WALL_HEIGHT - 0.16, posZ);
                         // Zona de luz del chunk (campo suave, como el tipo de
                         // chunk): hay sitios con TODOS los focos fundidos donde
                         // solo alumbra la linterna, zonas tenues, lo normal y
@@ -1910,26 +1941,34 @@
                             return false;
                         };
                         const lz = this.lightField(ch.cx, ch.cz);
-                        let offP = 0.44, flickP = 0.32;
+                        // Bombillas fundidas MENOS comunes: antes una de cada
+                        // ~2 lamparas estaba apagada; ahora ~1 de cada 3. Las
+                        // zonas "casi todo encendido" ademas son mas raras
+                        // (umbral 0.86) para que no haya zonas lavadas.
+                        let offP = 0.3, flickP = 0.3;
                         if (lz < 0.18) { offP = 1; flickP = 0; }          // apagon total
-                        else if (lz < 0.38) { offP = 0.72; flickP = 0.2; } // tenue
-                        else if (lz < 0.8) { /* normal */ }
-                        else { offP = 0.3; flickP = 0.4; }                // casi todo encendido
+                        else if (lz < 0.38) { offP = 0.6; flickP = 0.24; } // tenue
+                        else if (lz < 0.86) { /* normal */ }
+                        else { offP = 0.16; flickP = 0.3; }               // casi todo encendido (rara)
                         const lr = ch.rng();
                         if (nearDark(x, z) || lr < offP) {
-                            offL.push(dummy.matrix.clone());
+                            // Fundida: el tubo cuelga torcido (aspecto roto)
+                            const broken = bulbM.clone();
+                            broken.makeRotationZ((ch.rng() - 0.5) * 0.7);
+                            broken.setPosition(posX, WALL_HEIGHT - 0.16, posZ);
+                            offB.push(broken);
                         } else if (lr < offP + flickP) {
-                            flickL.push(dummy.matrix.clone());
+                            flickB.push(bulbM);
                             ch.lamps.push({
-                                pos: new THREE.Vector3(posX, WALL_HEIGHT - 0.12, posZ),
+                                pos: new THREE.Vector3(posX, WALL_HEIGHT - 0.14, posZ),
                                 state: 2,
                                 flickerTimer: ch.rng() * 2,
                                 isLitNow: true
                             });
                         } else {
-                            litL.push(dummy.matrix.clone());
+                            litB.push(bulbM);
                             ch.lamps.push({
-                                pos: new THREE.Vector3(posX, WALL_HEIGHT - 0.12, posZ),
+                                pos: new THREE.Vector3(posX, WALL_HEIGHT - 0.14, posZ),
                                 state: 1
                             });
                         }
@@ -1949,9 +1988,14 @@
             };
             addInst(wallT, Materials.wall);
             addInst(cylT, Materials.wall, cylGeo);
-            addInst(offL, Materials.lampOff);
-            addInst(flickL, Materials.lampFlicker);
-            addInst(litL, Materials.lampLit);
+            // Lamparas rehechas: carcasa metalica para TODAS + tubo por estado
+            // (los fundidos usan el material oscuro; los encendidos/parpadeantes
+            // el emisivo, que brilla a traves de la niebla)
+            const tubeGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.36, 10);
+            addInst(frameT, Materials.lampFrame);
+            addInst(offB, Materials.lampOff, tubeGeo);
+            addInst(flickB, Materials.lampFlicker, tubeGeo);
+            addInst(litB, Materials.lampLit, tubeGeo);
 
             // ---- GRAFITI en las paredes (100 variantes, blanco/negro/rojo) ----
             // RNG propio del chunk: no altera la generacion del mundo y, con la
@@ -1964,7 +2008,8 @@
             // Grafitis-guia GRANDES (flechas + SALIDA/POR AQUI) en las paredes
             // con linea de vision a la puerta: te guian hacia ella
             this.placeChunkGuideGraffiti(ch, wallKind, key, curvedCells);
-            // Flechas pintadas en el suelo que apuntan el camino a esas puertas
+            // Flechas-GRAFITI pintadas en las paredes que apuntan el camino
+            // a esas puertas (sustituyen a las antiguas flechas del suelo)
             this.placeChunkArrowSigns(ch);
 
             // ---- SALA DE SEGURIDAD (si este chunk la tiene): puerta de
@@ -2090,6 +2135,8 @@
             sr.maxX = ox + (sr.rx + sr.w) * C;
             sr.minZ = oz + sr.rz * C;
             sr.maxZ = oz + (sr.rz + sr.h) * C;
+            sr.centerX = (sr.minX + sr.maxX) / 2;
+            sr.centerZ = (sr.minZ + sr.maxZ) / 2;
             // Al recargar el chunk la malla se reconstruye: la lista se
             // resetea para no duplicar la sala (el estado vive en sr)
             if (ch.securityRooms) ch.securityRooms.length = 0;
@@ -2107,7 +2154,7 @@
             const rng = mulberry32(hash2(ch.cx * 9001 + 7, ch.cz * 7001 + 313));
             // Reset al reconstruir el chunk: sin duplicados al recargar
             ch.cameras = [];
-            if (rng() >= 0.24) return;   // ~1 de cada 4 chunks: raras
+            if (rng() >= 0.45) return;   // ~1 de cada 2,2 chunks: mas comunes
             const g = ch.grid;
             const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
             const cands = [];
@@ -2404,106 +2451,123 @@
             }
         }
 
-        // Flechas pintadas en el suelo que, desde lejos, apuntan el camino
-        // hacia las puertas falsas (niebla aparte: material basico, brillan
-        // en la oscuridad). Se colocan en celdas abiertas con linea de vision
-        // despejada hasta la puerta, a 8-34 m de ella.
+        // FLECHAS-GRAFITI en las PAREDES que, desde lejos, apuntan el camino
+        // hacia las puertas falsas (material basico: se ven tambien en los
+        // apagones). Sustituyen a las antiguas flechas del suelo: pintadas en
+        // las caras reales de los muros con linea de vision despejada hasta
+        // la puerta (5-30 m) y giradas para apuntar a lo largo de la pared.
+        // Se buscan paredes en el chunk de la puerta y en sus VECINOS
+        // cargados (igual que hacian las flechas del suelo): una puerta sola
+        // en su chunk no se queda sin guias.
         placeChunkArrowSigns(ch) {
             if (!ch.fakeDoors || !ch.fakeDoors.length) return;
-            const C = CELL_SIZE;
             const N = CHUNK_SIZE;
-            const CS = N * C;
-            // IMPORTANTE: el dedup es GLOBAL de sesion (por celda y por
-            // puerta) y las claves solo se liberan cuando el chunk que
-            // CONTIENE la flecha se descarga (ahi si se retiran sus meshes).
-            // Asi, aunque esta funcion se invoque muchas veces (al construir
-            // este chunk y al reconstruir sus vecinos), nunca se apilan dos
-            // flechas en la misma celda ni una puerta pasa de sus 3 flechas.
+            const C = CELL_SIZE;
             const rng = mulberry32(hash2(ch.cx * 3187 + 61, ch.cz * 5233 + 919));
+            const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
+            // Tangente horizontal de la pared en el mundo por cara (el local
+            // +X del plano del grafiti tras su rotation.y)
+            const TANGENT = { W: [0, 0, 1], E: [0, 0, -1], S: [-1, 0, 0], N: [1, 0, 0] };
+            // Dedup GLOBAL de sesion (por celda+cara y por puerta): al
+            // reconstruir chunks vecinos nunca se apilan flechas ni una
+            // puerta pasa de 3.
+            const key = (x, z) => x + ',' + z;
+            // Chunk donde esta la puerta + vecinos cargados (las rejillas y
+            // caras reales vienen de los chunks cargados, los mismos para
+            // toda la sala en la misma posicion)
+            const searchChunks = [ch];
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                    if (dx === 0 && dz === 0) continue;
+                    const n = this.chunks.get((ch.cx + dx) + ',' + (ch.cz + dz));
+                    if (n && n.loaded && n.wallFaceMap) searchChunks.push(n);
+                }
+            }
             for (let di = 0; di < ch.fakeDoors.length; di++) {
                 const door = ch.fakeDoors[di];
                 const doorKey = ch.key + '#' + di;
-                // Limite de 3 flechas POR PUERTA contado en toda la sesion
-                // (antes el limite era por llamada y cada recarga del chunk
-                // anadia 3 flechas mas a la misma puerta)
                 if ((this._arrowDoorCount.get(doorKey) || 0) >= 3) continue;
-                // Candidatas: celdas abiertas de los chunks CARGADOS (una
-                // flecha nunca se coloca sobre un chunk descargado: flotaria
-                // sobre el vacio). Las rejillas vienen del propio chunk o de
-                // getLayout (determinista: misma semilla -> misma rejilla).
                 const cands = [];
-                const dgx = Math.floor(door.x / CS);
-                const dgz = Math.floor(door.z / CS);
-                for (let gx = dgx - 2; gx <= dgx + 2; gx++) {
-                    for (let gz = dgz - 2; gz <= dgz + 2; gz++) {
-                        const lc = this.chunks.get(gx + ',' + gz);
-                        if (!lc || !lc.loaded || !lc.grid) continue;
-                        const g = lc.grid;
-                        const ox = gx * CS, oz = gz * CS;
-                        for (let x = 0; x < N; x++) {
-                            for (let z = 0; z < N; z++) {
-                                if (g[x][z] !== 0 && g[x][z] !== 2) continue;
+                for (const lc of searchChunks) {
+                    const g = lc.grid;
+                    const ox = lc.cx * N * C, oz = lc.cz * N * C;
+                    // Se incluyen las celdas de BORDE (x/z = 0 y N-1): su cara
+                    // hacia el interior es visible (la cara exterior la cubre
+                    // la copia del muro en el chunk vecino y ya se descarta
+                    // abajo). Sin esto, una puerta junto al borde del chunk
+                    // podia quedarse sin ninguna flecha (toda su zona
+                    // despejada caia en la fila N-1, excluida).
+                    for (let x = 0; x < N; x++) {
+                        for (let z = 0; z < N; z++) {
+                            const k = key(x, z);
+                            if (g[x][z] !== 1) continue;
+                            if (lc.graffitiCells && lc.graffitiCells.has(x + ',' + z)) continue;
+                            const box = lc.wallFaceMap && lc.wallFaceMap.get(k);
+                            if (!box) continue;
+                            for (const [dx, dz, d] of dirs) {
+                                const nx = x + dx, nz = z + dz;
+                                if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
+                                if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                                if (d === 'W' && x === 0) continue;
+                                if (d === 'E' && x === N - 1) continue;
+                                if (d === 'S' && z === 0) continue;
+                                if (d === 'N' && z === N - 1) continue;
+                                const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
+                                if (faceLen < 1.2) continue;
+                                // La linea de vision se mide desde el CENTRO de
+                                // la celda de pared (como los grafitis-guia), no
+                                // desde la cara: desde la cara, las paredes que
+                                // miran al lado contrario de la puerta fallarian
+                                // siempre (la primera muestra cae dentro del
+                                // muro) y no habria flechas.
                                 const wx = ox + (x + 0.5) * C;
                                 const wz = oz + (z + 0.5) * C;
                                 const dist = Math.hypot(wx - door.x, wz - door.z);
-                                if (dist < 8 || dist > 34) continue;
-                                cands.push([gx, gz, x, z, wx, wz]);
+                                if (dist < 5 || dist > 30) continue;
+                                if (!this.lineClear(wx, wz, door.x, door.z)) continue;
+                                cands.push({ lc, x, z, d, wx, wz, box, faceLen });
                             }
                         }
                     }
                 }
-                if (!cands.length) continue;
-                // Mezcla determinista: misma semilla -> mismas flechas
                 for (let i = cands.length - 1; i > 0; i--) {
                     const j = Math.floor(rng() * (i + 1));
                     [cands[i], cands[j]] = [cands[j], cands[i]];
                 }
-                for (const [gx, gz, x, z, wx, wz] of cands) {
+                for (const c of cands) {
                     if ((this._arrowDoorCount.get(doorKey) || 0) >= 3) break;
-                    if (!this.lineClear(wx, wz, door.x, door.z)) continue;
-                    // UNA flecha por celda, vengan de la puerta que vengan:
-                    // antes dos puertas falsas cercanas apilaban flechas
-                    // identicas que parpadeaban "dentro y fuera del suelo"
-                    const ck = gx + ':' + x + ':' + gz + ':' + z;
-                    if (this._arrowCells.has(ck)) continue;
-                    this._arrowCells.add(ck);
+                    // Clave GLOBAL (chunk + celda local + cara): dos chunks
+                    // distintos podrian tener la misma celda local
+                    const fk = c.lc.cx + ':' + c.x + ':' + c.lc.cz + ':' + c.z + c.d;
+                    if (this._arrowCells.has(fk)) continue;
+                    this._arrowCells.add(fk);
                     this._arrowDoorCount.set(doorKey, (this._arrowDoorCount.get(doorKey) || 0) + 1);
-                    const dx = door.x - wx, dz = door.z - wz;
-                    const mesh = new THREE.Mesh(
-                        new THREE.PlaneGeometry(1.05, 0.58),
-                        new THREE.MeshBasicMaterial({
-                            map: arrowTexture(),
-                            transparent: true,
-                            depthWrite: false,
-                            // El plano a 2 cm del suelo peleaba con la moqueta
-                            // al mirarlo de lejos (parpadeaba dentro/fuera):
-                            // se sube un poco y se desplaza contra la camara
-                            polygonOffset: true,
-                            polygonOffsetFactor: -2,
-                            polygonOffsetUnits: -1
-                        })
-                    );
-                    mesh.position.set(wx, 0.018, wz);
-                    // Orden YXZ: primero se tumba la hoja (rotation.x = -PI/2)
-                    // y DESPUES gira sobre el eje vertical del mundo. Con el
-                    // orden por defecto (XYZ) el giro se aplicaba ANTES de
-                    // tumbarla: la flecha quedaba plana solo con yaw=0 y en
-                    // cuanto apuntaba a otro lado se levantaba hasta ponerse
-                    // de CANTO ("flechas volando en el suelo", todas hacia
-                    // el mismo lado).
-                    mesh.rotation.order = 'YXZ';
-                    mesh.rotation.set(-Math.PI / 2, 0, 0);
-                    // La punta de la textura mira al local +X; tumbada, la
-                    // punta apunta en el mundo a (cos(yaw), -sin(yaw)). Para
-                    // que apunte a la puerta hace falta yaw = atan2(-dz, dx).
-                    // Antes se usaba atan2(-dx, -dz) y apuntaba perpendicular.
-                    mesh.rotation.y = Math.atan2(-dz, dx);
-                    this.scene.add(mesh);
-                    const own = this.chunks.get(gx + ',' + gz);
-                    const host = own || ch;
-                    host.meshes.push(mesh);
+                    const color = GRAFFITI_COLORS[Math.floor(rng() * GRAFFITI_COLORS.length)];
+                    const mat = new THREE.MeshBasicMaterial({
+                        map: wallArrowTexture(color),
+                        transparent: true
+                    });
+                    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+                    const w = Math.min(0.95 + rng() * 0.5, c.faceLen - 0.18);
+                    const h = 0.5 + rng() * 0.28;
+                    m.scale.set(w, h, 1);
+                    m.position.y = 1.15 + rng() * 0.95;
+                    // Giro para que la flecha apunte a la puerta a lo largo
+                    // de la pared (local +X = tangente de la cara)
+                    const t = TANGENT[c.d];
+                    const along = (door.x - c.wx) * t[0] + (door.z - c.wz) * t[2];
+                    m.rotation.z = (rng() - 0.5) * 0.14 + (along < 0 ? Math.PI : 0);
+                    if (c.d === 'W') { m.position.set(c.box.minX - 0.022, m.position.y, c.wz); m.rotation.y = -Math.PI / 2; }
+                    else if (c.d === 'E') { m.position.set(c.box.maxX + 0.022, m.position.y, c.wz); m.rotation.y = Math.PI / 2; }
+                    else if (c.d === 'S') { m.position.set(c.wx, m.position.y, c.box.minZ - 0.022); m.rotation.y = Math.PI; }
+                    else { m.position.set(c.wx, m.position.y, c.box.maxZ + 0.022); m.rotation.y = 0; }
+                    this.scene.add(m);
+                    // El mueble propietario es el chunk de la PARED (ahi se
+                    // retira al descargarse)
+                    const host = this.chunks.get(c.lc.key) || c.lc;
+                    host.meshes.push(m);
                     host.arrowKeys = host.arrowKeys || [];
-                    host.arrowKeys.push(ck);
+                    host.arrowKeys.push(fk);
                     host.arrowDoorKeys = host.arrowDoorKeys || [];
                     host.arrowDoorKeys.push(doorKey);
                 }
@@ -2522,6 +2586,17 @@
             const dist = Math.hypot(bx - ax, bz - az);
             const stop = Math.max(0, dist - 2.4);
             const n = Math.max(1, Math.ceil(stop / 1.2));
+            // Las muestras dentro de la celda INICIAL no cuentan como muro:
+            // el origen puede ser el CENTRO de una celda de pared (grafitis
+            // y flechas-guia se miden desde ahi, y la pared real es fina,
+            // 0,4-1,2 m, dentro de una celda de 2,8 m). Sin esto, las dos
+            // primeras muestras caian siempre dentro de la celda de pared y
+            // NINGUNA guia hacia la puerta encontraba linea despejada.
+            // OJO: las muestras usan celdas LOCALES de chunk; el inicio
+            // tambien debe compararse en ese mismo espacio.
+            const startGx = Math.floor(ax / CS), startGz = Math.floor(az / CS);
+            const startCx = Math.floor((ax - startGx * CS) / C);
+            const startCz = Math.floor((az - startGz * CS) / C);
             for (let i = 1; i <= n; i++) {
                 const t = (i / n) * (stop / dist);
                 const sx = ax + (bx - ax) * t;
@@ -2532,6 +2607,7 @@
                 const cx = Math.floor((sx - gx * CS) / C);
                 const cz = Math.floor((sz - gz * CS) / C);
                 if (cx < 0 || cx >= N || cz < 0 || cz >= N) continue;
+                if (gx === startGx && gz === startGz && cx === startCx && cz === startCz) continue;
                 const v = lc.grid[cx][cz];
                 if (v === 1 || v === 3) return false;
             }
@@ -3100,6 +3176,11 @@
         }
 
         buildSlantedWall(ch, cx, cz, ang, L, T0, T1, shape) {
+            // Registro para el MAPA: se dibuja como un rectangulo rotado con
+            // el angulo real, en vez de los cuadraditos AABB de la colision
+            if (ch) {
+                (ch.slantedWalls = ch.slantedWalls || []).push({ cx, cz, ang, L, T0, T1 });
+            }
             // 2 cm de aire arriba y abajo: las tapas del tabique no tocan el
             // plano del suelo ni del techo (antes quedaban COPLANARES y las
             // dos superficies peleaban -> z-fighting en las paredes nuevas)
@@ -3272,14 +3353,18 @@
                             const desk = ModelBuilder.createOfficeDesk(variant);
                             desk.position.set(deskX, 0, deskZ);
                             snapToFloor(desk, 0);
+                            // Id DETERMINISTA para la sincronizacion por red
+                            // (cajones y posiciones globales para la sala)
+                            desk.userData.fid = 'f:' + Math.round(deskX * 10) + ':' + Math.round(deskZ * 10);
                             // Cajon: de vez en cuando esconde un objeto. El
                             // tipo se decide AQUI con el rng del chunk: todos
                             // los clientes abren el mismo cajon con el mismo
                             // contenido (y el objeto se reclama por red).
-                            // Tambien las mesas CAIDAS DE LADO conservan su
-                            // cajon (abre hacia arriba, como pide el jugador).
+                            // TODAS las mesas tienen cajon abrible (antes las
+                            // patas-arriba y volcadas no: "esta mesa no tiene
+                            // cajon").
                             const dr = desk.userData.drawer;
-                            if (dr && (variant === 0 || variant === 1) && Math.random() < 0.35) {
+                            if (dr && Math.random() < 0.35) {
                                 const ir = Math.random();
                                 dr.itemType = ir < 0.4 ? 'almond' : (ir < 0.75 ? 'battery' : (ir < 0.9 ? 'chalk' : 'note'));
                                 if (dr.itemType === 'chalk') {
@@ -3294,7 +3379,7 @@
                             }
                             this.scene.add(desk);
                             this.furnitureMeshes.push(desk);
-                            this.dynamicFurniture.push({ mesh: desk, x: deskX, z: deskZ });
+                            this.dynamicFurniture.push({ mesh: desk, x: deskX, z: deskZ, fid: desk.userData.fid });
                             ch.occ.push({ x: deskX, z: deskZ, radius: 0.95 });
                         }
                     } else if (choice < 0.6) {
@@ -3308,9 +3393,10 @@
                             const chair = ModelBuilder.createOfficeChair(variant);
                             chair.position.set(chairX, 0, chairZ);
                             snapToFloor(chair, 0);
+                            chair.userData.fid = 'f:' + Math.round(chairX * 10) + ':' + Math.round(chairZ * 10);
                             this.scene.add(chair);
                             this.furnitureMeshes.push(chair);
-                            this.dynamicFurniture.push({ mesh: chair, x: chairX, z: chairZ });
+                            this.dynamicFurniture.push({ mesh: chair, x: chairX, z: chairZ, fid: chair.userData.fid });
                             ch.occ.push({ x: chairX, z: chairZ, radius: 0.55 });
                         }
                     } else {
@@ -3422,6 +3508,7 @@
             }
             this.scene.add(group);
             this.furnitureMeshes.push(group);
+            group.userData.fid = 'f:' + Math.round(bx * 10) + ':' + Math.round(bz * 10);
             if (ch) ch.occ.push({ x: bx, z: bz, radius: occupiedRadius * 0.9 });
             this.furnitureBoxes.push({
                 minX: bb.min.x - 0.04, maxX: bb.max.x + 0.04,

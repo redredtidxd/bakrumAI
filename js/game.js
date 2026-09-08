@@ -10,7 +10,7 @@
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.8.0';
+    const GAME_VERSION = '1.9.0';
 
     class BackroomsGame {
         constructor() {
@@ -145,6 +145,12 @@
                     this.worldSystem.rebuildUnions();
                 }
             };
+            // Muebles GLOBALES: si un companero empuja una mesa o abre un
+            // cajon, se ve en toda la sala (posiciones y cajones)
+            this.net.onFurnitureData = (list) => this.applyRemoteFurniture(list);
+            // Chat de sala
+            this.net.onChatData = (n, m) => this.appendChat(n, m);
+            this.chatOpen = false;
             this._feedTimer = 0;
             this._feedIdx = 0;
             this._feedRT = null;
@@ -287,9 +293,14 @@
                 fill.style.animation = (this.flashlightOn && pct < 25) ? 'blink 0.7s infinite' : 'none';
             }
             if (lab) {
-                lab.textContent = `${pct}%` + (this.inventory.batteries > 0 ? ` +${this.inventory.batteries}` : '');
+                // El contador de pilas de repuesto vive en el INVENTARIO
+                // (ranura PILAS del cinturon), no pegado a la linterna
+                lab.textContent = `${pct}%`;
                 lab.style.color = pct <= 0 ? '#d15b4a' : '#b7a97c';
             }
+            // Inventario de pilas: numero de repuestos (sustituye al de notas)
+            const battCount = document.getElementById('batteries-count-label');
+            if (battCount) battCount.textContent = String(this.inventory.batteries);
             // Pildora de pila compacta (movil): misma bateria, mini barra
             const fillM = document.getElementById('battery-fill-mobile');
             const labM = document.getElementById('battery-label-mobile');
@@ -299,7 +310,7 @@
                 fillM.style.animation = (this.flashlightOn && pct < 25) ? 'blink 0.7s infinite' : 'none';
             }
             if (labM) {
-                labM.textContent = `${pct}%` + (this.inventory.batteries > 0 ? ` +${this.inventory.batteries}` : '');
+                labM.textContent = `${pct}%`;
                 labM.style.color = pct <= 0 ? '#d15b4a' : '#b7a97c';
             }
         }
@@ -364,6 +375,8 @@
                 if (e.code === 'KeyE') this.handleInteraction();
                 if (e.code === 'KeyN') this.toggleNotebook();
                 if (e.code === 'KeyM') this.toggleMap();
+                if (e.code === 'KeyT' && !this.chatOpen) this.toggleChat(true);
+                if (e.code === 'Escape' && this.chatOpen) this.toggleChat(false);
             });
 
             document.addEventListener('keyup', (e) => {
@@ -432,7 +445,7 @@
                 let consumed = false;
                 for (const t of e.changedTouches) {
                     const el = document.elementFromPoint(t.clientX, t.clientY);
-                    if (el && el.closest('button, .tool-slot, input, textarea, #notebook-modal, #map-modal')) continue;
+                    if (el && el.closest('button, .tool-slot, input, textarea, #notebook-modal, #map-modal, #chat-ui')) continue;
                     if (joyId === null && t.clientX < window.innerWidth * LEFT_ZONE) {
                         joyId = t.identifier;
                         joyOx = t.clientX; joyOy = t.clientY;
@@ -541,6 +554,7 @@
             };
             bindTap('btn-touch-flash', () => this.toggleFlashlight());
             bindTap('btn-touch-note', () => this.toggleNotebook());
+            bindTap('btn-touch-chat', () => this.toggleChat());
             bindTap('btn-touch-map', () => this.toggleMap());
             bindTap('btn-touch-interact', () => this.handleInteraction());
             // Cerrar cuaderno/mapa tambien por toque directo (el click sintetico
@@ -665,6 +679,16 @@
             const closeNbX = document.getElementById('btn-close-notebook-x');
             if (closeNbX) closeNbX.onclick = () => this.toggleNotebook();
             document.getElementById('btn-close-map').onclick = () => this.toggleMap();
+            // Chat: Enter envia, Escape cierra, boton ENVIAR tambien
+            const chatInput = document.getElementById('chat-input');
+            if (chatInput) {
+                chatInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); this.sendChat(); }
+                    else if (e.key === 'Escape') { e.preventDefault(); this.toggleChat(false); }
+                });
+            }
+            const chatSend = document.getElementById('chat-send');
+            if (chatSend) chatSend.addEventListener('click', () => this.sendChat());
             document.getElementById('btn-map-zoom-in').onclick = () => this.mapZoom(1.35);
             document.getElementById('btn-map-zoom-out').onclick = () => this.mapZoom(1 / 1.35);
             document.getElementById('btn-map-center').onclick = () => this.mapCenterOnPlayer();
@@ -834,6 +858,9 @@
                         if (b.mesh === hit.object || b.mesh.children.includes(hit.object)) {
                             ud.drawer.open = true;
                             audio.playSwitchClick();
+                            // Cajones GLOBALES: la sala entera ve el cajon
+                            // abierto (y el objeto, si lo habia)
+                            if (b.fid) this.net.publishDrawer(b.fid);
                             if (ud.drawer.itemType) {
                                 this.worldSystem.spawnDrawerPickup(b.mesh, ud.drawer);
                                 this.notify('📦 ¡EL CAJÓN ESCONDÍA ALGO!');
@@ -1043,7 +1070,20 @@
                     // caia a la aproximacion por rejilla y dibujaba muros que
                     // no existian en el 3D ("puedo estar en una pared que el
                     // mapa dice que no existe").
+                    const isSlabBox = (b) => {
+                        // Las cajas AABB de los tabiques inclinados se saltan:
+                        // su colision son segmentos cuadrados que en el mapa
+                        // parecian "hitboxes cuadrados". El tabique se dibuja
+                        // rotado mas abajo con su angulo real.
+                        if (!ch.slantedAABBs || !ch.slantedAABBs.length) return false;
+                        for (const s of ch.slantedAABBs) {
+                            if (Math.abs(b.minX - s.minX) < 0.02 && Math.abs(b.maxX - s.maxX) < 0.02 &&
+                                Math.abs(b.minZ - s.minZ) < 0.02 && Math.abs(b.maxZ - s.maxZ) < 0.02) return true;
+                        }
+                        return false;
+                    };
                     for (const b of ch.wallBoxes) {
+                        if (isSlabBox(b)) continue;
                         const lcx = Math.floor(((b.minX + b.maxX) / 2 - gx * CS) / C);
                         const lcz = Math.floor(((b.minZ + b.maxZ) / 2 - gz * CS) / C);
                         if (!isExplored(lcx, lcz)) continue;
@@ -1052,6 +1092,48 @@
                         const bw = Math.max(1, Math.round((b.maxX - b.minX) * zoom));
                         const bh = Math.max(1, Math.round((b.maxZ - b.minZ) * zoom));
                         ctx.fillRect(bx - Math.floor(bw / 2), bz - Math.floor(bh / 2), bw, bh);
+                    }
+                    // TABIQUES INCLINADOS con su ANGULO REAL (rectangulo
+                    // rotado): antes el mapa pintaba las cajas AABB de su
+                    // colision y las paredes en diagonal parecian escalones
+                    // de cuadrados.
+                    if (ch.slantedWalls && ch.slantedWalls.length) {
+                        for (const s of ch.slantedWalls) {
+                            const lcx = Math.floor((s.cx - gx * CS) / C);
+                            const lcz = Math.floor((s.cz - gz * CS) / C);
+                            if (!isExplored(lcx, lcz)) continue;
+                            ctx.save();
+                            ctx.translate(W / 2 + (s.cx - this.mapView.x) * zoom, H / 2 + (s.cz - this.mapView.z) * zoom);
+                            ctx.rotate(-s.ang);
+                            ctx.fillStyle = '#090b07';
+                            ctx.fillRect(-Math.max(1, s.L * zoom) / 2, -Math.max(1, Math.max(s.T0, s.T1) * zoom) / 2,
+                                Math.max(1, s.L * zoom), Math.max(1, Math.max(s.T0, s.T1) * zoom));
+                            ctx.restore();
+                        }
+                    }
+                    // SALAS DE SEGURIDAD: marcador propio (una "S" en un
+                    // cuadrado dorado) cuando el jugador ya ha explorado la
+                    // sala.
+                    if (ch.securityRooms && ch.securityRooms.length) {
+                        for (const r of ch.securityRooms) {
+                            const cxc = (r.minX + r.maxX) / 2;
+                            const czc = (r.minZ + r.maxZ) / 2;
+                            const lcx = Math.floor((cxc - gx * CS) / C);
+                            const lcz = Math.floor((czc - gz * CS) / C);
+                            if (!isExplored(lcx, lcz)) continue;
+                            const mx = W / 2 + (cxc - this.mapView.x) * zoom;
+                            const mz = H / 2 + (czc - this.mapView.z) * zoom;
+                            ctx.fillStyle = '#c9a53c';
+                            ctx.strokeStyle = '#201805';
+                            ctx.lineWidth = 1.5;
+                            ctx.fillRect(mx - 5, mz - 5, 10, 10);
+                            ctx.strokeRect(mx - 5, mz - 5, 10, 10);
+                            ctx.fillStyle = '#201805';
+                            ctx.font = 'bold 9px Courier New';
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText('S', mx, mz + 0.5);
+                        }
                     }
                 } else {
                     // Chunk lejano (descargado): muros aproximados como en el
@@ -1111,6 +1193,81 @@
                     }
                     ctx.fillStyle = '#090b07';
                 }
+                // SALA DE SEGURIDAD en un chunk LEJANO (layout determinista,
+                // sin cargar el chunk): mismo marcador dorado "S" que en los
+                // chunks cargados, si la celda de la sala ya esta explorada.
+                if (ch.securityRoom && !(ch.securityRooms && ch.securityRooms.length)) {
+                    const sr = ch.securityRoom;
+                    const cxc = gx * CS + (sr.rx + sr.w / 2) * C;
+                    const czc = gz * CS + (sr.rz + sr.h / 2) * C;
+                    const lcx = Math.floor((cxc - gx * CS) / C);
+                    const lcz = Math.floor((czc - gz * CS) / C);
+                    if (isExplored(lcx, lcz)) {
+                        const mx = W / 2 + (cxc - this.mapView.x) * zoom;
+                        const mz = H / 2 + (czc - this.mapView.z) * zoom;
+                        ctx.fillStyle = '#c9a53c';
+                        ctx.strokeStyle = '#201805';
+                        ctx.lineWidth = 1.5;
+                        ctx.fillRect(mx - 5, mz - 5, 10, 10);
+                        ctx.strokeRect(mx - 5, mz - 5, 10, 10);
+                        ctx.fillStyle = '#201805';
+                        ctx.font = 'bold 9px Courier New';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('S', mx, mz + 0.5);
+                    }
+                }
+            }
+
+            // PUNTOS ESPECIALES ALEATORIOS: el mapa revela de vez en cuando
+            // (determinista: toda la sala ve los mismos) la posicion aproximada
+            // de una sala de seguridad AUN NO explorada, con un "?" rojo
+            // parpadeante. Cuando alguien la explora, el "?" se convierte en
+            // el marcador dorado "S".
+            const pcx = Math.floor(this.player.pos.x / CS);
+            const pcz = Math.floor(this.player.pos.z / CS);
+            if (!this._specialRooms || this._specialRooms.cx !== pcx || this._specialRooms.cz !== pcz) {
+                const rooms = [];
+                for (let dx = -3; dx <= 3; dx++) {
+                    for (let dz = -3; dz <= 3; dz++) {
+                        const lc = this.worldSystem.getLayout(pcx + dx, pcz + dz);
+                        if (!lc.securityRoom) continue;
+                        const sr = lc.securityRoom;
+                        if ((hash2((pcx + dx) * 7 + 3, (pcz + dz) * 11 + 5) & 3) === 0) {
+                            rooms.push({
+                                x: (pcx + dx) * CS + (sr.rx + sr.w / 2) * C,
+                                z: (pcz + dz) * CS + (sr.rz + sr.h / 2) * C,
+                                gx: pcx + dx, gz: pcz + dz
+                            });
+                        }
+                    }
+                }
+                this._specialRooms = { cx: pcx, cz: pcz, rooms };
+            }
+            for (const r of this._specialRooms.rooms) {
+                const bits2 = this.exploredChunks.get(r.gx + ',' + r.gz);
+                const lx2 = Math.floor((r.x - r.gx * CS) / C);
+                const lz2 = Math.floor((r.z - r.gz * CS) / C);
+                const explored = !!bits2 && lx2 >= 0 && lx2 < N && lz2 >= 0 && lz2 < N &&
+                    !!(bits2[(lx2 * N + lz2) >> 3] & (1 << ((lx2 * N + lz2) & 7)));
+                if (explored) continue;
+                const mx = W / 2 + (r.x - this.mapView.x) * zoom;
+                const mz = H / 2 + (r.z - this.mapView.z) * zoom;
+                ctx.save();
+                ctx.globalAlpha = 0.7 + 0.3 * Math.sin(performance.now() * 0.003);
+                ctx.strokeStyle = '#e03a2e';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 3]);
+                ctx.beginPath();
+                ctx.arc(mx, mz, 8, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#e03a2e';
+                ctx.font = 'bold 11px Courier New';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('?', mx, mz + 0.5);
+                ctx.restore();
             }
 
             // Marcador del jugador (flecha verde, orientada a su mirada)
@@ -1303,8 +1460,11 @@
                     light.position.copy(l.pos);
 
                     if (l.state === 1) {
-                        // Paneles encendidos: luz continua, visible de lejos
-                        light.intensity = 0.68;
+                        // Paneles encendidos: luz continua, visible de lejos.
+                        // Mas tenue que antes: las zonas "todo encendido"
+                        // quedaban lavadas; asi se mantiene el tono amarillo
+                        // y el contraste con la oscuridad.
+                        light.intensity = 0.52;
                     } else if (l.state === 2) {
                         l.flickerTimer -= dt;
                         if (l.flickerTimer <= 0) {
@@ -1312,7 +1472,7 @@
                             l.flickerTimer = Math.random() * 0.25 + 0.05;
                             if (!l.isLitNow && Math.random() < 0.15) audio.flickerHum();
                         }
-                        light.intensity = l.isLitNow ? (0.72 + Math.random() * 0.2) : 0.06;
+                        light.intensity = l.isLitNow ? (0.56 + Math.random() * 0.16) : 0.05;
                     }
                 } else {
                     light.intensity = 0;
@@ -1337,7 +1497,8 @@
                 aabb: null,
                 wobble: 0,
                 impactCd: 0,
-                baseRot: new THREE.Euler(mesh.rotation.x, mesh.rotation.y, mesh.rotation.z)
+                baseRot: new THREE.Euler(mesh.rotation.x, mesh.rotation.y, mesh.rotation.z),
+                fid: mesh.userData ? mesh.userData.fid : null
             };
             // Asentado sobre el suelo desde el principio: nunca flota ni levita
             mesh.visible = true;
@@ -1441,6 +1602,81 @@
                 // Bamboleo al ser empujado (se apaga solo)
                 b.mesh.rotation.x = b.baseRot.x + (b.wobble > 0 ? Math.sin(t * 6 + b.spawn.x) * 0.05 * b.wobble : 0);
                 b.mesh.rotation.z = b.baseRot.z + (b.wobble > 0 ? Math.cos(t * 5.3 + b.spawn.z) * 0.05 * b.wobble : 0);
+            }
+        }
+
+        // ---- MUEBLES GLOBALES (multijugador) ----------------------------
+        // Aplica posiciones y cajones que llegan de otros jugadores: si un
+        // companero empuja una mesa/silla o abre un cajon, la sala lo ve.
+        applyRemoteFurniture(list) {
+            if (!Array.isArray(list)) return;
+            for (const it of list) {
+                if (!it || !it.id) continue;
+                const b = this.furnitureBodies.find(x => x.fid === it.id);
+                if (!b || !b.mesh) continue;
+                if (typeof it.x === 'number' && typeof it.z === 'number') {
+                    b.mesh.position.set(it.x, 0, it.z);
+                    this.updateFurnitureAABB(b);
+                    b._remoteAt = Date.now();
+                }
+                const ud = b.mesh.userData;
+                if (it.d && ud && ud.drawer && !ud.drawer.open) {
+                    ud.drawer.open = true;
+                    b._remoteAt = Date.now();
+                    audio.playSwitchClick();
+                    if (ud.drawer.itemType) {
+                        const p = this.worldSystem.spawnDrawerPickup(b.mesh, ud.drawer);
+                        this.notify(p ? '📦 Un compañero abrió un cajón… ¡había algo!' : '📦 Un compañero abrió un cajón');
+                    } else {
+                        this.notify('📦 Un compañero abrió un cajón vacío');
+                    }
+                }
+            }
+        }
+
+        // ---- CHAT DE SALA ------------------------------------------------
+        toggleChat(open) {
+            const ui = document.getElementById('chat-ui');
+            if (!ui) return;
+            const willOpen = open !== undefined ? open : !this.chatOpen;
+            ui.classList.toggle('open', willOpen);
+            this.chatOpen = willOpen;
+            const input = document.getElementById('chat-input');
+            if (willOpen) {
+                if (!IS_TOUCH) document.exitPointerLock();
+                setTimeout(() => { if (input) input.focus(); }, 30);
+            } else if (!IS_TOUCH && this.gameActive) {
+                document.body.requestPointerLock();
+            }
+        }
+
+        sendChat() {
+            const input = document.getElementById('chat-input');
+            if (!input) return;
+            const text = input.value.trim();
+            if (!text) return;
+            input.value = '';
+            const name = this.net.playerName || 'EXPLORADOR';
+            this.appendChat(name, text);
+            this.net.publishChat(text);
+        }
+
+        appendChat(name, text) {
+            const box = document.getElementById('chat-messages');
+            if (!box) return;
+            const el = document.createElement('div');
+            el.className = 'chat-msg';
+            const n = document.createElement('span');
+            n.className = 'chat-name';
+            n.textContent = String(name).slice(0, 14) + ': ';
+            el.appendChild(n);
+            el.appendChild(document.createTextNode(String(text).slice(0, 200)));
+            box.appendChild(el);
+            while (box.children.length > 60) box.removeChild(box.firstChild);
+            box.scrollTop = box.scrollHeight;
+            // Con el chat cerrado, los mensajes ajenos llegan como aviso breve
+            if (!this.chatOpen && name !== this.net.playerName) {
+                this.notify('💬 ' + name + ': ' + String(text).slice(0, 60));
             }
         }
 
@@ -1623,6 +1859,7 @@
         triggerGameOver(reason) {
             this.gameActive = false;
             document.exitPointerLock();
+            this.toggleChat(false);
             document.getElementById('hud').style.display = 'none';
             document.getElementById('game-over-reason').textContent = reason;
             document.getElementById('game-over-screen').style.display = 'flex';
@@ -1712,8 +1949,15 @@
                 const watching = dist < 24;
                 cam.group.userData.ledMat.emissiveIntensity = watching ? 2.5 : 0;
                 if (!watching) continue;
-                // Direccion del jugador en el sistema local de la camara
-                const cos = Math.cos(-cam.baseRy), sin = Math.sin(-cam.baseRy);
+                // Direccion del jugador en el sistema local de la camara.
+                // CORREGIDO: antes se usaba Math.cos(-baseRy)/Math.sin(-baseRy)
+                // y las camaras de las paredes E/O giraban la cabeza HACIA EL
+                // LADO CONTRARIO al jugador ("hay camaras que ven al lado
+                // contrario a donde estoy": la cabeza apuntaba a la pared y
+                // el jugador de delante quedaba detras de su vision). La
+                // transformacion mundo->local de un objeto con giro ry es
+                // R(-ry), que se calcula con cos(ry) y -sin(ry):
+                const cos = Math.cos(cam.baseRy), sin = Math.sin(cam.baseRy);
                 const lx = dx * cos - dz * sin;
                 const lz = dx * sin + dz * cos;
                 const target = Math.max(-1.3, Math.min(1.3, Math.atan2(lx, lz)));
@@ -1865,13 +2109,13 @@
                 }
                 if (this.mapDirty) {
                     this._mapPubTick += dt;
-                    if (this._mapPubTick > 2.5) {
+                    if (this._mapPubTick > 1.5) {
                         this._mapPubTick = 0;
                         this.mapDirty = false;
                         this.net.publishMap();
                     }
                 }
-                this.net.update(dt, this.player.pos, this.yaw, this.pitch, this.flashlightOn, this.worldSystem.wallBoxes, this.entity);
+                this.net.update(dt, this.player.pos, this.yaw, this.pitch, this.flashlightOn, this.worldSystem.wallBoxes, this.entity, this.furnitureBodies);
                 this.updateNetHUD();
                 this.entity.update(
                     dt,
