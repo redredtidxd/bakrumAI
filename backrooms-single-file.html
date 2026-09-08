@@ -3984,8 +3984,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         publishState(pos, yaw, pitch, flashlightOn) {
             if (!this.client || !this.connected || !this.joined) return;
             try {
+                // Se envia la posicion de los PIES (y = ojos - 1.55) para que el
+                // modelo remoto apoye en el suelo; la camara local esta a 1.55 m
                 this.client.send(this.stateTopic(this.pid), JSON.stringify({
-                    x: pos.x, y: pos.y, z: pos.z,
+                    x: pos.x, y: pos.y - 1.55, z: pos.z,
                     yaw: yaw, pitch: pitch,
                     f: flashlightOn ? 1 : 0, t: Date.now()
                 }), 0, false);
@@ -4015,21 +4017,26 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 try { data = JSON.parse(m.payloadString); } catch (e) { return; }
                 if (!data.n) return;
                 const isNew = !this.peers.has(pid);
-                this.peers.set(pid, {
-                    name: String(data.n),
-                    lastSeen: Date.now(),
-                    x: 0, y: 1.55, z: 0, yaw: 0,
-                    tx: 0, ty: 1.55, tz: 0, tyaw: 0,
-                    f: false
-                });
                 if (isNew) {
-                    this.addRemotePlayer(pid, this.peers.get(pid));
+                    // hasState=false: el modelo NO se crea aqui (apareceria en
+                    // el origen y volaria por el mapa); se crea al llegar su
+                    // primer estado, ya en su posicion real
+                    this.peers.set(pid, {
+                        name: String(data.n),
+                        lastSeen: Date.now(),
+                        x: 0, y: 0, z: 0, yaw: 0,
+                        tx: 0, ty: 0, tz: 0, tyaw: 0,
+                        f: false,
+                        hasState: false
+                    });
                     if (this.snapshotDone && this.joined && !this.roomFull) {
                         this.onToast('👤 ' + this.peers.get(pid).name + ' entró en la sala');
                         this.updateHost();
                     }
                 } else {
-                    this.peers.get(pid).lastSeen = Date.now();
+                    const p = this.peers.get(pid);
+                    p.lastSeen = Date.now();
+                    p.name = String(data.n);
                 }
                 return;
             }
@@ -4039,12 +4046,29 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (!p) return;
                 let d = {};
                 try { d = JSON.parse(m.payloadString); } catch (e) { return; }
+                // Altura recibida: las versiones nuevas envian los PIES (y≈0);
+                // las antiguas enviaban la camara (y≈1.55). Normalizar ambas y
+                // anclar al suelo (mundo plano, sin saltos ni desniveles)
+                let fy = d.y;
+                if (fy == null) fy = 0;
+                else if (fy > 1.0) fy -= 1.55;   // convencion antigua: ojos -> pies
+                fy = Math.max(0, Math.min(fy, 0.1));
                 p.tx = d.x || 0;
-                p.ty = d.y != null ? d.y : 1.55;
+                p.ty = fy;
                 p.tz = d.z || 0;
                 p.tyaw = d.yaw || 0;
                 p.f = !!d.f;
                 p.lastSeen = Date.now();
+                if (!p.hasState) {
+                    // Primer estado: crear el modelo YA en su posicion real
+                    // (sin aparecer en el origen ni volar hasta aqui)
+                    p.hasState = true;
+                    if (!this.remotePlayers.has(pid)) this.addRemotePlayer(pid, p);
+                    p.x = p.tx;
+                    p.y = p.ty;
+                    p.z = p.tz;
+                    p.yaw = p.tyaw;
+                }
                 return;
             }
         }
@@ -4257,9 +4281,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         }), 0, false);
                     } catch (e) { /* noop */ }
                 }
-                // Refrescar presencia cada 10 s (broker con TTL de retenidos)
+                // Refrescar presencia cada 6 s (broker con TTL de retenidos)
                 this.presenceTimer += dt;
-                if (this.presenceTimer > 10) {
+                if (this.presenceTimer > 6) {
                     this.presenceTimer = 0;
                     this.publishPresence();
                 }
@@ -4268,8 +4292,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (this.cleanTimer > 3) {
                     this.cleanTimer = 0;
                     const now = Date.now();
+                    // Timeout generoso (25 s) para que un micro-corte del broker
+                    // publico no haga desaparecer a los companeros
                     for (const [pid, p] of [...this.peers]) {
-                        if (now - p.lastSeen > 12000) this.removePeer(pid);
+                        if (now - p.lastSeen > 25000) this.removePeer(pid);
                     }
                     if (this.entityActive && now - this.entityLastMsg > 3000) {
                         this.entityActive = false;
@@ -4283,10 +4309,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             for (const [pid, p] of this.peers) {
                 const r = this.remotePlayers.get(pid);
                 if (!r) continue;
+                // Salto legitimo (reconexion, reinicio): no interpolar a traves
+                // de todo el mapa, teletransportar directo a la posicion real
+                if (Math.abs(p.tx - p.x) + Math.abs(p.tz - p.z) > 10) {
+                    p.x = p.tx;
+                    p.y = p.ty;
+                    p.z = p.tz;
+                    p.yaw = p.tyaw;
+                }
                 p.x += (p.tx - p.x) * k;
                 p.y += (p.ty - p.y) * k;
                 p.z += (p.tz - p.z) * k;
                 p.yaw = lerpAngleShort(p.yaw, p.tyaw, k);
+                // p.y es la altura de los pies: el modelo se ancla al suelo
                 r.group.position.set(p.x, p.y, p.z);
                 r.group.rotation.y = p.yaw;
                 const dist = this.camera.position.distanceTo(r.group.position);
