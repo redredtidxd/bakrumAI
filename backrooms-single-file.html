@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>The Backrooms: Nivel 0 - Las Oficinas Infinitas</title>
     <!-- Three.js CDN + Paho MQTT (multijugador) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -493,6 +493,158 @@
             color: #7d2a1c;
             font-weight: bold;
         }
+
+        /* ============================================================
+           CONTROLES TÁCTILES (móvil/tableta): joystick, botones y HUD
+           compacto. Solo se activan en dispositivos sin puntero fino
+           (body.touch-mode, lo añade game.js).
+           ============================================================ */
+        .tool-slot {
+            pointer-events: auto;
+        }
+
+        #touch-ui {
+            display: none;
+        }
+        body.touch-mode #touch-ui {
+            display: block;
+            position: absolute;
+            inset: 0;
+            z-index: 35;
+            pointer-events: none;
+        }
+
+        #joy-base {
+            display: none;
+            position: absolute;
+            width: 110px;
+            height: 110px;
+            border: 2px solid rgba(216, 200, 157, 0.45);
+            border-radius: 50%;
+            background: rgba(20, 18, 12, 0.28);
+            pointer-events: none;
+            box-shadow: 0 0 18px rgba(0, 0, 0, 0.5);
+        }
+        #joy-knob {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(224, 188, 98, 0.55);
+            border: 2px solid rgba(255, 234, 158, 0.75);
+            transform: translate(-50%, -50%);
+        }
+
+        .touch-btn {
+            position: absolute;
+            pointer-events: auto;
+            touch-action: none;
+            background: linear-gradient(180deg, rgba(24, 20, 12, 0.92), rgba(12, 10, 7, 0.92));
+            border: 1px solid #7a6936;
+            color: #ffebad;
+            font-family: inherit;
+            font-size: 19px;
+            width: 58px;
+            height: 58px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.65);
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+        .touch-btn:active {
+            background: linear-gradient(180deg, rgba(84, 72, 38, 0.95), rgba(46, 40, 22, 0.95));
+            border-color: #e0bc62;
+        }
+        #btn-touch-run     { left: 20px;  bottom: 178px; width: 66px; height: 46px; border-radius: 12px; font-size: 14px; }
+        #btn-touch-draw    { right: 100px; bottom: 102px; }
+        #btn-touch-flash   { right: 26px;  bottom: 170px; }
+        #btn-touch-note    { right: 100px; bottom: 170px; }
+        #btn-touch-interact{ right: 26px;  bottom: 102px; font-size: 16px; }
+
+        /* HUD compacto para pantallas táctiles */
+        body.touch-mode,
+        body.touch-mode html {
+            touch-action: none;
+            overscroll-behavior: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+        body.touch-mode #hud {
+            padding: 10px;
+        }
+        body.touch-mode .rec-tag {
+            font-size: 12px;
+        }
+        body.touch-mode .sanity-container {
+            width: 150px;
+            padding: 5px 6px;
+        }
+        body.touch-mode .sanity-label {
+            font-size: 9px;
+        }
+        body.touch-mode .coords-label {
+            display: none;
+        }
+        body.touch-mode .hud-footer {
+            position: absolute;
+            left: 50%;
+            bottom: 10px;
+            transform: translateX(-50%);
+            width: auto;
+        }
+        body.touch-mode .hud-footer > div:last-child {
+            display: none;
+        }
+        body.touch-mode .flashlight-indicator {
+            font-size: 9px;
+            padding: 4px 8px;
+            margin-bottom: 4px;
+        }
+        body.touch-mode .toolbelt {
+            gap: 5px;
+            padding: 6px 8px;
+            max-width: 96vw;
+            overflow-x: auto;
+        }
+        body.touch-mode .tool-slot {
+            min-width: 54px;
+            padding: 6px 5px 4px;
+            font-size: 9px;
+        }
+        body.touch-mode .tool-slot .tool-emoji {
+            font-size: 19px;
+        }
+        body.touch-mode .tool-slot .tool-key,
+        body.touch-mode .chalk-meter,
+        body.touch-mode .tool-slot #chalk-status-label,
+        body.touch-mode .tool-slot #chalk-color-label,
+        body.touch-mode .tool-slot #camera-status-label,
+        body.touch-mode .tool-slot #almond-count-label,
+        body.touch-mode .tool-slot #notes-count-label {
+            display: none;
+        }
+        body.touch-mode #interact-prompt {
+            top: 40%;
+            font-size: 11px;
+        }
+        body.touch-mode .menu-box {
+            max-height: 94vh;
+            overflow-y: auto;
+            padding: 18px;
+        }
+        body.touch-mode .menu-title {
+            font-size: 24px;
+        }
+        body.touch-mode #notebook-modal {
+            height: 78vh;
+        }
+    
     </style>
 </head>
 <body>
@@ -507,12 +659,22 @@
     <div id="interact-prompt">PRESIONA [E]</div>
     <div id="toast-box"></div>
 
+    <!-- CONTROLES TÁCTILES (móvil/tableta) -->
+    <div id="touch-ui">
+        <div id="joy-base"><div id="joy-knob"></div></div>
+        <button id="btn-touch-run" class="touch-btn" title="Correr">🏃</button>
+        <button id="btn-touch-draw" class="touch-btn" title="Dibujar tiza">✏️</button>
+        <button id="btn-touch-flash" class="touch-btn" title="Linterna">🔦</button>
+        <button id="btn-touch-note" class="touch-btn" title="Cuaderno">📓</button>
+        <button id="btn-touch-interact" class="touch-btn" title="Interactuar">E</button>
+    </div>
+
     <!-- HUD -->
     <div id="hud">
         <div class="hud-header">
             <div>
                 <div class="rec-tag"><div class="rec-dot"></div> REC [TAPE-00]</div>
-                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS</div>
+                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS <span id="hud-version" style="color: #4f4833;">v1.1.0</span></div>
             </div>
             <div class="sanity-container">
                 <div id="coords-label" class="coords-label">POS X:+0000.0 Y:+0001.6 Z:+0000.0</div>
@@ -595,6 +757,7 @@
                 🛰 <b style="color:#a39879;">MULTIJUGADOR · HASTA 6 EXPLORADORES:</b> quienes escriban la <b style="color:#a39879;">MISMA SEMILLA</b> caen en la misma sala. El número del HUD (SEMILLA) es el código para compartir. Si la sala está llena jugarás en solitario.
             </p>
             <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
+            <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.1.0</div>
             <div style="margin-top: 18px; font-size: 12px;">
                 <label for="vol-slider">VOLUMEN:</label>
                 <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="0.7" style="vertical-align:middle; accent-color:#bda052;">
@@ -1463,14 +1626,156 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         },
 
         createFloorNote() {
-            const paperMat = new THREE.MeshBasicMaterial({ color: 0xd9d1bc, side: THREE.DoubleSide });
-            const note = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.36), paperMat);
-            note.rotation.x = -Math.PI / 2;
-            note.rotation.z = (Math.random() - 0.5) * 1.5;
-            note.position.y = 0.005;
-            return note;
+            // Nota tirada en el suelo: mas grande y con la hoja rayada visible
+            // para que se encuentren de un vistazo (antes era un rectangulo
+            // plano diminuto que pasaba desapercibido en la moqueta)
+            const group = new THREE.Group();
+            const paper = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.36, 0.46),
+                new THREE.MeshBasicMaterial({
+                    map: wallNoteTexture(4, 'portrait'),
+                    transparent: true,
+                    side: THREE.DoubleSide
+                })
+            );
+            paper.rotation.x = -Math.PI / 2;
+            paper.rotation.z = (Math.random() - 0.5) * 1.5;
+            paper.position.y = 0.006;
+            group.add(paper);
+            return group;
+        },
+
+        // Nota PEGADA A LA PARED: variantes de fijacion (chincheta, cinta
+        // horizontal, cintas en diagonal, papel rasgado o a secas) y de
+        // orientacion (vertical u horizontal, con distintos giros). La textura
+        // se genera con RNG determinista para que toda la sala vea la misma
+        // nota. opts: { variant, aspect, rot } (ver pickWallNoteSpot).
+        createWallNote(opts = {}) {
+            const group = new THREE.Group();
+            const portrait = opts.aspect !== 'landscape';
+            const w = portrait ? 0.3 : 0.44;
+            const h = portrait ? 0.4 : 0.3;
+            const paper = new THREE.Mesh(
+                new THREE.PlaneGeometry(w, h),
+                new THREE.MeshBasicMaterial({
+                    map: wallNoteTexture(opts.variant || 0, opts.aspect || 'portrait'),
+                    transparent: true,
+                    side: THREE.DoubleSide
+                })
+            );
+            paper.rotation.z = opts.rot || 0;   // giro dentro del plano de la pared
+            group.add(paper);
+            return group;
         }
     };
+
+    // ---- Textura de nota de pared: papel con rayas de escritura y la
+    // variante de fijacion pintada encima (cache por variante + orientacion).
+    // RNG con semilla FIJA: mismo dibujo en todas las partidas y clientes. ----
+    const wallNoteTexCache = new Map();
+    function wallNoteTexture(variant, aspect) {
+        const ck = variant + '|' + aspect;
+        let tex = wallNoteTexCache.get(ck);
+        if (tex) return tex;
+        const portrait = aspect !== 'landscape';
+        const W = portrait ? 256 : 320;
+        const H = portrait ? 320 : 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        const rng = mulberry32(variant * 2654435761 + (portrait ? 40503 : 81203) + 0xC0FFEE);
+
+        // Papel (el rasgado recorta el borde inferior)
+        const paperColor = '#e2d9c0';
+        if (variant === 3) {
+            ctx.beginPath();
+            ctx.moveTo(0, 0); ctx.lineTo(W, 0); ctx.lineTo(W, H - 16);
+            for (let x = W; x >= 0; x -= W / 12) {
+                ctx.lineTo(x, H - 16 + (rng() - 0.5) * 30);
+            }
+            ctx.closePath();
+            ctx.fillStyle = paperColor;
+            ctx.fill();
+        } else {
+            ctx.fillStyle = paperColor;
+            ctx.fillRect(0, 0, W, H);
+        }
+
+        // Suciedad del papel
+        for (let i = 0; i < 60; i++) {
+            ctx.fillStyle = 'rgba(120, 100, 60, ' + (0.04 + rng() * 0.09).toFixed(3) + ')';
+            ctx.fillRect(rng() * W, rng() * H, 3 + rng() * 9, 2 + rng() * 6);
+        }
+
+        // Rayas de escritura a mano
+        ctx.strokeStyle = '#3a3628';
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = 'round';
+        ctx.globalAlpha = 0.8;
+        const margin = 32;
+        const lines = portrait ? 5 : 3;
+        for (let li = 0; li < lines; li++) {
+            ctx.beginPath();
+            const y = margin + (H - margin * 2) * (li + 0.5) / lines;
+            let x = margin + rng() * 22;
+            ctx.moveTo(x, y);
+            const n = 4 + Math.floor(rng() * 5);
+            for (let s = 0; s < n; s++) {
+                x += ((W - margin * 2) / n) * (0.75 + rng() * 0.5);
+                ctx.lineTo(Math.min(W - margin, x), y + (rng() - 0.5) * 8);
+            }
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+
+        // Variante de fijacion
+        if (variant === 0) {
+            // Chincheta roja
+            ctx.fillStyle = 'rgba(0,0,0,0.28)';
+            ctx.beginPath(); ctx.arc(54, 54, 11, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#b32d1c';
+            ctx.beginPath(); ctx.arc(48, 46, 9, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#e0483a';
+            ctx.beginPath(); ctx.arc(46, 42, 4, 0, Math.PI * 2); ctx.fill();
+        } else if (variant === 1) {
+            // Cinta adhesiva arriba y abajo
+            ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#e8dcae';
+            ctx.translate(W / 2, 18); ctx.rotate((rng() - 0.5) * 0.25);
+            ctx.fillRect(-W * 0.42, -9, W * 0.84, 18);
+            ctx.restore();
+            ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#e8dcae';
+            ctx.translate(W / 2, H - 18); ctx.rotate((rng() - 0.5) * 0.25);
+            ctx.fillRect(-W * 0.42, -9, W * 0.84, 18);
+            ctx.restore();
+        } else if (variant === 2) {
+            // Cintas en las esquinas, en diagonal
+            ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#e8dcae';
+            ctx.translate(16, 16); ctx.rotate(-Math.PI / 4);
+            ctx.fillRect(-26, -10, 52, 20);
+            ctx.restore();
+            ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#e8dcae';
+            ctx.translate(W - 16, H - 16); ctx.rotate(-Math.PI / 4);
+            ctx.fillRect(-26, -10, 52, 20);
+            ctx.restore();
+        } else if (variant === 3) {
+            // Pliegue en la esquina superior izquierda
+            ctx.fillStyle = 'rgba(90, 70, 40, 0.35)';
+            ctx.beginPath();
+            ctx.moveTo(0, 0); ctx.lineTo(W * 0.24, 0); ctx.lineTo(0, W * 0.24);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Borde del papel
+        ctx.strokeStyle = 'rgba(80, 65, 40, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(1, 1, W - 2, H - (variant === 3 ? 18 : 2));
+
+        tex = new THREE.CanvasTexture(canvas);
+        wallNoteTexCache.set(ck, tex);
+        return tex;
+    }
     </script>
     <script>
 /* ==========================================================================
@@ -1950,6 +2255,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     openCells: [],      // celdas transitables en celdas de MUNDO {x,z}
                     doorCells: [],      // celdas interiores de las puertas (locales)
                     wallBoxes: [],      // cajas de muros/pilares (mundo)
+                    slantedAABBs: [],   // cajas envolventes de tabiques inclinados
                     lamps: [],
                     meshes: [],
                     pickupList: [],
@@ -2035,6 +2341,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.lamps = lamps;
             this.walkableCells = walkable;
             this.pickups = pickups;
+            // Tabiques inclinados de los chunks cargados (para la IA de la entidad)
+            this.slantedAABBs = [];
+            for (const ch of this.chunks.values()) {
+                if (ch.loaded && ch.slantedAABBs) this.slantedAABBs.push(...ch.slantedAABBs);
+            }
+        }
+
+        // True si el punto (mundo, XZ) cae dentro de un tabique inclinado
+        pointInSlab(x, z) {
+            for (const b of this.slantedAABBs) {
+                if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ) return true;
+            }
+            return false;
         }
 
         // Tipo de chunk CONTINUO por logica, no por azar de chunk: el tipo se
@@ -2986,6 +3305,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // RNG propio del chunk: no altera la generacion del mundo y, con la
             // misma semilla, toda la sala ve exactamente los mismos grafitis.
             this.placeChunkGraffiti(ch, wallKind, key, curvedCells);
+
+            // ---- PAREDES INCLINADAS (rectas, en angulo) al final: ya estan
+            // todas las cajas de colision de muros y pilares para validar que
+            // cada tabique deja paso libre por ambos lados ----
+            this.placeChunkSlantedWalls(ch);
         }
 
         // ---- GRAFITI (100 variantes, blanco/negro/rojo) sobre las paredes ----
@@ -3015,7 +3339,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             if (!candidates.length) return;
             const geo = new THREE.PlaneGeometry(1, 1);
             const placed = new Set();
-            const count = 2 + Math.floor(rng() * 5);   // 2-6 grafitis por chunk
+            const count = 3 + Math.floor(rng() * 6);   // 3-8 grafitis por chunk
             for (let i = 0; i < count; i++) {
                 const c = candidates[Math.floor(rng() * candidates.length)];
                 const fk = c[0] + ',' + c[1] + c[2];
@@ -3025,6 +3349,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (!box) continue;
                 const color = GRAFFITI_COLORS[Math.floor(rng() * GRAFFITI_COLORS.length)];
                 const variant = Math.floor(rng() * GRAFFITI_POOL.length);
+                // La cara real de la pared: el grafiti NUNCA puede sobresalir de
+                // ella. Antes media hasta 1,7 m y se colocaba tambien sobre
+                // postes y juntas diminutas de esquina, asi que quedaba parte
+                // del plano volando fuera de la pared.
+                const faceLen = (c[2] === 'W' || c[2] === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
+                if (faceLen < 1.0) continue;            // caras demasiado cortas: nada de grafiti volador
                 // Sin luces (como la tiza): el grafiti se ve tambien en las
                 // zonas de apagon, no solo bajo lamparas encendidas
                 const mat = new THREE.MeshBasicMaterial({
@@ -3032,10 +3362,13 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     transparent: true
                 });
                 const m = new THREE.Mesh(geo, mat);
-                const w = 0.85 + rng() * 0.85;          // 0,85-1,7 m de ancho
+                const w = Math.min(0.85 + rng() * 0.85, faceLen - 0.14); // 0,85-1,7 m, nunca mas ancho que la pared
                 const h = 0.5 + rng() * 0.55;           // 0,5-1,05 m de alto
                 m.scale.set(w, h, 1);
-                m.position.y = 1.05 + rng() * 1.15;     // lejos de rodapie y techo
+                // Altura limitada para que el grafiti quede DENTRO de la pared
+                // (antes el borde superior podia asomar por encima del techo)
+                const y = Math.max(0.3 + h / 2, Math.min(1.05 + rng() * 1.15, WALL_HEIGHT - 0.07 - h / 2));
+                m.position.y = y;
                 const mx = (box.minX + box.maxX) / 2;
                 const mz = (box.minZ + box.maxZ) / 2;
                 if (c[2] === 'W') { m.position.set(box.minX - 0.022, m.position.y, mz); m.rotation.y = -Math.PI / 2; }
@@ -3261,6 +3594,175 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 }
             }
             return { cells, boxes, kind, along0, along1, sweep0, sweep1, fixed0, dir, B, T, ext0, ext1 };
+        }
+
+        // ================================================================
+        //  PAREDES INCLINADAS: tabiques RECTOS colocados en angulo dentro de
+        //  salas, salones y a veces pasillos. Dos formas (como el boceto):
+        //  rectangulares y trapezoidales (un extremo mas grueso que el otro),
+        //  con largo, angulo y grosor aleatorios por chunk. RNG propio del
+        //  chunk: determinista, toda la sala ve los mismos tabiques.
+        //  Colision por segmentos AABB a lo largo del tabique (el jugador y
+        //  los muebles chocan con el angulo real, no con su caja envolvente
+        //  entera). Se exige paso libre de ~0,75 m a cada lado contra muros,
+        //  pilares y otros tabiques: nunca sellan un pasillo.
+        // ================================================================
+        slabCorners(cx, cz, ang, L, T0, T1) {
+            const cos = Math.cos(ang), sin = Math.sin(ang);
+            const half = L / 2;
+            return [
+                [-T0 / 2, -half], [T0 / 2, -half],
+                [-T1 / 2, half], [T1 / 2, half]
+            ].map(([lx, lz]) => ({ x: cx + lx * cos + lz * sin, z: cz - lx * sin + lz * cos }));
+        }
+
+        placeChunkSlantedWalls(ch) {
+            const rng = mulberry32(hash2(ch.cx * 65407 + 89, ch.cz * 65407 + 137));
+            const N = CHUNK_SIZE, C = CELL_SIZE;
+            const g = ch.grid;
+            const ox = ch.cx * N * C;
+            const oz = ch.cz * N * C;
+            const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
+
+            // Celdas candidatas: interiores (nunca en vanos de borde), abiertas
+            // y con los 4 vecinos abiertos (campo libre alrededor del centro)
+            const cands = [];
+            for (let x = 3; x < N - 3; x++) {
+                for (let z = 3; z < N - 3; z++) {
+                    if (!open(x, z)) continue;
+                    if (!open(x - 1, z) || !open(x + 1, z) || !open(x, z - 1) || !open(x, z + 1)) continue;
+                    cands.push([x, z]);
+                }
+            }
+            for (let i = cands.length - 1; i > 0; i--) {
+                const j = Math.floor(rng() * (i + 1));
+                [cands[i], cands[j]] = [cands[j], cands[i]];
+            }
+
+            // Cantidad: 0-2 en chunks con salas/salones, ocasional en pasillos
+            let n = 0;
+            if (ch.rooms.length > 0) {
+                if (rng() < 0.6) n = 1 + (rng() < 0.45 ? 1 : 0);
+            } else if (rng() < 0.25) {
+                n = 1;
+            }
+
+            const placed = [];
+            for (const [cx2, cz2] of cands) {
+                if (placed.length >= n) break;
+                const wx = ox + (cx2 + 0.5) * C;
+                const wz = oz + (cz2 + 0.5) * C;
+                const shape = rng() < 0.45 ? 'trap' : 'rect';
+                const L = 1.8 + rng() * 2.8;             // 1,8-4,6 m de largo
+                const ang = (rng() - 0.5) * 2.6;         // hasta ~±75°
+                const T0 = shape === 'trap' ? 0.2 + rng() * 0.12 : 0.22 + rng() * 0.2;
+                const T1 = shape === 'trap' ? T0 + 0.3 + rng() * 0.35 : T0;
+
+                const pts = this.slabCorners(wx, wz, ang, L, T0, T1);
+                const aabb = {
+                    minX: Math.min(...pts.map(p => p.x)), maxX: Math.max(...pts.map(p => p.x)),
+                    minZ: Math.min(...pts.map(p => p.z)), maxZ: Math.max(...pts.map(p => p.z))
+                };
+                // Paso libre garantizado: ~0,75 m de aire a cada lado del
+                // tabique (el tabique vive dentro de su AABB, asi que el paso
+                // real nunca es menor que el margen comprobado)
+                const M = 0.75;
+                let ok = true;
+                for (const b of ch.wallBoxes) {
+                    if (aabb.minX - M < b.maxX && aabb.maxX + M > b.minX &&
+                        aabb.minZ - M < b.maxZ && aabb.maxZ + M > b.minZ) { ok = false; break; }
+                }
+                if (ok) {
+                    for (const s of placed) {
+                        if (aabb.minX - 0.8 < s.maxX && aabb.maxX + 0.8 > s.minX &&
+                            aabb.minZ - 0.8 < s.maxZ && aabb.maxZ + 0.8 > s.minZ) { ok = false; break; }
+                    }
+                }
+                if (!ok) continue;
+
+                const built = this.buildSlantedWall(ch, wx, wz, ang, L, T0, T1, shape);
+                placed.push(aabb);
+                ch.slantedAABBs.push(aabb);
+                ch.wallBoxes.push(...built.boxes);
+                ch.meshes.push(built.mesh);
+            }
+        }
+
+        buildSlantedWall(ch, cx, cz, ang, L, T0, T1, shape) {
+            const H = WALL_HEIGHT;
+            const cos = Math.cos(ang), sin = Math.sin(ang);
+            const half = L / 2;
+
+            // Colision: cajas por segmentos (~1,1 m) a lo largo del tabique.
+            // Cada caja es el AABB del segmento rotado, asi la colision sigue
+            // el angulo real en vez de bloquear todo el rectangulo envolvente.
+            const nSeg = Math.max(2, Math.round(L / 1.1));
+            const boxes = [];
+            for (let i = 0; i < nSeg; i++) {
+                const z0 = -half + (L / nSeg) * i;
+                const z1 = z0 + L / nSeg;
+                const m = Math.max(T0, T1) / 2;   // el grosor crece de forma lineal: el maximo acota el segmento
+                const pts = [
+                    { x: cx - m * cos + z0 * sin, z: cz + m * sin + z0 * cos },
+                    { x: cx + m * cos + z0 * sin, z: cz - m * sin + z0 * cos },
+                    { x: cx - m * cos + z1 * sin, z: cz + m * sin + z1 * cos },
+                    { x: cx + m * cos + z1 * sin, z: cz - m * sin + z1 * cos }
+                ];
+                boxes.push({
+                    minX: Math.min(...pts.map(p => p.x)), maxX: Math.max(...pts.map(p => p.x)),
+                    minZ: Math.min(...pts.map(p => p.z)), maxZ: Math.max(...pts.map(p => p.z))
+                });
+            }
+
+            // Malla
+            let geo;
+            if (shape === 'rect') {
+                geo = new THREE.BoxGeometry(1, 1, 1);
+                geo.scale(T0, H, L);
+            } else {
+                geo = this.trapezoidGeometry(L, H, T0, T1);
+            }
+            const mat = Materials.wall.clone();
+            mat.side = THREE.DoubleSide;
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(cx, H / 2, cz);
+            mesh.rotation.y = ang;
+            this.scene.add(mesh);
+            return { mesh, boxes };
+        }
+
+        // Prisma trapezoidal vertical: un extremo mas grueso que el otro
+        // (como el tabique afinado del boceto). UVs: la textura se repite
+        // cada celda a lo largo y en vertical.
+        trapezoidGeometry(L, H, T0, T1) {
+            const pos = [], uv = [], idx = [];
+            const hL = L / 2;
+            const A = [-T0 / 2, 0, -hL], B = [T0 / 2, 0, -hL];
+            const C = [-T1 / 2, 0, hL], D = [T1 / 2, 0, hL];
+            const E = [-T0 / 2, H, -hL], F = [T0 / 2, H, -hL];
+            const G = [-T1 / 2, H, hL], HH = [T1 / 2, H, hL];
+            const vert = (p, u, v) => { pos.push(p[0], p[1], p[2]); uv.push(u, v); return pos.length / 3 - 1; };
+            const tri = (a, b, c) => idx.push(a, b, c);
+            const u0 = 0, u1 = L / CELL_SIZE, v0 = 0, v1 = H / CELL_SIZE;
+            const a = vert(A, u0, v0), b = vert(B, u0, v0);
+            const c = vert(C, u1, v0), d = vert(D, u1, v0);
+            const e = vert(E, u0, v1), f = vert(F, u0, v1);
+            const g = vert(G, u1, v1), h = vert(HH, u1, v1);
+            // Suelo (-Y) y techo (+Y)
+            tri(a, d, c); tri(a, b, d);
+            tri(f, g, h); tri(f, e, g);
+            // Laterales (x- y x+)
+            tri(a, g, e); tri(a, c, g);
+            tri(b, f, h); tri(b, f, d);
+            // Tapas de los extremos (z- y z+)
+            tri(a, e, b); tri(b, e, f);
+            tri(d, h, g); tri(d, g, c);
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+            geo.setIndex(idx);
+            geo.computeVertexNormals();
+            return geo;
         }
 
         // ================================================================
@@ -3696,6 +4198,46 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             return null;
         }
 
+        // Punto de una nota PEGADA A LA PARED: elige una cara expuesta de un
+        // muro recto (misma logica que los grafitis) y guarda todo lo que hace
+        // falta para materializarla: caja de la cara, direccion, posicion a lo
+        // largo de la pared, altura, variante de fijacion, orientacion y giro.
+        pickWallNoteSpot(ch) {
+            const N = CHUNK_SIZE;
+            const r = ch.rng;
+            const g = ch.grid;
+            const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
+            const cands = [];
+            for (let x = 1; x < N - 1; x++) {
+                for (let z = 1; z < N - 1; z++) {
+                    const k = x + ',' + z;
+                    if (g[x][z] !== 1) continue;
+                    const box = ch.wallFaceMap && ch.wallFaceMap.get(k);
+                    if (!box) continue;   // paredes curvas no tienen cara plana
+                    for (const [dx, dz, d] of dirs) {
+                        const nx = x + dx, nz = z + dz;
+                        if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
+                        if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
+                        if (faceLen < 0.9) continue;
+                        cands.push({ box, d, faceLen });
+                    }
+                }
+            }
+            if (!cands.length) return null;
+            const c = cands[Math.floor(r() * cands.length)];
+            const rots = [-0.4, -0.24, -0.1, 0.08, 0.22, 0.38];
+            return {
+                box: { minX: c.box.minX, maxX: c.box.maxX, minZ: c.box.minZ, maxZ: c.box.maxZ },
+                dir: c.d,
+                t: 0.12 + r() * 0.76,          // donde, a lo largo de la pared
+                y: 1.1 + r() * 0.8,            // altura sobre el suelo
+                variant: Math.floor(r() * 5),  // 0 chincheta, 1 cinta H, 2 cintas diag., 3 rasgada, 4 sola
+                aspect: r() < 0.6 ? 'portrait' : 'landscape',
+                rot: rots[Math.floor(r() * rots.length)]
+            };
+        }
+
         buildPickupMesh(p) {
             let mesh;
             if (p.type === 'camera') {
@@ -3719,8 +4261,23 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 mesh.position.set(p.x, 0, p.z);
                 snapToFloor(mesh, 0.01);
             } else if (p.type === 'note') {
-                mesh = ModelBuilder.createFloorNote();
-                mesh.position.set(p.x, 0.005, p.z);
+                if (p.wall) {
+                    // Nota pegada a la pared: el plano se apoya en la cara real
+                    // del muro (wallFaceMap) en la posicion/altura elegidas
+                    mesh = ModelBuilder.createWallNote(p.wall);
+                    const b = p.wall.box;
+                    const bx = b.minX + (b.maxX - b.minX) * p.wall.t;
+                    const bz = b.minZ + (b.maxZ - b.minZ) * p.wall.t;
+                    let ry = 0;
+                    if (p.wall.dir === 'W') { mesh.position.set(b.minX - 0.016, p.wall.y, bz); ry = -Math.PI / 2; }
+                    else if (p.wall.dir === 'E') { mesh.position.set(b.maxX + 0.016, p.wall.y, bz); ry = Math.PI / 2; }
+                    else if (p.wall.dir === 'S') { mesh.position.set(bx, p.wall.y, b.minZ - 0.016); ry = Math.PI; }
+                    else { mesh.position.set(bx, p.wall.y, b.maxZ + 0.016); ry = 0; }
+                    mesh.rotation.y = ry;
+                } else {
+                    mesh = ModelBuilder.createFloorNote();
+                    mesh.position.set(p.x, 0.005, p.z);
+                }
             }
             this.scene.add(mesh);
             return mesh;
@@ -3743,8 +4300,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (gx === 0 && gz === 0) want.push({ type: 'camera' }, { type: 'chalk', color: '#ffffff', colorName: 'BLANCO' }, { type: 'note', noteIndex: 0 });
                 if (gx === 1 && gz === 0) want.push({ type: 'almond' }, { type: 'battery' });
                 if (gx === 0 && gz === 1) want.push({ type: 'battery' }, { type: 'note', noteIndex: 1 });
-                if (gx === -1 && gz === 0) want.push({ type: 'almond' });
-                if (gx === 0 && gz === -1) want.push({ type: 'battery' });
+                if (gx === -1 && gz === 0) want.push({ type: 'almond' }, { type: 'note', noteIndex: 2 });
+                if (gx === 0 && gz === -1) want.push({ type: 'battery' }, { type: 'note', noteIndex: 3 });
                 if (gx === 1 && gz === 1) want.push({ type: 'chalk', color: '#ff3333', colorName: 'ROJO' });
 
                 // Reparto aleatorio de recursos por el infinito (densidad
@@ -3753,7 +4310,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (r() < 0.20) want.push({ type: 'chalk' });
                 if (r() < 0.26) want.push({ type: 'almond' });
                 if (r() < 0.34) want.push({ type: 'battery' });
-                if (r() < 0.28) want.push({ type: 'note' });
+                if (r() < 0.32) want.push({ type: 'note' });
 
                 const chalkColors = ['#ffffff', '#ff3333', '#111111'];
                 const chalkNames = ['BLANCO', 'ROJO', 'NEGRO'];
@@ -3765,13 +4322,29 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             if (!this.collectedNoteIndices.has(i)) fresh.push(i);
                         }
                         it.noteIndex = fresh.length > 0 ? fresh[Math.floor(r() * fresh.length)] : Math.floor(r() * NOTE_POOL.length);
+                        // Una parte de las notas va PEGADA A LA PARED, en
+                        // distintas variantes (chincheta, cintas, rasgada,
+                        // orientaciones y giros distintos)
+                        if (r() < 0.45) {
+                            const wall = this.pickWallNoteSpot(ch);
+                            if (wall) it.wall = wall;
+                        }
                     } else if (it.type === 'chalk' && !it.color) {
                         const ci = Math.floor(r() * 3);
                         it.color = chalkColors[ci];
                         it.colorName = chalkNames[ci];
                     }
-                    const spot = this.pickupSpot(ch);
+                    let spot = this.pickupSpot(ch);
                     if (!spot) continue;
+                    // Los objetos nunca caen DENTRO de un tabique inclinado
+                    if (ch.slantedAABBs && ch.slantedAABBs.length) {
+                        let bad = false;
+                        for (const b of ch.slantedAABBs) {
+                            if (spot.x > b.minX - 0.1 && spot.x < b.maxX + 0.1 &&
+                                spot.z > b.minZ - 0.1 && spot.z < b.maxZ + 0.1) { bad = true; break; }
+                        }
+                        if (bad) continue;
+                    }
                     // Id persistente y DETERMINISTA (misma semilla -> mismo id en
                     // todos los clientes): sirve para reclamar el objeto por red.
                     const data = {
@@ -3788,7 +4361,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     if (this.claimedPickupIds.has(data.id)) data.collected = true;
                     this.pickupById.set(data.id, data);
                     if (it.type === 'chalk') { data.color = it.color; data.colorName = it.colorName; }
-                    if (it.type === 'note') { data.noteIndex = it.noteIndex; data.text = NOTE_POOL[it.noteIndex]; }
+                    if (it.type === 'note') { data.noteIndex = it.noteIndex; data.text = NOTE_POOL[it.noteIndex]; data.wall = it.wall || null; }
                     this.pickupData.push(data);
                     ch.pickupList.push(data);
                 }
@@ -3936,8 +4509,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
     }
 
     class BacteriophageEntity {
-        constructor(scene) {
+        constructor(scene, worldSystem) {
             this.scene = scene;
+            this.worldSystem = worldSystem || null;   // para no atravesar tabiques inclinados
             this.mesh = new THREE.Group();
             this.state = 'WANDERING';
             this.speed = 1.8;
@@ -3961,6 +4535,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const valid = walkableCells.filter(c => {
                 const wx = (c.x + 0.5) * CELL_SIZE;
                 const wz = (c.z + 0.5) * CELL_SIZE;
+                if (this.worldSystem && this.worldSystem.pointInSlab(wx, wz)) return false;
                 return Math.hypot(wx - playerPos.x, wz - playerPos.z) >= 48.0;
             });
 
@@ -3976,7 +4551,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }
 
         pickRandomWaypoint(walkableCells) {
-            const pick = walkableCells[Math.floor(Math.random() * walkableCells.length)];
+            // Evita elegir un punto dentro de un tabique inclinado (si no, la
+            // entidad podria quedarse dando vueltas tratando de alcanzarlo)
+            let pool = walkableCells;
+            if (this.worldSystem) {
+                pool = walkableCells.filter(c => {
+                    return !this.worldSystem.pointInSlab((c.x + 0.5) * CELL_SIZE, (c.z + 0.5) * CELL_SIZE);
+                });
+                if (!pool.length) pool = walkableCells;
+            }
+            const pick = pool[Math.floor(Math.random() * pool.length)];
             this.targetWaypoint.set((pick.x + 0.5) * CELL_SIZE, 0, (pick.z + 0.5) * CELL_SIZE);
         }
 
@@ -4886,6 +5470,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 /* ==========================================================================
        7. CONTROLADOR PRINCIPAL, ILUMINACIÓN Y NIEBLA AMARILLENTA CONTINUA
        ========================================================================== */
+    // Dispositivos táctiles reales (móvil/tableta): pantalla sin puntero fino.
+    // Un portátil táctil con ratón sigue usando los controles de escritorio.
+    const IS_TOUCH = !window.matchMedia('(pointer: fine)').matches &&
+        ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+
+    // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
+    // Al subirla, actualiza también el ?v=... de index.html (cache busting:
+    // así el navegador no se queda con los js antiguos en caché).
+    const GAME_VERSION = '1.1.0';
+
     class BackroomsGame {
         constructor() {
             this.container = document.getElementById('canvas-container');
@@ -4904,7 +5498,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
             this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
             this.renderer.setSize(window.innerWidth, window.innerHeight);
-            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+            // En movil se baja la resolucion (pixel ratio 1): mas fps y menos calor
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_TOUCH ? 1 : 1.5));
             this.renderer.setClearColor(FOG_COLOR);
             // Control de exposición: mapeado de tonos oscuro y aterrador
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -4987,7 +5582,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
             this.worldSystem = new WorldGridSystem(this.scene);
             this.chalkSystem = new ChalkDrawingSystem(this.scene, this.camera);
-            this.entity = new BacteriophageEntity(this.scene);
+            this.entity = new BacteriophageEntity(this.scene, this.worldSystem);
 
             // Multijugador (hasta 6): mismo mundo deterministico + broker MQTT
             this.net = new MultiplayerManager(this.scene, this.camera, {
@@ -5015,8 +5610,13 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.isLocked = false;
             this.isMouseDown = false;
             this.gameActive = false;
+            this.touchMove = { x: 0, y: 0 };   // joystick tactil (movil)
+            this.touchDrawHeld = false;        // boton de dibujar pulsado (movil)
+
+            if (IS_TOUCH) document.body.classList.add('touch-mode');
 
             this.initInput();
+            this.initTouch();
             this.initNoiseCanvas();
             this.initUI();
             const notesLabel = document.getElementById('notes-count-label');
@@ -5210,7 +5810,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             });
 
             this.renderer.domElement.addEventListener('click', () => {
-                if (this.gameActive && !this.isLocked) {
+                // En movil no hay pointer lock: los controles tactiles ya estan activos
+                if (this.gameActive && !this.isLocked && !IS_TOUCH) {
                     document.body.requestPointerLock();
                 }
             });
@@ -5218,6 +5819,128 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             document.addEventListener('pointerlockchange', () => {
                 this.isLocked = document.pointerLockElement === document.body;
             });
+        }
+
+        // ---- CONTROLES TACTILES (móvil/tableta) ----
+        // Mitad izquierda: joystick virtual dinamico (moverse). Resto de la
+        // pantalla: arrastrar para mirar; un toque rapido dispara la camara
+        // (slot 2) o interactua. Botones en pantalla: correr, dibujar,
+        // linterna, cuaderno e interactuar.
+        initTouch() {
+            if (!IS_TOUCH) return;
+            const joyBase = document.getElementById('joy-base');
+            const joyKnob = document.getElementById('joy-knob');
+            const LEFT_ZONE = 0.42;
+            let joyId = null, joyOx = 0, joyOy = 0;
+            let lookId = null, lookX = 0, lookY = 0, lookT = 0, lookSX = 0, lookSY = 0;
+
+            document.addEventListener('touchstart', (e) => {
+                if (!this.gameActive) return;
+                for (const t of e.changedTouches) {
+                    const el = document.elementFromPoint(t.clientX, t.clientY);
+                    // Nada de joystick/mirar dentro de botones, ranuras del
+                    // cinturón ni del cuaderno abierto (ahi se hace scroll)
+                    if (el && el.closest('button, .tool-slot, input, textarea, #notebook-modal')) continue;
+                    if (joyId === null && t.clientX < window.innerWidth * LEFT_ZONE) {
+                        joyId = t.identifier;
+                        joyOx = t.clientX; joyOy = t.clientY;
+                        joyBase.style.display = 'block';
+                        joyBase.style.left = (t.clientX - 55) + 'px';
+                        joyBase.style.top = (t.clientY - 55) + 'px';
+                        joyKnob.style.transform = 'translate(-50%, -50%)';
+                        this.touchMove.x = 0; this.touchMove.y = 0;
+                    } else if (lookId === null) {
+                        lookId = t.identifier;
+                        lookX = t.clientX; lookY = t.clientY;
+                        lookSX = t.clientX; lookSY = t.clientY;
+                        lookT = performance.now();
+                        if (this.touchDrawHeld && this.inventory.currentSlot === 1) {
+                            this.isMouseDown = true;   // dibujar con la tiza
+                        }
+                    }
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            document.addEventListener('touchmove', (e) => {
+                if (!this.gameActive) return;
+                for (const t of e.changedTouches) {
+                    if (t.identifier === joyId) {
+                        let dx = t.clientX - joyOx, dy = t.clientY - joyOy;
+                        const len = Math.hypot(dx, dy);
+                        const max = 56;
+                        if (len > 1) {
+                            const cl = Math.min(1, len / max);
+                            dx = dx / len * max * cl;
+                            dy = dy / len * max * cl;
+                        }
+                        this.touchMove.x = dx / max;
+                        this.touchMove.y = -dy / max;   // arriba en pantalla = hacia delante
+                        joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                    } else if (t.identifier === lookId) {
+                        if (this.touchDrawHeld && this.inventory.currentSlot === 1) {
+                            this.isMouseDown = true;    // dibujando: el dedo pinta en el centro de la pantalla
+                            continue;
+                        }
+                        const dx = t.clientX - lookX, dy = t.clientY - lookY;
+                        lookX = t.clientX; lookY = t.clientY;
+                        const sens = 0.004 * (600 / Math.max(window.innerWidth, window.innerHeight));
+                        this.yaw -= dx * sens;
+                        this.pitch -= dy * sens;
+                        this.pitch = Math.max(-1.4, Math.min(1.4, this.pitch));
+                        this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+                    }
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            const endTouch = (e) => {
+                if (!this.gameActive) return;
+                for (const t of e.changedTouches) {
+                    if (t.identifier === joyId) {
+                        joyId = null;
+                        joyBase.style.display = 'none';
+                        this.touchMove.x = 0; this.touchMove.y = 0;
+                    } else if (t.identifier === lookId) {
+                        lookId = null;
+                        this.isMouseDown = false;
+                        this.chalkSystem.lastDrawPoint = null;
+                        const dur = performance.now() - lookT;
+                        const dist = Math.hypot(t.clientX - lookSX, t.clientY - lookSY);
+                        if (dur < 260 && dist < 14) {
+                            // Toque rapido: disparo de camara (slot 2) o interactuar
+                            if (this.inventory.currentSlot === 2) this.triggerCameraFlash();
+                            else this.handleInteraction();
+                        }
+                    }
+                }
+                e.preventDefault();
+            };
+            document.addEventListener('touchend', endTouch, { passive: false });
+            document.addEventListener('touchcancel', endTouch, { passive: false });
+
+            // Botones: mantener pulsado para correr/dibujar, toque para el resto
+            const bindHold = (id, on, off) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener('touchstart', (e) => { e.preventDefault(); if (this.gameActive) on(); });
+                el.addEventListener('touchend', (e) => { e.preventDefault(); off(); });
+                el.addEventListener('touchcancel', () => off());
+            };
+            bindHold('btn-touch-run', () => { this.keys['ShiftLeft'] = true; }, () => { this.keys['ShiftLeft'] = false; });
+            bindHold('btn-touch-draw', () => { this.touchDrawHeld = true; }, () => {
+                this.touchDrawHeld = false;
+                this.isMouseDown = false;
+                this.chalkSystem.lastDrawPoint = null;
+            });
+            const bindTap = (id, fn) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener('touchstart', (e) => { e.preventDefault(); if (this.gameActive) fn(); });
+            };
+            bindTap('btn-touch-flash', () => this.toggleFlashlight());
+            bindTap('btn-touch-note', () => this.toggleNotebook());
+            bindTap('btn-touch-interact', () => this.handleInteraction());
         }
 
         initNoiseCanvas() {
@@ -5244,6 +5967,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }
 
         initUI() {
+            // Version en el menu principal y en el HUD (unica fuente: GAME_VERSION)
+            const mv = document.getElementById('menu-version');
+            if (mv) mv.textContent = 'THE BACKROOMS v' + GAME_VERSION;
+            const hv = document.getElementById('hud-version');
+            if (hv) hv.textContent = 'v' + GAME_VERSION;
+
             // Recuerda el nombre entre partidas
             const nameInput = document.getElementById('name-input');
             if (nameInput) {
@@ -5296,8 +6025,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
                 this.gameActive = true;
-                document.body.requestPointerLock();
+                if (!IS_TOUCH) document.body.requestPointerLock();
             };
+
+            // En movil las ranuras del cinturón se tocan directamente
+            if (IS_TOUCH) {
+                for (let i = 1; i <= 4; i++) {
+                    const slotEl = document.getElementById(`slot-${i}`);
+                    if (slotEl) slotEl.addEventListener('touchstart', (e) => {
+                        e.preventDefault();
+                        if (this.gameActive) this.selectSlot(i);
+                    });
+                }
+            }
 
             document.getElementById('btn-close-notebook').onclick = () => this.toggleNotebook();
 
@@ -5449,6 +6189,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const modal = document.getElementById('notebook-modal');
             const isOpen = modal.style.display === 'flex';
             modal.style.display = isOpen ? 'none' : 'flex';
+            if (IS_TOUCH) return;   // en movil no hay pointer lock que liberar
             if (!isOpen) document.exitPointerLock();
             else document.body.requestPointerLock();
         }
@@ -5713,7 +6454,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             else if (p.type === 'chalk') prompt.textContent = `[E] RECOGER TIZA [${p.colorName}]`;
                             else if (p.type === 'almond') prompt.textContent = '[E] RECOGER AGUA DE ALMENDRAS';
                             else if (p.type === 'battery') prompt.textContent = '[E] COGER PILA';
-                            else if (p.type === 'note') prompt.textContent = '[E] LEER NOTA DEL SUELO';
+                            else if (p.type === 'note') prompt.textContent = p.wall ? '[E] LEER NOTA DE LA PARED' : '[E] LEER NOTA DEL SUELO';
                             break;
                         }
                     }
@@ -5733,6 +6474,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             if (this.keys['KeyS']) moveDir.sub(forward);
             if (this.keys['KeyD']) moveDir.add(right);
             if (this.keys['KeyA']) moveDir.sub(right);
+            // Joystick tactil (movil): x = lateral, y = adelante/atras
+            if (this.touchMove.x !== 0 || this.touchMove.y !== 0) {
+                moveDir.addScaledVector(right, this.touchMove.x);
+                moveDir.addScaledVector(forward, this.touchMove.y);
+            }
 
             const isMoving = moveDir.lengthSq() > 0;
             if (isMoving) moveDir.normalize();
@@ -5839,6 +6585,14 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const dt = Math.min(this.clock.getDelta(), 0.1);
 
             if (this.gameActive) {
+                // Boton de dibujo visible solo con la tiza equipada (movil)
+                const drawBtn = document.getElementById('btn-touch-draw');
+                if (drawBtn) {
+                    const show = this.inventory.currentSlot === 1 && this.inventory.hasChalk && this.inventory.chalkPoints > 0;
+                    if (show !== (drawBtn.style.display !== 'none')) {
+                        drawBtn.style.display = show ? 'flex' : 'none';
+                    }
+                }
                 // Mundo infinito: carga/descarga chunks alrededor del jugador
                 this.worldSystem.update(this.player.pos);
                 this.syncFurnitureBodies();

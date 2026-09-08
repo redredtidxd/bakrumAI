@@ -475,6 +475,7 @@
                     openCells: [],      // celdas transitables en celdas de MUNDO {x,z}
                     doorCells: [],      // celdas interiores de las puertas (locales)
                     wallBoxes: [],      // cajas de muros/pilares (mundo)
+                    slantedAABBs: [],   // cajas envolventes de tabiques inclinados
                     lamps: [],
                     meshes: [],
                     pickupList: [],
@@ -560,6 +561,19 @@
             this.lamps = lamps;
             this.walkableCells = walkable;
             this.pickups = pickups;
+            // Tabiques inclinados de los chunks cargados (para la IA de la entidad)
+            this.slantedAABBs = [];
+            for (const ch of this.chunks.values()) {
+                if (ch.loaded && ch.slantedAABBs) this.slantedAABBs.push(...ch.slantedAABBs);
+            }
+        }
+
+        // True si el punto (mundo, XZ) cae dentro de un tabique inclinado
+        pointInSlab(x, z) {
+            for (const b of this.slantedAABBs) {
+                if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ) return true;
+            }
+            return false;
         }
 
         // Tipo de chunk CONTINUO por logica, no por azar de chunk: el tipo se
@@ -1511,6 +1525,11 @@
             // RNG propio del chunk: no altera la generacion del mundo y, con la
             // misma semilla, toda la sala ve exactamente los mismos grafitis.
             this.placeChunkGraffiti(ch, wallKind, key, curvedCells);
+
+            // ---- PAREDES INCLINADAS (rectas, en angulo) al final: ya estan
+            // todas las cajas de colision de muros y pilares para validar que
+            // cada tabique deja paso libre por ambos lados ----
+            this.placeChunkSlantedWalls(ch);
         }
 
         // ---- GRAFITI (100 variantes, blanco/negro/rojo) sobre las paredes ----
@@ -1540,7 +1559,7 @@
             if (!candidates.length) return;
             const geo = new THREE.PlaneGeometry(1, 1);
             const placed = new Set();
-            const count = 2 + Math.floor(rng() * 5);   // 2-6 grafitis por chunk
+            const count = 3 + Math.floor(rng() * 6);   // 3-8 grafitis por chunk
             for (let i = 0; i < count; i++) {
                 const c = candidates[Math.floor(rng() * candidates.length)];
                 const fk = c[0] + ',' + c[1] + c[2];
@@ -1550,6 +1569,12 @@
                 if (!box) continue;
                 const color = GRAFFITI_COLORS[Math.floor(rng() * GRAFFITI_COLORS.length)];
                 const variant = Math.floor(rng() * GRAFFITI_POOL.length);
+                // La cara real de la pared: el grafiti NUNCA puede sobresalir de
+                // ella. Antes media hasta 1,7 m y se colocaba tambien sobre
+                // postes y juntas diminutas de esquina, asi que quedaba parte
+                // del plano volando fuera de la pared.
+                const faceLen = (c[2] === 'W' || c[2] === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
+                if (faceLen < 1.0) continue;            // caras demasiado cortas: nada de grafiti volador
                 // Sin luces (como la tiza): el grafiti se ve tambien en las
                 // zonas de apagon, no solo bajo lamparas encendidas
                 const mat = new THREE.MeshBasicMaterial({
@@ -1557,10 +1582,13 @@
                     transparent: true
                 });
                 const m = new THREE.Mesh(geo, mat);
-                const w = 0.85 + rng() * 0.85;          // 0,85-1,7 m de ancho
+                const w = Math.min(0.85 + rng() * 0.85, faceLen - 0.14); // 0,85-1,7 m, nunca mas ancho que la pared
                 const h = 0.5 + rng() * 0.55;           // 0,5-1,05 m de alto
                 m.scale.set(w, h, 1);
-                m.position.y = 1.05 + rng() * 1.15;     // lejos de rodapie y techo
+                // Altura limitada para que el grafiti quede DENTRO de la pared
+                // (antes el borde superior podia asomar por encima del techo)
+                const y = Math.max(0.3 + h / 2, Math.min(1.05 + rng() * 1.15, WALL_HEIGHT - 0.07 - h / 2));
+                m.position.y = y;
                 const mx = (box.minX + box.maxX) / 2;
                 const mz = (box.minZ + box.maxZ) / 2;
                 if (c[2] === 'W') { m.position.set(box.minX - 0.022, m.position.y, mz); m.rotation.y = -Math.PI / 2; }
@@ -1786,6 +1814,175 @@
                 }
             }
             return { cells, boxes, kind, along0, along1, sweep0, sweep1, fixed0, dir, B, T, ext0, ext1 };
+        }
+
+        // ================================================================
+        //  PAREDES INCLINADAS: tabiques RECTOS colocados en angulo dentro de
+        //  salas, salones y a veces pasillos. Dos formas (como el boceto):
+        //  rectangulares y trapezoidales (un extremo mas grueso que el otro),
+        //  con largo, angulo y grosor aleatorios por chunk. RNG propio del
+        //  chunk: determinista, toda la sala ve los mismos tabiques.
+        //  Colision por segmentos AABB a lo largo del tabique (el jugador y
+        //  los muebles chocan con el angulo real, no con su caja envolvente
+        //  entera). Se exige paso libre de ~0,75 m a cada lado contra muros,
+        //  pilares y otros tabiques: nunca sellan un pasillo.
+        // ================================================================
+        slabCorners(cx, cz, ang, L, T0, T1) {
+            const cos = Math.cos(ang), sin = Math.sin(ang);
+            const half = L / 2;
+            return [
+                [-T0 / 2, -half], [T0 / 2, -half],
+                [-T1 / 2, half], [T1 / 2, half]
+            ].map(([lx, lz]) => ({ x: cx + lx * cos + lz * sin, z: cz - lx * sin + lz * cos }));
+        }
+
+        placeChunkSlantedWalls(ch) {
+            const rng = mulberry32(hash2(ch.cx * 65407 + 89, ch.cz * 65407 + 137));
+            const N = CHUNK_SIZE, C = CELL_SIZE;
+            const g = ch.grid;
+            const ox = ch.cx * N * C;
+            const oz = ch.cz * N * C;
+            const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
+
+            // Celdas candidatas: interiores (nunca en vanos de borde), abiertas
+            // y con los 4 vecinos abiertos (campo libre alrededor del centro)
+            const cands = [];
+            for (let x = 3; x < N - 3; x++) {
+                for (let z = 3; z < N - 3; z++) {
+                    if (!open(x, z)) continue;
+                    if (!open(x - 1, z) || !open(x + 1, z) || !open(x, z - 1) || !open(x, z + 1)) continue;
+                    cands.push([x, z]);
+                }
+            }
+            for (let i = cands.length - 1; i > 0; i--) {
+                const j = Math.floor(rng() * (i + 1));
+                [cands[i], cands[j]] = [cands[j], cands[i]];
+            }
+
+            // Cantidad: 0-2 en chunks con salas/salones, ocasional en pasillos
+            let n = 0;
+            if (ch.rooms.length > 0) {
+                if (rng() < 0.6) n = 1 + (rng() < 0.45 ? 1 : 0);
+            } else if (rng() < 0.25) {
+                n = 1;
+            }
+
+            const placed = [];
+            for (const [cx2, cz2] of cands) {
+                if (placed.length >= n) break;
+                const wx = ox + (cx2 + 0.5) * C;
+                const wz = oz + (cz2 + 0.5) * C;
+                const shape = rng() < 0.45 ? 'trap' : 'rect';
+                const L = 1.8 + rng() * 2.8;             // 1,8-4,6 m de largo
+                const ang = (rng() - 0.5) * 2.6;         // hasta ~±75°
+                const T0 = shape === 'trap' ? 0.2 + rng() * 0.12 : 0.22 + rng() * 0.2;
+                const T1 = shape === 'trap' ? T0 + 0.3 + rng() * 0.35 : T0;
+
+                const pts = this.slabCorners(wx, wz, ang, L, T0, T1);
+                const aabb = {
+                    minX: Math.min(...pts.map(p => p.x)), maxX: Math.max(...pts.map(p => p.x)),
+                    minZ: Math.min(...pts.map(p => p.z)), maxZ: Math.max(...pts.map(p => p.z))
+                };
+                // Paso libre garantizado: ~0,75 m de aire a cada lado del
+                // tabique (el tabique vive dentro de su AABB, asi que el paso
+                // real nunca es menor que el margen comprobado)
+                const M = 0.75;
+                let ok = true;
+                for (const b of ch.wallBoxes) {
+                    if (aabb.minX - M < b.maxX && aabb.maxX + M > b.minX &&
+                        aabb.minZ - M < b.maxZ && aabb.maxZ + M > b.minZ) { ok = false; break; }
+                }
+                if (ok) {
+                    for (const s of placed) {
+                        if (aabb.minX - 0.8 < s.maxX && aabb.maxX + 0.8 > s.minX &&
+                            aabb.minZ - 0.8 < s.maxZ && aabb.maxZ + 0.8 > s.minZ) { ok = false; break; }
+                    }
+                }
+                if (!ok) continue;
+
+                const built = this.buildSlantedWall(ch, wx, wz, ang, L, T0, T1, shape);
+                placed.push(aabb);
+                ch.slantedAABBs.push(aabb);
+                ch.wallBoxes.push(...built.boxes);
+                ch.meshes.push(built.mesh);
+            }
+        }
+
+        buildSlantedWall(ch, cx, cz, ang, L, T0, T1, shape) {
+            const H = WALL_HEIGHT;
+            const cos = Math.cos(ang), sin = Math.sin(ang);
+            const half = L / 2;
+
+            // Colision: cajas por segmentos (~1,1 m) a lo largo del tabique.
+            // Cada caja es el AABB del segmento rotado, asi la colision sigue
+            // el angulo real en vez de bloquear todo el rectangulo envolvente.
+            const nSeg = Math.max(2, Math.round(L / 1.1));
+            const boxes = [];
+            for (let i = 0; i < nSeg; i++) {
+                const z0 = -half + (L / nSeg) * i;
+                const z1 = z0 + L / nSeg;
+                const m = Math.max(T0, T1) / 2;   // el grosor crece de forma lineal: el maximo acota el segmento
+                const pts = [
+                    { x: cx - m * cos + z0 * sin, z: cz + m * sin + z0 * cos },
+                    { x: cx + m * cos + z0 * sin, z: cz - m * sin + z0 * cos },
+                    { x: cx - m * cos + z1 * sin, z: cz + m * sin + z1 * cos },
+                    { x: cx + m * cos + z1 * sin, z: cz - m * sin + z1 * cos }
+                ];
+                boxes.push({
+                    minX: Math.min(...pts.map(p => p.x)), maxX: Math.max(...pts.map(p => p.x)),
+                    minZ: Math.min(...pts.map(p => p.z)), maxZ: Math.max(...pts.map(p => p.z))
+                });
+            }
+
+            // Malla
+            let geo;
+            if (shape === 'rect') {
+                geo = new THREE.BoxGeometry(1, 1, 1);
+                geo.scale(T0, H, L);
+            } else {
+                geo = this.trapezoidGeometry(L, H, T0, T1);
+            }
+            const mat = Materials.wall.clone();
+            mat.side = THREE.DoubleSide;
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(cx, H / 2, cz);
+            mesh.rotation.y = ang;
+            this.scene.add(mesh);
+            return { mesh, boxes };
+        }
+
+        // Prisma trapezoidal vertical: un extremo mas grueso que el otro
+        // (como el tabique afinado del boceto). UVs: la textura se repite
+        // cada celda a lo largo y en vertical.
+        trapezoidGeometry(L, H, T0, T1) {
+            const pos = [], uv = [], idx = [];
+            const hL = L / 2;
+            const A = [-T0 / 2, 0, -hL], B = [T0 / 2, 0, -hL];
+            const C = [-T1 / 2, 0, hL], D = [T1 / 2, 0, hL];
+            const E = [-T0 / 2, H, -hL], F = [T0 / 2, H, -hL];
+            const G = [-T1 / 2, H, hL], HH = [T1 / 2, H, hL];
+            const vert = (p, u, v) => { pos.push(p[0], p[1], p[2]); uv.push(u, v); return pos.length / 3 - 1; };
+            const tri = (a, b, c) => idx.push(a, b, c);
+            const u0 = 0, u1 = L / CELL_SIZE, v0 = 0, v1 = H / CELL_SIZE;
+            const a = vert(A, u0, v0), b = vert(B, u0, v0);
+            const c = vert(C, u1, v0), d = vert(D, u1, v0);
+            const e = vert(E, u0, v1), f = vert(F, u0, v1);
+            const g = vert(G, u1, v1), h = vert(HH, u1, v1);
+            // Suelo (-Y) y techo (+Y)
+            tri(a, d, c); tri(a, b, d);
+            tri(f, g, h); tri(f, e, g);
+            // Laterales (x- y x+)
+            tri(a, g, e); tri(a, c, g);
+            tri(b, f, h); tri(b, f, d);
+            // Tapas de los extremos (z- y z+)
+            tri(a, e, b); tri(b, e, f);
+            tri(d, h, g); tri(d, g, c);
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+            geo.setIndex(idx);
+            geo.computeVertexNormals();
+            return geo;
         }
 
         // ================================================================
@@ -2221,6 +2418,46 @@
             return null;
         }
 
+        // Punto de una nota PEGADA A LA PARED: elige una cara expuesta de un
+        // muro recto (misma logica que los grafitis) y guarda todo lo que hace
+        // falta para materializarla: caja de la cara, direccion, posicion a lo
+        // largo de la pared, altura, variante de fijacion, orientacion y giro.
+        pickWallNoteSpot(ch) {
+            const N = CHUNK_SIZE;
+            const r = ch.rng;
+            const g = ch.grid;
+            const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
+            const cands = [];
+            for (let x = 1; x < N - 1; x++) {
+                for (let z = 1; z < N - 1; z++) {
+                    const k = x + ',' + z;
+                    if (g[x][z] !== 1) continue;
+                    const box = ch.wallFaceMap && ch.wallFaceMap.get(k);
+                    if (!box) continue;   // paredes curvas no tienen cara plana
+                    for (const [dx, dz, d] of dirs) {
+                        const nx = x + dx, nz = z + dz;
+                        if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
+                        if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
+                        if (faceLen < 0.9) continue;
+                        cands.push({ box, d, faceLen });
+                    }
+                }
+            }
+            if (!cands.length) return null;
+            const c = cands[Math.floor(r() * cands.length)];
+            const rots = [-0.4, -0.24, -0.1, 0.08, 0.22, 0.38];
+            return {
+                box: { minX: c.box.minX, maxX: c.box.maxX, minZ: c.box.minZ, maxZ: c.box.maxZ },
+                dir: c.d,
+                t: 0.12 + r() * 0.76,          // donde, a lo largo de la pared
+                y: 1.1 + r() * 0.8,            // altura sobre el suelo
+                variant: Math.floor(r() * 5),  // 0 chincheta, 1 cinta H, 2 cintas diag., 3 rasgada, 4 sola
+                aspect: r() < 0.6 ? 'portrait' : 'landscape',
+                rot: rots[Math.floor(r() * rots.length)]
+            };
+        }
+
         buildPickupMesh(p) {
             let mesh;
             if (p.type === 'camera') {
@@ -2244,8 +2481,23 @@
                 mesh.position.set(p.x, 0, p.z);
                 snapToFloor(mesh, 0.01);
             } else if (p.type === 'note') {
-                mesh = ModelBuilder.createFloorNote();
-                mesh.position.set(p.x, 0.005, p.z);
+                if (p.wall) {
+                    // Nota pegada a la pared: el plano se apoya en la cara real
+                    // del muro (wallFaceMap) en la posicion/altura elegidas
+                    mesh = ModelBuilder.createWallNote(p.wall);
+                    const b = p.wall.box;
+                    const bx = b.minX + (b.maxX - b.minX) * p.wall.t;
+                    const bz = b.minZ + (b.maxZ - b.minZ) * p.wall.t;
+                    let ry = 0;
+                    if (p.wall.dir === 'W') { mesh.position.set(b.minX - 0.016, p.wall.y, bz); ry = -Math.PI / 2; }
+                    else if (p.wall.dir === 'E') { mesh.position.set(b.maxX + 0.016, p.wall.y, bz); ry = Math.PI / 2; }
+                    else if (p.wall.dir === 'S') { mesh.position.set(bx, p.wall.y, b.minZ - 0.016); ry = Math.PI; }
+                    else { mesh.position.set(bx, p.wall.y, b.maxZ + 0.016); ry = 0; }
+                    mesh.rotation.y = ry;
+                } else {
+                    mesh = ModelBuilder.createFloorNote();
+                    mesh.position.set(p.x, 0.005, p.z);
+                }
             }
             this.scene.add(mesh);
             return mesh;
@@ -2268,8 +2520,8 @@
                 if (gx === 0 && gz === 0) want.push({ type: 'camera' }, { type: 'chalk', color: '#ffffff', colorName: 'BLANCO' }, { type: 'note', noteIndex: 0 });
                 if (gx === 1 && gz === 0) want.push({ type: 'almond' }, { type: 'battery' });
                 if (gx === 0 && gz === 1) want.push({ type: 'battery' }, { type: 'note', noteIndex: 1 });
-                if (gx === -1 && gz === 0) want.push({ type: 'almond' });
-                if (gx === 0 && gz === -1) want.push({ type: 'battery' });
+                if (gx === -1 && gz === 0) want.push({ type: 'almond' }, { type: 'note', noteIndex: 2 });
+                if (gx === 0 && gz === -1) want.push({ type: 'battery' }, { type: 'note', noteIndex: 3 });
                 if (gx === 1 && gz === 1) want.push({ type: 'chalk', color: '#ff3333', colorName: 'ROJO' });
 
                 // Reparto aleatorio de recursos por el infinito (densidad
@@ -2278,7 +2530,7 @@
                 if (r() < 0.20) want.push({ type: 'chalk' });
                 if (r() < 0.26) want.push({ type: 'almond' });
                 if (r() < 0.34) want.push({ type: 'battery' });
-                if (r() < 0.28) want.push({ type: 'note' });
+                if (r() < 0.32) want.push({ type: 'note' });
 
                 const chalkColors = ['#ffffff', '#ff3333', '#111111'];
                 const chalkNames = ['BLANCO', 'ROJO', 'NEGRO'];
@@ -2290,13 +2542,29 @@
                             if (!this.collectedNoteIndices.has(i)) fresh.push(i);
                         }
                         it.noteIndex = fresh.length > 0 ? fresh[Math.floor(r() * fresh.length)] : Math.floor(r() * NOTE_POOL.length);
+                        // Una parte de las notas va PEGADA A LA PARED, en
+                        // distintas variantes (chincheta, cintas, rasgada,
+                        // orientaciones y giros distintos)
+                        if (r() < 0.45) {
+                            const wall = this.pickWallNoteSpot(ch);
+                            if (wall) it.wall = wall;
+                        }
                     } else if (it.type === 'chalk' && !it.color) {
                         const ci = Math.floor(r() * 3);
                         it.color = chalkColors[ci];
                         it.colorName = chalkNames[ci];
                     }
-                    const spot = this.pickupSpot(ch);
+                    let spot = this.pickupSpot(ch);
                     if (!spot) continue;
+                    // Los objetos nunca caen DENTRO de un tabique inclinado
+                    if (ch.slantedAABBs && ch.slantedAABBs.length) {
+                        let bad = false;
+                        for (const b of ch.slantedAABBs) {
+                            if (spot.x > b.minX - 0.1 && spot.x < b.maxX + 0.1 &&
+                                spot.z > b.minZ - 0.1 && spot.z < b.maxZ + 0.1) { bad = true; break; }
+                        }
+                        if (bad) continue;
+                    }
                     // Id persistente y DETERMINISTA (misma semilla -> mismo id en
                     // todos los clientes): sirve para reclamar el objeto por red.
                     const data = {
@@ -2313,7 +2581,7 @@
                     if (this.claimedPickupIds.has(data.id)) data.collected = true;
                     this.pickupById.set(data.id, data);
                     if (it.type === 'chalk') { data.color = it.color; data.colorName = it.colorName; }
-                    if (it.type === 'note') { data.noteIndex = it.noteIndex; data.text = NOTE_POOL[it.noteIndex]; }
+                    if (it.type === 'note') { data.noteIndex = it.noteIndex; data.text = NOTE_POOL[it.noteIndex]; data.wall = it.wall || null; }
                     this.pickupData.push(data);
                     ch.pickupList.push(data);
                 }

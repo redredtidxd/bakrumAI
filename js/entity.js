@@ -39,8 +39,9 @@
     }
 
     class BacteriophageEntity {
-        constructor(scene) {
+        constructor(scene, worldSystem) {
             this.scene = scene;
+            this.worldSystem = worldSystem || null;   // para no atravesar tabiques inclinados
             this.mesh = new THREE.Group();
             this.state = 'WANDERING';
             this.speed = 1.8;
@@ -64,6 +65,7 @@
             const valid = walkableCells.filter(c => {
                 const wx = (c.x + 0.5) * CELL_SIZE;
                 const wz = (c.z + 0.5) * CELL_SIZE;
+                if (this.worldSystem && this.worldSystem.pointInSlab(wx, wz)) return false;
                 return Math.hypot(wx - playerPos.x, wz - playerPos.z) >= 48.0;
             });
 
@@ -79,7 +81,16 @@
         }
 
         pickRandomWaypoint(walkableCells) {
-            const pick = walkableCells[Math.floor(Math.random() * walkableCells.length)];
+            // Evita elegir un punto dentro de un tabique inclinado (si no, la
+            // entidad podria quedarse dando vueltas tratando de alcanzarlo)
+            let pool = walkableCells;
+            if (this.worldSystem) {
+                pool = walkableCells.filter(c => {
+                    return !this.worldSystem.pointInSlab((c.x + 0.5) * CELL_SIZE, (c.z + 0.5) * CELL_SIZE);
+                });
+                if (!pool.length) pool = walkableCells;
+            }
+            const pick = pool[Math.floor(Math.random() * pool.length)];
             this.targetWaypoint.set((pick.x + 0.5) * CELL_SIZE, 0, (pick.z + 0.5) * CELL_SIZE);
         }
 

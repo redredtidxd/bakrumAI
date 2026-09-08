@@ -1,6 +1,16 @@
 /* ==========================================================================
        7. CONTROLADOR PRINCIPAL, ILUMINACIÓN Y NIEBLA AMARILLENTA CONTINUA
        ========================================================================== */
+    // Dispositivos táctiles reales (móvil/tableta): pantalla sin puntero fino.
+    // Un portátil táctil con ratón sigue usando los controles de escritorio.
+    const IS_TOUCH = !window.matchMedia('(pointer: fine)').matches &&
+        ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+
+    // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
+    // Al subirla, actualiza también el ?v=... de index.html (cache busting:
+    // así el navegador no se queda con los js antiguos en caché).
+    const GAME_VERSION = '1.1.0';
+
     class BackroomsGame {
         constructor() {
             this.container = document.getElementById('canvas-container');
@@ -19,7 +29,8 @@
 
             this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
             this.renderer.setSize(window.innerWidth, window.innerHeight);
-            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+            // En movil se baja la resolucion (pixel ratio 1): mas fps y menos calor
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_TOUCH ? 1 : 1.5));
             this.renderer.setClearColor(FOG_COLOR);
             // Control de exposición: mapeado de tonos oscuro y aterrador
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -102,7 +113,7 @@
 
             this.worldSystem = new WorldGridSystem(this.scene);
             this.chalkSystem = new ChalkDrawingSystem(this.scene, this.camera);
-            this.entity = new BacteriophageEntity(this.scene);
+            this.entity = new BacteriophageEntity(this.scene, this.worldSystem);
 
             // Multijugador (hasta 6): mismo mundo deterministico + broker MQTT
             this.net = new MultiplayerManager(this.scene, this.camera, {
@@ -130,8 +141,13 @@
             this.isLocked = false;
             this.isMouseDown = false;
             this.gameActive = false;
+            this.touchMove = { x: 0, y: 0 };   // joystick tactil (movil)
+            this.touchDrawHeld = false;        // boton de dibujar pulsado (movil)
+
+            if (IS_TOUCH) document.body.classList.add('touch-mode');
 
             this.initInput();
+            this.initTouch();
             this.initNoiseCanvas();
             this.initUI();
             const notesLabel = document.getElementById('notes-count-label');
@@ -325,7 +341,8 @@
             });
 
             this.renderer.domElement.addEventListener('click', () => {
-                if (this.gameActive && !this.isLocked) {
+                // En movil no hay pointer lock: los controles tactiles ya estan activos
+                if (this.gameActive && !this.isLocked && !IS_TOUCH) {
                     document.body.requestPointerLock();
                 }
             });
@@ -333,6 +350,128 @@
             document.addEventListener('pointerlockchange', () => {
                 this.isLocked = document.pointerLockElement === document.body;
             });
+        }
+
+        // ---- CONTROLES TACTILES (móvil/tableta) ----
+        // Mitad izquierda: joystick virtual dinamico (moverse). Resto de la
+        // pantalla: arrastrar para mirar; un toque rapido dispara la camara
+        // (slot 2) o interactua. Botones en pantalla: correr, dibujar,
+        // linterna, cuaderno e interactuar.
+        initTouch() {
+            if (!IS_TOUCH) return;
+            const joyBase = document.getElementById('joy-base');
+            const joyKnob = document.getElementById('joy-knob');
+            const LEFT_ZONE = 0.42;
+            let joyId = null, joyOx = 0, joyOy = 0;
+            let lookId = null, lookX = 0, lookY = 0, lookT = 0, lookSX = 0, lookSY = 0;
+
+            document.addEventListener('touchstart', (e) => {
+                if (!this.gameActive) return;
+                for (const t of e.changedTouches) {
+                    const el = document.elementFromPoint(t.clientX, t.clientY);
+                    // Nada de joystick/mirar dentro de botones, ranuras del
+                    // cinturón ni del cuaderno abierto (ahi se hace scroll)
+                    if (el && el.closest('button, .tool-slot, input, textarea, #notebook-modal')) continue;
+                    if (joyId === null && t.clientX < window.innerWidth * LEFT_ZONE) {
+                        joyId = t.identifier;
+                        joyOx = t.clientX; joyOy = t.clientY;
+                        joyBase.style.display = 'block';
+                        joyBase.style.left = (t.clientX - 55) + 'px';
+                        joyBase.style.top = (t.clientY - 55) + 'px';
+                        joyKnob.style.transform = 'translate(-50%, -50%)';
+                        this.touchMove.x = 0; this.touchMove.y = 0;
+                    } else if (lookId === null) {
+                        lookId = t.identifier;
+                        lookX = t.clientX; lookY = t.clientY;
+                        lookSX = t.clientX; lookSY = t.clientY;
+                        lookT = performance.now();
+                        if (this.touchDrawHeld && this.inventory.currentSlot === 1) {
+                            this.isMouseDown = true;   // dibujar con la tiza
+                        }
+                    }
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            document.addEventListener('touchmove', (e) => {
+                if (!this.gameActive) return;
+                for (const t of e.changedTouches) {
+                    if (t.identifier === joyId) {
+                        let dx = t.clientX - joyOx, dy = t.clientY - joyOy;
+                        const len = Math.hypot(dx, dy);
+                        const max = 56;
+                        if (len > 1) {
+                            const cl = Math.min(1, len / max);
+                            dx = dx / len * max * cl;
+                            dy = dy / len * max * cl;
+                        }
+                        this.touchMove.x = dx / max;
+                        this.touchMove.y = -dy / max;   // arriba en pantalla = hacia delante
+                        joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                    } else if (t.identifier === lookId) {
+                        if (this.touchDrawHeld && this.inventory.currentSlot === 1) {
+                            this.isMouseDown = true;    // dibujando: el dedo pinta en el centro de la pantalla
+                            continue;
+                        }
+                        const dx = t.clientX - lookX, dy = t.clientY - lookY;
+                        lookX = t.clientX; lookY = t.clientY;
+                        const sens = 0.004 * (600 / Math.max(window.innerWidth, window.innerHeight));
+                        this.yaw -= dx * sens;
+                        this.pitch -= dy * sens;
+                        this.pitch = Math.max(-1.4, Math.min(1.4, this.pitch));
+                        this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+                    }
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            const endTouch = (e) => {
+                if (!this.gameActive) return;
+                for (const t of e.changedTouches) {
+                    if (t.identifier === joyId) {
+                        joyId = null;
+                        joyBase.style.display = 'none';
+                        this.touchMove.x = 0; this.touchMove.y = 0;
+                    } else if (t.identifier === lookId) {
+                        lookId = null;
+                        this.isMouseDown = false;
+                        this.chalkSystem.lastDrawPoint = null;
+                        const dur = performance.now() - lookT;
+                        const dist = Math.hypot(t.clientX - lookSX, t.clientY - lookSY);
+                        if (dur < 260 && dist < 14) {
+                            // Toque rapido: disparo de camara (slot 2) o interactuar
+                            if (this.inventory.currentSlot === 2) this.triggerCameraFlash();
+                            else this.handleInteraction();
+                        }
+                    }
+                }
+                e.preventDefault();
+            };
+            document.addEventListener('touchend', endTouch, { passive: false });
+            document.addEventListener('touchcancel', endTouch, { passive: false });
+
+            // Botones: mantener pulsado para correr/dibujar, toque para el resto
+            const bindHold = (id, on, off) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener('touchstart', (e) => { e.preventDefault(); if (this.gameActive) on(); });
+                el.addEventListener('touchend', (e) => { e.preventDefault(); off(); });
+                el.addEventListener('touchcancel', () => off());
+            };
+            bindHold('btn-touch-run', () => { this.keys['ShiftLeft'] = true; }, () => { this.keys['ShiftLeft'] = false; });
+            bindHold('btn-touch-draw', () => { this.touchDrawHeld = true; }, () => {
+                this.touchDrawHeld = false;
+                this.isMouseDown = false;
+                this.chalkSystem.lastDrawPoint = null;
+            });
+            const bindTap = (id, fn) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener('touchstart', (e) => { e.preventDefault(); if (this.gameActive) fn(); });
+            };
+            bindTap('btn-touch-flash', () => this.toggleFlashlight());
+            bindTap('btn-touch-note', () => this.toggleNotebook());
+            bindTap('btn-touch-interact', () => this.handleInteraction());
         }
 
         initNoiseCanvas() {
@@ -359,6 +498,12 @@
         }
 
         initUI() {
+            // Version en el menu principal y en el HUD (unica fuente: GAME_VERSION)
+            const mv = document.getElementById('menu-version');
+            if (mv) mv.textContent = 'THE BACKROOMS v' + GAME_VERSION;
+            const hv = document.getElementById('hud-version');
+            if (hv) hv.textContent = 'v' + GAME_VERSION;
+
             // Recuerda el nombre entre partidas
             const nameInput = document.getElementById('name-input');
             if (nameInput) {
@@ -411,8 +556,19 @@
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
                 this.gameActive = true;
-                document.body.requestPointerLock();
+                if (!IS_TOUCH) document.body.requestPointerLock();
             };
+
+            // En movil las ranuras del cinturón se tocan directamente
+            if (IS_TOUCH) {
+                for (let i = 1; i <= 4; i++) {
+                    const slotEl = document.getElementById(`slot-${i}`);
+                    if (slotEl) slotEl.addEventListener('touchstart', (e) => {
+                        e.preventDefault();
+                        if (this.gameActive) this.selectSlot(i);
+                    });
+                }
+            }
 
             document.getElementById('btn-close-notebook').onclick = () => this.toggleNotebook();
 
@@ -564,6 +720,7 @@
             const modal = document.getElementById('notebook-modal');
             const isOpen = modal.style.display === 'flex';
             modal.style.display = isOpen ? 'none' : 'flex';
+            if (IS_TOUCH) return;   // en movil no hay pointer lock que liberar
             if (!isOpen) document.exitPointerLock();
             else document.body.requestPointerLock();
         }
@@ -828,7 +985,7 @@
                             else if (p.type === 'chalk') prompt.textContent = `[E] RECOGER TIZA [${p.colorName}]`;
                             else if (p.type === 'almond') prompt.textContent = '[E] RECOGER AGUA DE ALMENDRAS';
                             else if (p.type === 'battery') prompt.textContent = '[E] COGER PILA';
-                            else if (p.type === 'note') prompt.textContent = '[E] LEER NOTA DEL SUELO';
+                            else if (p.type === 'note') prompt.textContent = p.wall ? '[E] LEER NOTA DE LA PARED' : '[E] LEER NOTA DEL SUELO';
                             break;
                         }
                     }
@@ -848,6 +1005,11 @@
             if (this.keys['KeyS']) moveDir.sub(forward);
             if (this.keys['KeyD']) moveDir.add(right);
             if (this.keys['KeyA']) moveDir.sub(right);
+            // Joystick tactil (movil): x = lateral, y = adelante/atras
+            if (this.touchMove.x !== 0 || this.touchMove.y !== 0) {
+                moveDir.addScaledVector(right, this.touchMove.x);
+                moveDir.addScaledVector(forward, this.touchMove.y);
+            }
 
             const isMoving = moveDir.lengthSq() > 0;
             if (isMoving) moveDir.normalize();
@@ -954,6 +1116,14 @@
             const dt = Math.min(this.clock.getDelta(), 0.1);
 
             if (this.gameActive) {
+                // Boton de dibujo visible solo con la tiza equipada (movil)
+                const drawBtn = document.getElementById('btn-touch-draw');
+                if (drawBtn) {
+                    const show = this.inventory.currentSlot === 1 && this.inventory.hasChalk && this.inventory.chalkPoints > 0;
+                    if (show !== (drawBtn.style.display !== 'none')) {
+                        drawBtn.style.display = show ? 'flex' : 'none';
+                    }
+                }
                 // Mundo infinito: carga/descarga chunks alrededor del jugador
                 this.worldSystem.update(this.player.pos);
                 this.syncFurnitureBodies();

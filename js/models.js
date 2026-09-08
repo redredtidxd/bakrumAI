@@ -454,11 +454,153 @@
         },
 
         createFloorNote() {
-            const paperMat = new THREE.MeshBasicMaterial({ color: 0xd9d1bc, side: THREE.DoubleSide });
-            const note = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.36), paperMat);
-            note.rotation.x = -Math.PI / 2;
-            note.rotation.z = (Math.random() - 0.5) * 1.5;
-            note.position.y = 0.005;
-            return note;
+            // Nota tirada en el suelo: mas grande y con la hoja rayada visible
+            // para que se encuentren de un vistazo (antes era un rectangulo
+            // plano diminuto que pasaba desapercibido en la moqueta)
+            const group = new THREE.Group();
+            const paper = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.36, 0.46),
+                new THREE.MeshBasicMaterial({
+                    map: wallNoteTexture(4, 'portrait'),
+                    transparent: true,
+                    side: THREE.DoubleSide
+                })
+            );
+            paper.rotation.x = -Math.PI / 2;
+            paper.rotation.z = (Math.random() - 0.5) * 1.5;
+            paper.position.y = 0.006;
+            group.add(paper);
+            return group;
+        },
+
+        // Nota PEGADA A LA PARED: variantes de fijacion (chincheta, cinta
+        // horizontal, cintas en diagonal, papel rasgado o a secas) y de
+        // orientacion (vertical u horizontal, con distintos giros). La textura
+        // se genera con RNG determinista para que toda la sala vea la misma
+        // nota. opts: { variant, aspect, rot } (ver pickWallNoteSpot).
+        createWallNote(opts = {}) {
+            const group = new THREE.Group();
+            const portrait = opts.aspect !== 'landscape';
+            const w = portrait ? 0.3 : 0.44;
+            const h = portrait ? 0.4 : 0.3;
+            const paper = new THREE.Mesh(
+                new THREE.PlaneGeometry(w, h),
+                new THREE.MeshBasicMaterial({
+                    map: wallNoteTexture(opts.variant || 0, opts.aspect || 'portrait'),
+                    transparent: true,
+                    side: THREE.DoubleSide
+                })
+            );
+            paper.rotation.z = opts.rot || 0;   // giro dentro del plano de la pared
+            group.add(paper);
+            return group;
         }
     };
+
+    // ---- Textura de nota de pared: papel con rayas de escritura y la
+    // variante de fijacion pintada encima (cache por variante + orientacion).
+    // RNG con semilla FIJA: mismo dibujo en todas las partidas y clientes. ----
+    const wallNoteTexCache = new Map();
+    function wallNoteTexture(variant, aspect) {
+        const ck = variant + '|' + aspect;
+        let tex = wallNoteTexCache.get(ck);
+        if (tex) return tex;
+        const portrait = aspect !== 'landscape';
+        const W = portrait ? 256 : 320;
+        const H = portrait ? 320 : 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        const rng = mulberry32(variant * 2654435761 + (portrait ? 40503 : 81203) + 0xC0FFEE);
+
+        // Papel (el rasgado recorta el borde inferior)
+        const paperColor = '#e2d9c0';
+        if (variant === 3) {
+            ctx.beginPath();
+            ctx.moveTo(0, 0); ctx.lineTo(W, 0); ctx.lineTo(W, H - 16);
+            for (let x = W; x >= 0; x -= W / 12) {
+                ctx.lineTo(x, H - 16 + (rng() - 0.5) * 30);
+            }
+            ctx.closePath();
+            ctx.fillStyle = paperColor;
+            ctx.fill();
+        } else {
+            ctx.fillStyle = paperColor;
+            ctx.fillRect(0, 0, W, H);
+        }
+
+        // Suciedad del papel
+        for (let i = 0; i < 60; i++) {
+            ctx.fillStyle = 'rgba(120, 100, 60, ' + (0.04 + rng() * 0.09).toFixed(3) + ')';
+            ctx.fillRect(rng() * W, rng() * H, 3 + rng() * 9, 2 + rng() * 6);
+        }
+
+        // Rayas de escritura a mano
+        ctx.strokeStyle = '#3a3628';
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = 'round';
+        ctx.globalAlpha = 0.8;
+        const margin = 32;
+        const lines = portrait ? 5 : 3;
+        for (let li = 0; li < lines; li++) {
+            ctx.beginPath();
+            const y = margin + (H - margin * 2) * (li + 0.5) / lines;
+            let x = margin + rng() * 22;
+            ctx.moveTo(x, y);
+            const n = 4 + Math.floor(rng() * 5);
+            for (let s = 0; s < n; s++) {
+                x += ((W - margin * 2) / n) * (0.75 + rng() * 0.5);
+                ctx.lineTo(Math.min(W - margin, x), y + (rng() - 0.5) * 8);
+            }
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+
+        // Variante de fijacion
+        if (variant === 0) {
+            // Chincheta roja
+            ctx.fillStyle = 'rgba(0,0,0,0.28)';
+            ctx.beginPath(); ctx.arc(54, 54, 11, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#b32d1c';
+            ctx.beginPath(); ctx.arc(48, 46, 9, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#e0483a';
+            ctx.beginPath(); ctx.arc(46, 42, 4, 0, Math.PI * 2); ctx.fill();
+        } else if (variant === 1) {
+            // Cinta adhesiva arriba y abajo
+            ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#e8dcae';
+            ctx.translate(W / 2, 18); ctx.rotate((rng() - 0.5) * 0.25);
+            ctx.fillRect(-W * 0.42, -9, W * 0.84, 18);
+            ctx.restore();
+            ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#e8dcae';
+            ctx.translate(W / 2, H - 18); ctx.rotate((rng() - 0.5) * 0.25);
+            ctx.fillRect(-W * 0.42, -9, W * 0.84, 18);
+            ctx.restore();
+        } else if (variant === 2) {
+            // Cintas en las esquinas, en diagonal
+            ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#e8dcae';
+            ctx.translate(16, 16); ctx.rotate(-Math.PI / 4);
+            ctx.fillRect(-26, -10, 52, 20);
+            ctx.restore();
+            ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#e8dcae';
+            ctx.translate(W - 16, H - 16); ctx.rotate(-Math.PI / 4);
+            ctx.fillRect(-26, -10, 52, 20);
+            ctx.restore();
+        } else if (variant === 3) {
+            // Pliegue en la esquina superior izquierda
+            ctx.fillStyle = 'rgba(90, 70, 40, 0.35)';
+            ctx.beginPath();
+            ctx.moveTo(0, 0); ctx.lineTo(W * 0.24, 0); ctx.lineTo(0, W * 0.24);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Borde del papel
+        ctx.strokeStyle = 'rgba(80, 65, 40, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(1, 1, W - 2, H - (variant === 3 ? 18 : 2));
+
+        tex = new THREE.CanvasTexture(canvas);
+        wallNoteTexCache.set(ck, tex);
+        return tex;
+    }

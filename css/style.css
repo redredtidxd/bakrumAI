@@ -483,4 +483,155 @@
             color: #7d2a1c;
             font-weight: bold;
         }
+
+        /* ============================================================
+           CONTROLES TÁCTILES (móvil/tableta): joystick, botones y HUD
+           compacto. Solo se activan en dispositivos sin puntero fino
+           (body.touch-mode, lo añade game.js).
+           ============================================================ */
+        .tool-slot {
+            pointer-events: auto;
+        }
+
+        #touch-ui {
+            display: none;
+        }
+        body.touch-mode #touch-ui {
+            display: block;
+            position: absolute;
+            inset: 0;
+            z-index: 35;
+            pointer-events: none;
+        }
+
+        #joy-base {
+            display: none;
+            position: absolute;
+            width: 110px;
+            height: 110px;
+            border: 2px solid rgba(216, 200, 157, 0.45);
+            border-radius: 50%;
+            background: rgba(20, 18, 12, 0.28);
+            pointer-events: none;
+            box-shadow: 0 0 18px rgba(0, 0, 0, 0.5);
+        }
+        #joy-knob {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(224, 188, 98, 0.55);
+            border: 2px solid rgba(255, 234, 158, 0.75);
+            transform: translate(-50%, -50%);
+        }
+
+        .touch-btn {
+            position: absolute;
+            pointer-events: auto;
+            touch-action: none;
+            background: linear-gradient(180deg, rgba(24, 20, 12, 0.92), rgba(12, 10, 7, 0.92));
+            border: 1px solid #7a6936;
+            color: #ffebad;
+            font-family: inherit;
+            font-size: 19px;
+            width: 58px;
+            height: 58px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.65);
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+        .touch-btn:active {
+            background: linear-gradient(180deg, rgba(84, 72, 38, 0.95), rgba(46, 40, 22, 0.95));
+            border-color: #e0bc62;
+        }
+        #btn-touch-run     { left: 20px;  bottom: 178px; width: 66px; height: 46px; border-radius: 12px; font-size: 14px; }
+        #btn-touch-draw    { right: 100px; bottom: 102px; }
+        #btn-touch-flash   { right: 26px;  bottom: 170px; }
+        #btn-touch-note    { right: 100px; bottom: 170px; }
+        #btn-touch-interact{ right: 26px;  bottom: 102px; font-size: 16px; }
+
+        /* HUD compacto para pantallas táctiles */
+        body.touch-mode,
+        body.touch-mode html {
+            touch-action: none;
+            overscroll-behavior: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+        body.touch-mode #hud {
+            padding: 10px;
+        }
+        body.touch-mode .rec-tag {
+            font-size: 12px;
+        }
+        body.touch-mode .sanity-container {
+            width: 150px;
+            padding: 5px 6px;
+        }
+        body.touch-mode .sanity-label {
+            font-size: 9px;
+        }
+        body.touch-mode .coords-label {
+            display: none;
+        }
+        body.touch-mode .hud-footer {
+            position: absolute;
+            left: 50%;
+            bottom: 10px;
+            transform: translateX(-50%);
+            width: auto;
+        }
+        body.touch-mode .hud-footer > div:last-child {
+            display: none;
+        }
+        body.touch-mode .flashlight-indicator {
+            font-size: 9px;
+            padding: 4px 8px;
+            margin-bottom: 4px;
+        }
+        body.touch-mode .toolbelt {
+            gap: 5px;
+            padding: 6px 8px;
+            max-width: 96vw;
+            overflow-x: auto;
+        }
+        body.touch-mode .tool-slot {
+            min-width: 54px;
+            padding: 6px 5px 4px;
+            font-size: 9px;
+        }
+        body.touch-mode .tool-slot .tool-emoji {
+            font-size: 19px;
+        }
+        body.touch-mode .tool-slot .tool-key,
+        body.touch-mode .chalk-meter,
+        body.touch-mode .tool-slot #chalk-status-label,
+        body.touch-mode .tool-slot #chalk-color-label,
+        body.touch-mode .tool-slot #camera-status-label,
+        body.touch-mode .tool-slot #almond-count-label,
+        body.touch-mode .tool-slot #notes-count-label {
+            display: none;
+        }
+        body.touch-mode #interact-prompt {
+            top: 40%;
+            font-size: 11px;
+        }
+        body.touch-mode .menu-box {
+            max-height: 94vh;
+            overflow-y: auto;
+            padding: 18px;
+        }
+        body.touch-mode .menu-title {
+            font-size: 24px;
+        }
+        body.touch-mode #notebook-modal {
+            height: 78vh;
+        }
     
