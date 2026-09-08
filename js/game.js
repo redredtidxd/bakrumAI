@@ -108,6 +108,10 @@
                 onToast: (msg) => this.notify(msg),
                 onKill: (reason) => this.triggerGameOver(reason)
             });
+            // El mundo y la tiza se sincronizan por red: objetos reclamados y
+            // dibujos visibles para toda la sala
+            this.net.worldSync = this.worldSystem;
+            this.net.onChalkDot = (pt, n, c) => this.chalkSystem.addDot(pt, n, c);
 
             window.addEventListener('beforeunload', () => this.net.leave());
             window.addEventListener('pagehide', () => this.net.leave());
@@ -488,6 +492,9 @@
                         if (!p.collected && (p.mesh === hit.object || p.mesh.children.includes(hit.object))) {
                             p.collected = true;
                             this.scene.remove(p.mesh);
+                            // Cada objeto es DE UN SOLO jugador: se reclama por
+                            // red y desaparece para toda la sala
+                            if (p.id) this.net.claimPickup(p.id);
 
                             if (p.type === 'camera') {
                                 this.inventory.hasCamera = true;
@@ -639,6 +646,8 @@
                 if (hit.distance < 2.7 && hit.object.material && (hit.object.material === Materials.wall || hit.object.material === Materials.floor)) {
                     if (!this.chalkSystem.lastDrawPoint || this.chalkSystem.lastDrawPoint.distanceTo(hit.point) > 0.05) {
                         this.chalkSystem.addDot(hit.point, hit.face.normal, this.inventory.chalkColor);
+                        // Los dibujos de tiza se comparten con toda la sala
+                        this.net.queueChalkDot(hit.point, hit.face.normal, this.inventory.chalkColor);
                         this.chalkSystem.lastDrawPoint = hit.point.clone();
 
                         this.inventory.chalkPoints = Math.max(0, this.inventory.chalkPoints - 0.32);
@@ -652,19 +661,14 @@
         }
 
         updateLights(dt) {
-            // Prioridad a las lamparas VISIBLES en pantalla: primero las que
-            // caen dentro (o casi dentro) del frustum, y entre ellas las mas
-            // cercanas. Asi toda luz a la vista tiene foco aunque la piscina
-            // no alcance para todas las del nivel.
-            const v = new THREE.Vector3();
+            // La luz depende SOLO de la posicion del jugador, nunca de hacia
+            // donde apunta la camara: antes la piscina priorizaba las lamparas
+            // visibles en pantalla y girar la vista reasignaba los focos, asi
+            // que la habitacion se aclaraba u oscurecia al mirar a un lado u
+            // otro. Ahora se iluminan siempre las lamparas MAS CERCANAS.
             const sorted = this.worldSystem.lamps.map(l => {
-                v.copy(l.pos).project(this.camera);
-                const onScreen = v.z < 1 && v.x > -1.2 && v.x < 1.2 && v.y > -1.2 && v.y < 1.2;
-                return { lamp: l, dist: this.camera.position.distanceTo(l.pos), onScreen };
-            }).sort((a, b) => {
-                if (a.onScreen !== b.onScreen) return a.onScreen ? -1 : 1;
-                return a.dist - b.dist;
-            });
+                return { lamp: l, dist: this.camera.position.distanceTo(l.pos) };
+            }).sort((a, b) => a.dist - b.dist);
 
             this.lightPool.forEach((light, i) => {
                 if (sorted[i] && sorted[i].dist < 21) {

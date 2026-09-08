@@ -55,6 +55,14 @@
             this.presenceTimer = 0;
             this.cleanTimer = 0;
             this._netHud = '';
+
+            // Objetos recogidos por MI (mensaje RETAINED para la sala)
+            this.myClaims = new Set();
+            // Puntos de tiza pendientes de enviar (lotes)
+            this.chalkQueue = [];
+            this.chalkTimer = 0;
+            this.onChalkDot = null;   // el juego lo engancha para dibujar puntos remotos
+            this.worldSync = null;    // WorldGridSystem (para retirar objetos reclamados)
         }
 
         // ----------------------------------------------------------------
@@ -112,6 +120,8 @@
             sub(this.presenceTopic('+'));
             sub(this.stateTopic('+'));
             sub(this.entTopic());
+            sub(this.claimTopic('+'));
+            sub(this.chalkTopic());
             this.publishPresence();
             this.onToast('🛰 CONECTADO · sala ' + this.roomKey);
             // Pequena espera para recibir las presencias retenidas de los que
@@ -178,6 +188,8 @@
         presenceTopic(pid) { return 'br0/' + this.roomKey + '/presence/' + pid; }
         stateTopic(pid) { return 'br0/' + this.roomKey + '/state/' + pid; }
         entTopic() { return 'br0/' + this.roomKey + '/ent'; }
+        claimTopic(pid) { return 'br0/' + this.roomKey + '/claims/' + pid; }
+        chalkTopic() { return 'br0/' + this.roomKey + '/chalk'; }
 
         publishPresence() {
             if (!this.client || !this.connected) return;
@@ -199,9 +211,42 @@
             } catch (e) { /* noop */ }
         }
 
+        // Reclama un objeto recogido: solo el primero que lo coge se lo queda;
+        // el mensaje RETAINED hace que los que entren despues tambien lo vean
+        // recogido (cada objeto es de un solo jugador).
+        claimPickup(id) {
+            if (!this.client || !this.connected || !this.joined) return;
+            this.myClaims.add(id);
+            try {
+                this.client.send(this.claimTopic(this.pid), JSON.stringify([...this.myClaims]), 0, true);
+            } catch (e) { /* noop */ }
+        }
+
+        // Encola un punto de tiza para compartirlo con la sala (lotes)
+        queueChalkDot(point, normal, colorHex) {
+            if (!this.client || !this.connected || !this.joined) return;
+            if (this.chalkQueue.length >= 60) return;
+            const r2 = (v) => Math.round(v * 100) / 100;
+            this.chalkQueue.push([r2(point.x), r2(point.y), r2(point.z), r2(normal.x), r2(normal.y), r2(normal.z), colorHex]);
+        }
+
         // ----------------------------------------------------------------
         //  MENSAJES ENTRANTES
         // ----------------------------------------------------------------
+        // Dibujos de tiza remotos: cada punto trae posicion, normal y color
+        handleChalkMessage(m) {
+            let d = {};
+            try { d = JSON.parse(m.payloadString); } catch (e) { return; }
+            if (!d || d.p === this.pid || !d.dots || !Array.isArray(d.dots) || !this.onChalkDot) return;
+            const v = new THREE.Vector3();
+            const n = new THREE.Vector3();
+            for (const dot of d.dots) {
+                if (!Array.isArray(dot) || dot.length < 7) continue;
+                v.set(dot[0], dot[1], dot[2]);
+                n.set(dot[3], dot[4], dot[5]);
+                this.onChalkDot(v, n, dot[6]);
+            }
+        }
         handleMessage(m) {
             const parts = m.destinationName.split('/');
             const kind = parts[2];
@@ -212,9 +257,29 @@
                 return;
             }
 
+            // Dibujos de tiza compartidos (br0/sala/chalk): sin pid, 3 segmentos
+            if (kind === 'chalk') {
+                this.handleChalkMessage(m);
+                return;
+            }
+
             if (parts.length < 4) return;
             const pid = parts[3];
             if (pid === this.pid) return;   // eco de mi propia presencia/estado
+
+            // Objetos recogidos por otros (br0/sala/claims/<pid>, RETAINED):
+            // cada jugador publica la lista de lo que ha cogido; quien entre
+            // despues la recibe al suscribirse y retira esos objetos del mundo
+            if (kind === 'claims') {
+                let data = [];
+                try { data = JSON.parse(m.payloadString); } catch (e) { return; }
+                if (!Array.isArray(data)) return;
+                for (const id of data) {
+                    if (typeof id !== 'string') continue;
+                    if (this.worldSync) this.worldSync.markPickupCollected(id);
+                }
+                return;
+            }
 
             if (kind === 'presence') {
                 if (m.payloadBytes.length === 0) { this.removePeer(pid); return; }
@@ -492,6 +557,15 @@
                     this.presenceTimer = 0;
                     this.publishPresence();
                 }
+                // Dibujos de tiza compartidos: lotes pequenos (~10 msgs/s)
+                this.chalkTimer += dt;
+                if (this.chalkTimer > 0.1 && this.chalkQueue.length) {
+                    this.chalkTimer = 0;
+                    const batch = this.chalkQueue.splice(0, 30);
+                    try {
+                        this.client.send(this.chalkTopic(), JSON.stringify({ p: this.pid, dots: batch }), 0, false);
+                    } catch (e) { /* noop */ }
+                }
                 // Limpieza: jugadores caidos y entidad muda
                 this.cleanTimer += dt;
                 if (this.cleanTimer > 3) {
@@ -526,6 +600,10 @@
                 p.y += (p.ty - p.y) * k;
                 p.z += (p.tz - p.z) * k;
                 p.yaw = lerpAngleShort(p.yaw, p.tyaw, k);
+                // Red de seguridad: el modelo remoto SIEMPRE con los pies en el
+                // suelo (ninguna version vieja de otro jugador puede hacerlo
+                // volar con la cabeza en el techo)
+                if (p.y < 0 || p.y > 0.1) p.y = Math.max(0, Math.min(0.1, p.y));
                 // p.y es la altura de los pies: el modelo se ancla al suelo
                 r.group.position.set(p.x, p.y, p.z);
                 r.group.rotation.y = p.yaw;

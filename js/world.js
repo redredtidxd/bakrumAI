@@ -108,6 +108,8 @@
             this.dynamicFurniture = [];       // muebles con fisica (mundo)
             this.furnitureMeshes = [];        // mallas de muebles en la escena (para reconstruir)
             this.collectedNoteIndices = new Set();
+            this.pickupById = new Map();      // id persistente -> datos del objeto
+            this.claimedPickupIds = new Set(); // objetos reclamados por CUALQUIER jugador
             this._lcx = undefined;
             this._lcz = undefined;
             this._playerPos = new THREE.Vector3(0, 0, 0);
@@ -190,6 +192,8 @@
             this.furnitureBoxes = [];
             this.dynamicFurniture = [];
             this.collectedNoteIndices = new Set();
+            this.pickupById = new Map();
+            this.claimedPickupIds = new Set();
             this._lcx = undefined;
             this._lcz = undefined;
             this.update(this._playerPos);
@@ -583,26 +587,6 @@
                 for (let z = hz; z < hz + h; z++) ch.grid[x][z] = 2;
             }
             ch.rooms.push({ x: hx, z: hz, w, h });
-            // Divisor interior: un trozo de pared corto (horizontal o vertical,
-            // en posicion aleatoria, nunca centrado) separa el salon sin
-            // cerrarlo (deja paso por ambos lados): menos campo abierto y
-            // menos simetria
-            if (r() < 0.65) {
-                const dl = 1 + Math.floor(r() * 2); // 1-2 celdas de largo
-                if (w >= 6 && (h < 6 || r() < 0.5)) {
-                    const px = hx + 1 + Math.floor(r() * (w - 2 - dl));
-                    const pz = hz + 1 + Math.floor(r() * (h - 2));
-                    for (let i = 0; i < dl; i++) {
-                        if (ch.grid[px + i][pz] === 2) ch.grid[px + i][pz] = 1;
-                    }
-                } else if (h >= 6) {
-                    const px = hx + 1 + Math.floor(r() * (w - 2));
-                    const pz = hz + 1 + Math.floor(r() * (h - 2 - dl));
-                    for (let i = 0; i < dl; i++) {
-                        if (ch.grid[px][pz + i] === 2) ch.grid[px][pz + i] = 1;
-                    }
-                }
-            }
             // A veces una salita lateral pequeña, separada del salon
             if (r() < 0.5) {
                 const sw = 3 + Math.floor(r() * 2);
@@ -815,11 +799,17 @@
             const oz = ch.cz * N * C;
             const g = ch.grid;
 
-            const floorGeo = new THREE.PlaneGeometry(N * C, N * C);
+            // Suelo y techo se solapan 0,12 m con los chunks vecinos: las losas
+            // contiguas (misma altura, misma textura y misma fase de azulejo)
+            // quedan selladas sin la grieta de un pixel que delataba la rejilla
+            // de chunks en la moqueta y el techo.
+            const OVERLAP = 0.12;
+            const floorGeo = new THREE.PlaneGeometry(N * C + OVERLAP * 2, N * C + OVERLAP * 2);
             const fuv = floorGeo.attributes.uv;
-            // Cada repeticion de la moqueta (512 px) cubre exactamente una celda
+            // Cada repeticion de la moqueta (512 px) cubre exactamente una celda;
+            // el solape mantiene la fase: mismo patron a ambos lados del borde
             for (let i = 0; i < fuv.count; i++) {
-                fuv.setXY(i, fuv.getX(i) * N, fuv.getY(i) * N);
+                fuv.setXY(i, fuv.getX(i) * (N + (OVERLAP * 2) / C), fuv.getY(i) * (N + (OVERLAP * 2) / C));
             }
             fuv.needsUpdate = true;
             const floor = new THREE.Mesh(floorGeo, Materials.floor);
@@ -828,10 +818,10 @@
             this.scene.add(floor);
             ch.meshes.push(floor);
 
-            const ceilGeo = new THREE.PlaneGeometry(N * C, N * C);
+            const ceilGeo = new THREE.PlaneGeometry(N * C + OVERLAP * 2, N * C + OVERLAP * 2);
             const cuv = ceilGeo.attributes.uv;
             for (let i = 0; i < cuv.count; i++) {
-                cuv.setXY(i, cuv.getX(i) * (N / 2), cuv.getY(i) * (N / 2));
+                cuv.setXY(i, cuv.getX(i) * (N / 2 + OVERLAP / C), cuv.getY(i) * (N / 2 + OVERLAP / C));
             }
             cuv.needsUpdate = true;
             const ceiling = new THREE.Mesh(ceilGeo, Materials.ceiling);
@@ -851,6 +841,9 @@
             // El suelo sobrante alrededor de cada lamina queda transitable:
             // los pasillos se ensanchan solos.
             const T_MIN = 0.4, T_MAX = 1.2;
+            // Columnas de las esquinas de pared: ~1,05 m (antes bloques de
+            // 2,8 x 2,8 m que parecian pilares gigantes en cada esquina).
+            const R_POST = 0.525;
             const key = (x, z) => x + ',' + z;
             const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
             const wallKind = new Map();   // 'border' | 'post' | 'x' | 'z'
@@ -895,7 +888,7 @@
                 for (let z = 1; z < N - 1; z++) {
                     const k = key(x, z);
                     if (wallKind.get(k) === 'post' && !wallTMap.has(k)) {
-                        wallTMap.set(k, 0.35 + ch.rng() * 0.1);
+                        wallTMap.set(k, R_POST);
                     }
                 }
             }
@@ -998,20 +991,20 @@
                             // (nunca se ve ni se alcanza)
                             box = { minX: posX - C / 2, maxX: posX + C / 2, minZ: posZ - C / 2, maxZ: posZ + C / 2 };
                         } else if (kind === 'post') {
-                            // Esquina = BLOQUE RECTANGULAR de la celda entera
-                            // (2,8 x 2,8 m), enrasado con las laminas contiguas
-                            // y con los pasillos (caras en los bordes de celda):
-                            // NADA de pilares en las esquinas, la pared continua
-                            // sin protuberancias ni huecos. Un poste sin ningun
-                            // tramo de pared conectado es flotante y se elimina.
+                            // Esquina = COLUMNA compacta (1,05 x 1,05 m) centrada
+                            // en la celda, enrasada con las laminas contiguas
+                            // (que se alargan hasta tocarla). Antes era un bloque
+                            // de 2,8 x 2,8 m: un pilar gigante en cada esquina y
+                            // final de pared. Un poste sin ningun tramo de pared
+                            // conectado es flotante y se elimina.
                             const runNeighbor = (dx, dz) => {
                                 const nk = wallKind.get(key(x + dx, z + dz));
                                 return nk === 'x' || nk === 'z';
                             };
                             if (runNeighbor(1, 0) || runNeighbor(-1, 0) || runNeighbor(0, 1) || runNeighbor(0, -1)) {
-                                const jb = { minX: posX - 1.4, maxX: posX + 1.4, minZ: posZ - 1.4, maxZ: posZ + 1.4 };
+                                const jb = { minX: posX - R_POST, maxX: posX + R_POST, minZ: posZ - R_POST, maxZ: posZ + R_POST };
                                 dummy.position.set(posX, WALL_HEIGHT / 2, posZ);
-                                dummy.scale.set(2.8, WALL_HEIGHT, 2.8);
+                                dummy.scale.set(R_POST * 2, WALL_HEIGHT, R_POST * 2);
                                 dummy.updateMatrix();
                                 wallT.push(dummy.matrix.clone());
                                 ch.wallBoxes.push(jb);
@@ -1046,14 +1039,26 @@
                             const pN = wallKind.get(key(x, z - 1));
                             const pE = wallKind.get(key(x + 1, z));
                             const pW = wallKind.get(key(x - 1, z));
-                            // 1,12 m: supera el hueco 1,4 - r incluso con el poste
-                            // minimo (r = 0,35 -> 1,05 exacto) dejando solape
+                            // La lamina se alarga hasta tocar la columna vecina
+                            // (R_POST) o la junta de chunk. Si la celda del borde
+                            // es una PUERTA (hueco abierto), NO se extiende:
+                            // antes el alargue entraba hasta 2,45 m en el vano y
+                            // delataba el borde del chunk con un muro fantasma.
+                            const extTo = (nk, end, pos, borderCellWall) => {
+                                if (nk === 'post') return Math.max(0.05, C - R_POST - Math.abs(end - pos) + 0.05);
+                                // Junta de chunk: la lamina se alarga solo hasta
+                                // tocar la lamina del borde (interior a 0,4-0,6 m
+                                // del filo); si la cara ya llego (faceZ/borde) no
+                                // se anade nada y no se sale del chunk.
+                                if (nk === 'border') return borderCellWall ? Math.max(0, C * 1.5 - 0.55 - Math.abs(end - pos)) : 0;
+                                return 0;
+                            };
                             if (kind === 'x') {
-                                if (pS === 'post') box.maxZ += 1.12; else if (pS === 'border') box.maxZ += 2.45;
-                                if (pN === 'post') box.minZ -= 1.12; else if (pN === 'border') box.minZ -= 2.45;
+                                box.maxZ += extTo(pS, box.maxZ, posZ, g[x][N - 1] === 1);
+                                box.minZ -= extTo(pN, box.minZ, posZ, g[x][0] === 1);
                             } else {
-                                if (pE === 'post') box.maxX += 1.12; else if (pE === 'border') box.maxX += 2.45;
-                                if (pW === 'post') box.minX -= 1.12; else if (pW === 'border') box.minX -= 2.45;
+                                box.maxX += extTo(pE, box.maxX, posX, g[N - 1][z] === 1);
+                                box.minX -= extTo(pW, box.minX, posX, g[0][z] === 1);
                             }
                             // Extension LATERAL: si la lamina queda anclada en el
                             // borde opuesto de su celda y el poste esta centrado,
@@ -1256,9 +1261,16 @@
             // colaba a la zona de atras de la pared.
             const nk0 = kind === 'x' ? wallKind.get(key(first[0], first[1] - 1)) : wallKind.get(key(first[0] - 1, first[1]));
             const nk1 = kind === 'x' ? wallKind.get(key(last[0], last[1] + 1)) : wallKind.get(key(last[0] + 1, last[1]));
-            const extFor = (nk) => nk === 'border' ? 2.45 : (nk === 'post' ? 1.12 : 0);
-            const ext0 = extFor(nk0);
-            const ext1 = extFor(nk1);
+            // Sellado de extremos solo contra muro real: si la celda vecina es
+            // una PUERTA del borde de chunk (hueco abierto), la curva termina
+            // justa en su borde y no se mete en el vano.
+            const extFor = (nk, cx2, cz2) => {
+                if (nk === 'post') return 1.12;
+                if (nk === 'border' && g[cx2] && g[cx2][cz2] === 1) return 2.45;
+                return 0;
+            };
+            const ext0 = kind === 'x' ? extFor(nk0, first[0], first[1] - 1) : extFor(nk0, first[0] - 1, first[1]);
+            const ext1 = kind === 'x' ? extFor(nk1, last[0], last[1] + 1) : extFor(nk1, last[0] + 1, last[1]);
             const sweep0 = along0 - ext0;
             const sweep1 = along1 + ext1;
 
@@ -1885,7 +1897,10 @@
                     }
                     const spot = this.pickupSpot(ch);
                     if (!spot) continue;
+                    // Id persistente y DETERMINISTA (misma semilla -> mismo id en
+                    // todos los clientes): sirve para reclamar el objeto por red.
                     const data = {
+                        id: gx + ',' + gz + '#' + ch.pickupList.length,
                         type: it.type,
                         x: spot.x,
                         z: spot.z,
@@ -1893,6 +1908,10 @@
                         mesh: null,
                         pos: new THREE.Vector3(spot.x, 0, spot.z)
                     };
+                    // Si otro jugador ya lo reclamo antes de generar este chunk,
+                    // nace directamente recogido para este cliente
+                    if (this.claimedPickupIds.has(data.id)) data.collected = true;
+                    this.pickupById.set(data.id, data);
                     if (it.type === 'chalk') { data.color = it.color; data.colorName = it.colorName; }
                     if (it.type === 'note') { data.noteIndex = it.noteIndex; data.text = NOTE_POOL[it.noteIndex]; }
                     this.pickupData.push(data);
@@ -1905,5 +1924,21 @@
                 if (p.collected || p.mesh) continue;
                 p.mesh = this.buildPickupMesh(p);
             }
+        }
+
+        // Un objeto reclamado por red (otro jugador lo recogio): desaparece
+        // para todos. Si el chunk aun no se ha generado, el id queda marcado y
+        // el objeto nace recogido cuando se cree.
+        markPickupCollected(id) {
+            if (id == null) return;
+            this.claimedPickupIds.add(id);
+            const p = this.pickupById.get(id);
+            if (!p || p.collected) return;
+            p.collected = true;
+            if (p.mesh) {
+                this.scene.remove(p.mesh);
+                p.mesh = null;
+            }
+            this.rebuildUnions();
         }
     }
