@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>The Backrooms: Nivel 0 - Las Oficinas Infinitas</title>
     <!-- Three.js CDN + Paho MQTT (multijugador).
-         El ?v=1.6.0 fuerza al navegador a recargar los js/css al actualizar
+         El ?v=1.7.1 fuerza al navegador a recargar los js/css al actualizar
          (sube la versión también en js/game.js GAME_VERSION). -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
@@ -846,7 +846,7 @@
         <div class="hud-header">
             <div>
                 <div class="rec-tag"><div class="rec-dot"></div> REC [TAPE-00]</div>
-                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS <span id="hud-version" style="color: #4f4833;">v1.6.0</span></div>
+                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS <span id="hud-version" style="color: #4f4833;">v1.7.1</span></div>
             </div>
             <div class="sanity-container">
                 <div id="coords-label" class="coords-label">POS X:+0000.0 Y:+0001.6 Z:+0000.0</div>
@@ -932,12 +932,11 @@
             <div style="margin-bottom: 16px;">
                 <label for="name-input" style="font-size: 11px; letter-spacing: 2px; color: #8c8266; display: block; margin-bottom: 7px;">NOMBRE (MULTIJUGADOR)</label>
                 <input type="text" id="name-input" placeholder="Explorador" autocomplete="off" spellcheck="false" maxlength="14">
-            </div>
-            <p style="font-size: 11px; line-height: 1.7; color: #7d7355; margin-bottom: 14px;">
-                🛰 <b style="color:#a39879;">MULTIJUGADOR · HASTA 6 EXPLORADORES:</b> quienes escriban la <b style="color:#a39879;">MISMA SEMILLA</b> caen en la misma sala. El número del HUD (SEMILLA) es el código para compartir. Si la sala está llena jugarás en solitario.
+            </div>                <p style="font-size: 11px; line-height: 1.7; color: #7d7355; margin-bottom: 14px;">
+                🛰 <b style="color:#a39879;">MULTIJUGADOR · HASTA 6 EXPLORADORES:</b> quienes escriban la <b style="color:#a39879;">MISMA SEMILLA</b> caen en la misma sala (números o <b style="color:#a39879;">letras</b>: da igual mayúsculas o tildes). El código del HUD (SEMILLA) es el que hay que compartir. Si la sala está llena jugarás en solitario.
             </p>
             <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
-            <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.6.0</div>
+            <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.7.1</div>
             <div style="margin-top: 18px; font-size: 12px;">
                 <label for="vol-slider">VOLUMEN:</label>
                 <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="0.7" style="vertical-align:middle; accent-color:#bda052;">
@@ -1476,12 +1475,14 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             panel(0.04, 0.02, 0.42, -0.20, -PH / 2 + PT + 0.005, 0);
             panel(0.04, 0.02, 0.42, 0.20, -PH / 2 + PT + 0.005, 0);
 
-            // Cajon HUECO (bandeja abierta por arriba): SOLO en las mesas de
-            // pie (variant 0). Las mesas caidas o tumbadas no tienen cajon
-            // que se abra: antes la bandeja se deslizaba en TODAS las
+            // Cajon HUECO (bandeja abierta por arriba): en las mesas de pie
+            // (variant 0) y en las CAIDAS DE LADO (variant 1), cuyo hueco
+            // queda mirando hacia arriba: el cajon se desliza hacia arriba al
+            // abrirlo. Las demas tumbadas (patas arriba / volcada) no tienen
+            // cajon que se abra: antes la bandeja se deslizaba en TODAS las
             // variantes y en las mesas tumbadas se hundia en el suelo o salia
             // flotando al aire (las mesas "flotantes" que se veian).
-            if (variant === 0) {
+            if (variant === 0 || variant === 1) {
                 const drawer = new THREE.Group();
                 const dp = (w, h, d, x, y, z) => {
                     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
@@ -1507,8 +1508,13 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 group.rotation.z = (Math.random() - 0.5) * 0.12;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else if (variant === 1) {
-                // Pata rota: CAIDA DE LADO, plana sobre la moqueta
-                group.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.18;
+                // Pata rota: CAIDA DE LADO, apoyada PLANA sobre la moqueta.
+                // Se rota alrededor de X (no de Z): la mesa reposa sobre toda
+                // su cara lateral (1,6 x 0,77 m), el tablero queda vertical y
+                // las patas tumbadas en el suelo. Antes se rotaba alrededor
+                // de Z y la mesa se apoyaba en el CANTO del tablero con las
+                // patas en el aire: parecia medio flotando.
+                group.rotation.x = -Math.PI / 2 + (Math.random() - 0.5) * 0.14;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else if (variant === 3) {
                 // Volcada hacia delante: el tablero queda vertical y las
@@ -2107,23 +2113,29 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
         // Hoja con bisagra REAL en su canto: gira alrededor del borde de la
         // bisagra, no de su centro (antes la hoja se clavaba en el marco al
-        // entornarse). La hoja se construye desplazada +X respecto al pivote.
-        const leaf = (pw, pivotX, ajar) => {
+        // entornarse). La hoja se construye desplazada respecto al pivote:
+        // hacia +X en las hojas normales (mirror=false) y espejada hacia -X
+        // en la hoja derecha de las dobles (mirror=true), cuya bisagra esta
+        // en la jamba derecha y debe cerrar hacia el CENTRO. Sin el espejo,
+        // las dos hojas se construian hacia +X y la derecha quedaba FUERA
+        // del marco, pegada por fuera de la jamba.
+        const leaf = (pw, pivotX, ajar, mirror) => {
             const pivot = new THREE.Group();
             pivot.position.x = pivotX;
+            const m = mirror ? -1 : 1;
             const face = new THREE.Mesh(new THREE.BoxGeometry(pw, H, T), doorMat);
-            face.position.set(pw / 2, H / 2, 0);
+            face.position.set(m * pw / 2, H / 2, 0);
             pivot.add(face);
             // Recuadros de panel (2 por hoja), enrasados con la cara frontal
             const iw = pw * 0.78, ih = H * 0.3;
             for (const iy of [H * 0.28, H * 0.62]) {
                 const inset = new THREE.Mesh(new THREE.BoxGeometry(iw, ih, 0.022), insetMat);
-                inset.position.set(pw / 2, iy, T / 2 + 0.012);
+                inset.position.set(m * pw / 2, iy, T / 2 + 0.012);
                 pivot.add(inset);
             }
-            // Tirador junto al canto LIBRE de la hoja
+            // Tirador junto al canto LIBRE de la hoja (el interior)
             const handle = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.24, 0.028), darkMat);
-            handle.position.set(pw - 0.1, H * 0.48, T / 2 + 0.022);
+            handle.position.set(m * (pw - 0.1), H * 0.48, T / 2 + 0.022);
             pivot.add(handle);
             // Grafiti pintado encima de la hoja (opcional)
             if (o.graffitiTex) {
@@ -2131,7 +2143,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     new THREE.PlaneGeometry(pw - 0.08, H - 0.25),
                     new THREE.MeshBasicMaterial({ map: o.graffitiTex, transparent: true, depthWrite: false })
                 );
-                g.position.set(pw / 2, H / 2 + 0.05, T / 2 + 0.022);
+                g.position.set(m * pw / 2, H / 2 + 0.05, T / 2 + 0.022);
                 pivot.add(g);
             }
             pivot.rotation.y = ajar;
@@ -2146,8 +2158,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // sobre su propio centro)
             const pw = W / 2 - 0.03;
             const a = o.ajar || 0.0;
-            leaf(pw, -W / 2 + 0.005, -a);   // hoja izquierda
-            leaf(pw, W / 2 - 0.005, a);     // hoja derecha
+            leaf(pw, -W / 2 + 0.005, -a, false);   // hoja izquierda: bisagra en la jamba izquierda
+            leaf(pw, W / 2 - 0.005, a, true);       // hoja derecha: bisagra en la jamba derecha, espejada al centro
         } else {
             leaf(W - 0.01, -W / 2 + 0.005, o.ajar || 0.0);   // hoja unica
         }
@@ -2767,6 +2779,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.collectedNoteIndices = new Set();
             this.pickupById = new Map();      // id persistente -> datos del objeto
             this.claimedPickupIds = new Set(); // objetos reclamados por CUALQUIER jugador
+            this._arrowCells = new Set();     // flechas del suelo ya colocadas (dedup por celda)
+            this._arrowDoorCount = new Map(); // flechas colocadas por puerta (limite de 3)
             this._lcx = undefined;
             this._lcz = undefined;
             this._playerPos = new THREE.Vector3(0, 0, 0);
@@ -2833,6 +2847,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     doorCells: [],      // celdas interiores de las puertas (locales)
                     wallBoxes: [],      // cajas de muros/pilares (mundo)
                     slantedAABBs: [],   // cajas envolventes de tabiques inclinados
+                    occ: [],            // ocupacion de muebles de ESTE chunk (colocar)
+                    arrowKeys: [],      // claves de flechas colocadas (dedup por celda)
+                    arrowDoorKeys: [],  // puerta de cada flecha (recuento por puerta)
                     lamps: [],
                     meshes: [],
                     pickupList: [],
@@ -2882,11 +2899,28 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             ch.loaded = false;
             for (const m of ch.meshes) this.scene.remove(m);
             ch.meshes = [];
-            ch.wallBoxes = [];
-            // Al recargar el chunk la generacion determinista los vuelve a
-            // calcular: si no se limpiaran aqui, se duplicarian cada recarga
-            ch.slantedAABBs = [];
-            ch.lamps = [];
+            // Las cajas de colision SE CONSERVAN al descargar: son datos
+            // deterministas y el MAPA las dibuja (muros reales tambien en
+            // chunks lejanos). Al recargar, buildChunkMeshes las regenera
+            // desde cero (las resetea al empezar), asi no se duplican.
+            // ch.wallBoxes NO se limpia aqui (antes el mapa caia a la
+            // aproximacion por rejilla y dibujaba muros que no existian).
+            // Las flechas del suelo las limpia el chunk que las contiene:
+            // se liberan sus claves de dedup (celda y recuento de su puerta)
+            // para que al recargar se puedan volver a colocar sin apilarse.
+            const ak = ch.arrowKeys || [];
+            const adk = ch.arrowDoorKeys || [];
+            for (let i = 0; i < ak.length; i++) {
+                this._arrowCells.delete(ak[i]);
+                const dk = adk[i];
+                if (dk) {
+                    const c = (this._arrowDoorCount.get(dk) || 1) - 1;
+                    if (c <= 0) this._arrowDoorCount.delete(dk);
+                    else this._arrowDoorCount.set(dk, c);
+                }
+            }
+            ch.arrowKeys = [];
+            ch.arrowDoorKeys = [];
             // Los objetos guardan su estado: al recargar el chunk reaparecen
             for (const p of ch.pickupList) {
                 if (p.mesh) {
@@ -3665,6 +3699,22 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const oz = ch.cz * N * C;
             const g = ch.grid;
 
+            // Las cajas se regeneran en CADA construccion (tambien en las
+            // recargas) y se CONSERVAN al descargar: el mapa las dibuja como
+            // muros reales aunque el chunk este lejos.
+            ch.wallBoxes = [];
+            ch.slantedAABBs = [];
+
+            // RNG PROPIO DE CADA CONSTRUCCION. La rejilla (generateLayout)
+            // se genera UNA sola vez por chunk, pero las MALLAS se
+            // reconstruyen en cada carga. Si se usara ch.rng (el mismo de la
+            // rejilla), la segunda construccion leia la secuencia YA
+            // consumida y los grosores de pared y las curvas cambiaban en
+            // cada recarga: el mundo no era estable ("hay paredes y cosas
+            // que yo veo y otros no", flechas que se movian solas...).
+            const buildRng = mulberry32((hash2(ch.cx, ch.cz) ^ 0x6A09E667) >>> 0);
+            ch.buildRng = buildRng;
+
             // Suelo y techo se solapan 0,12 m con los chunks vecinos: las losas
             // contiguas (misma altura, misma textura y misma fase de azulejo)
             // quedan selladas sin la grieta de un pixel que delataba la rejilla
@@ -3738,10 +3788,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     const k = key(x, z);
                     const kind = wallKind.get(k);
                     if (!kind || kind === 'border' || kind === 'post' || wallTMap.has(k)) continue;
-                    const rv = ch.rng();
-                    const T = rv < 0.25 ? 0.3 + ch.rng() * 0.15      // fina
-                        : rv < 0.7 ? 0.55 + ch.rng() * 0.3           // normal
-                        : 0.95 + ch.rng() * 0.35;                    // muy gruesa
+                    const rv = buildRng();
+                    const T = rv < 0.25 ? 0.3 + buildRng() * 0.15    // fina
+                        : rv < 0.7 ? 0.55 + buildRng() * 0.3         // normal
+                        : 0.95 + buildRng() * 0.35;                  // muy gruesa
                     const q = [[x, z]];
                     wallTMap.set(k, T);
                     while (q.length) {
@@ -4166,6 +4216,27 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // integradas en la generacion: esquinas recortadas de salas,
             // contrafuertes en pasillos y tabiques sueltos en campo abierto ----
             this.placeChunkSlantedWalls(ch, wallKind, key, curvedCells);
+
+            // Flechas de las PUERTAS FALSAS de los chunks vecinos (hasta 2
+            // chunks: el radio de colocacion de las flechas): al reconstruir
+            // este chunk se recolocan las que habia perdido. El dedup global
+            // evita duplicados y el conjunto es determinista (las rejillas
+            // usadas son las de los chunks cargados, que son los mismos para
+            // todos los jugadores en la misma posicion).
+            for (let dx = -2; dx <= 2; dx++) {
+                for (let dz = -2; dz <= 2; dz++) {
+                    if (dx === 0 && dz === 0) continue;
+                    const n = this.chunks.get((ch.cx + dx) + ',' + (ch.cz + dz));
+                    // Solo vecinos CARGADOS: los chunks cargados son los
+                    // mismos para todos los jugadores en la misma posicion,
+                    // asi el conjunto de flechas es identico para la sala
+                    // (un chunk descargado tendria puertas segun el historial
+                    // de cada jugador y las flechas variarian entre ellos)
+                    if (n && n.loaded && n.fakeDoors && n.fakeDoors.length) {
+                        this.placeChunkArrowSigns(n);
+                    }
+                }
+            }
         }
 
         // ---- SALA DE SEGURIDAD: construye la puerta de metal (que sube al
@@ -4577,16 +4648,31 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const C = CELL_SIZE;
             const N = CHUNK_SIZE;
             const CS = N * C;
+            // IMPORTANTE: el dedup es GLOBAL de sesion (por celda y por
+            // puerta) y las claves solo se liberan cuando el chunk que
+            // CONTIENE la flecha se descarga (ahi si se retiran sus meshes).
+            // Asi, aunque esta funcion se invoque muchas veces (al construir
+            // este chunk y al reconstruir sus vecinos), nunca se apilan dos
+            // flechas en la misma celda ni una puerta pasa de sus 3 flechas.
             const rng = mulberry32(hash2(ch.cx * 3187 + 61, ch.cz * 5233 + 919));
-            for (const door of ch.fakeDoors) {
-                // Candidatas: celdas abiertas de los chunks cercanos
+            for (let di = 0; di < ch.fakeDoors.length; di++) {
+                const door = ch.fakeDoors[di];
+                const doorKey = ch.key + '#' + di;
+                // Limite de 3 flechas POR PUERTA contado en toda la sesion
+                // (antes el limite era por llamada y cada recarga del chunk
+                // anadia 3 flechas mas a la misma puerta)
+                if ((this._arrowDoorCount.get(doorKey) || 0) >= 3) continue;
+                // Candidatas: celdas abiertas de los chunks CARGADOS (una
+                // flecha nunca se coloca sobre un chunk descargado: flotaria
+                // sobre el vacio). Las rejillas vienen del propio chunk o de
+                // getLayout (determinista: misma semilla -> misma rejilla).
                 const cands = [];
                 const dgx = Math.floor(door.x / CS);
                 const dgz = Math.floor(door.z / CS);
                 for (let gx = dgx - 2; gx <= dgx + 2; gx++) {
                     for (let gz = dgz - 2; gz <= dgz + 2; gz++) {
                         const lc = this.chunks.get(gx + ',' + gz);
-                        if (!lc) continue;   // solo chunks cargados (los vecinos quizá no)
+                        if (!lc || !lc.loaded || !lc.grid) continue;
                         const g = lc.grid;
                         const ox = gx * CS, oz = gz * CS;
                         for (let x = 0; x < N; x++) {
@@ -4596,33 +4682,53 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                                 const wz = oz + (z + 0.5) * C;
                                 const dist = Math.hypot(wx - door.x, wz - door.z);
                                 if (dist < 8 || dist > 34) continue;
-                                cands.push([wx, wz]);
+                                cands.push([gx, gz, x, z, wx, wz]);
                             }
                         }
                     }
                 }
                 if (!cands.length) continue;
-                // Mezcla determinista: misma semilla -> mismas flechas para todos
+                // Mezcla determinista: misma semilla -> mismas flechas
                 for (let i = cands.length - 1; i > 0; i--) {
                     const j = Math.floor(rng() * (i + 1));
                     [cands[i], cands[j]] = [cands[j], cands[i]];
                 }
-                let placed = 0;
-                for (const [wx, wz] of cands) {
-                    if (placed >= 3) break;
+                for (const [gx, gz, x, z, wx, wz] of cands) {
+                    if ((this._arrowDoorCount.get(doorKey) || 0) >= 3) break;
                     if (!this.lineClear(wx, wz, door.x, door.z)) continue;
+                    // UNA flecha por celda, vengan de la puerta que vengan:
+                    // antes dos puertas falsas cercanas apilaban flechas
+                    // identicas que parpadeaban "dentro y fuera del suelo"
+                    const ck = gx + ':' + x + ':' + gz + ':' + z;
+                    if (this._arrowCells.has(ck)) continue;
+                    this._arrowCells.add(ck);
+                    this._arrowDoorCount.set(doorKey, (this._arrowDoorCount.get(doorKey) || 0) + 1);
                     const dx = door.x - wx, dz = door.z - wz;
                     const mesh = new THREE.Mesh(
                         new THREE.PlaneGeometry(1.05, 0.58),
-                        new THREE.MeshBasicMaterial({ map: arrowTexture(), transparent: true, depthWrite: false })
+                        new THREE.MeshBasicMaterial({
+                            map: arrowTexture(),
+                            transparent: true,
+                            depthWrite: false,
+                            // El plano a 2 cm del suelo peleaba con la moqueta
+                            // al mirarlo de lejos (parpadeaba dentro/fuera):
+                            // se sube un poco y se desplaza contra la camara
+                            polygonOffset: true,
+                            polygonOffsetFactor: -2,
+                            polygonOffsetUnits: -1
+                        })
                     );
-                    mesh.position.set(wx, 0.02, wz);
+                    mesh.position.set(wx, 0.05, wz);
                     mesh.rotation.set(-Math.PI / 2, 0, 0);
                     mesh.rotation.y = Math.atan2(-dx, -dz);
                     this.scene.add(mesh);
-                    const own = this.chunks.get(Math.floor(wx / CS) + ',' + Math.floor(wz / CS));
-                    (own || ch).meshes.push(mesh);
-                    placed++;
+                    const own = this.chunks.get(gx + ',' + gz);
+                    const host = own || ch;
+                    host.meshes.push(mesh);
+                    host.arrowKeys = host.arrowKeys || [];
+                    host.arrowKeys.push(ck);
+                    host.arrowDoorKeys = host.arrowDoorKeys || [];
+                    host.arrowDoorKeys.push(doorKey);
                 }
             }
         }
@@ -4663,7 +4769,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         pickCurvedRuns(ch, wallKind, key) {
             const N = CHUNK_SIZE;
             const g = ch.grid;
-            const r = ch.rng;
+            const r = ch.buildRng || ch.rng;
             const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
             // "De vez en cuando": ~1 de cada 5 chunks tiene una pared curva
             if (r() >= 0.2) return [];
@@ -4769,9 +4875,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             let dir;
             if (wOpen && !eOpen) dir = -1;
             else if (eOpen && !wOpen) dir = 1;
-            else dir = ch.rng() < 0.5 ? -1 : 1;
+            else dir = (ch.buildRng || ch.rng)() < 0.5 ? -1 : 1;
             const cap = C - T / 2 - 1.2;   // el paso nunca baja de ~1,2 m
-            const B = Math.min(cap, (0.30 + ch.rng() * 0.40) * C);
+            const B = Math.min(cap, (0.30 + (ch.buildRng || ch.rng)() * 0.40) * C);
 
             // Muestras a lo largo del tramo (~0,5 m) para que el arco se vea liso
             const n = Math.max(6, Math.ceil((sweep1 - sweep0) / 0.5));
@@ -5253,10 +5359,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 ? this.trapezoidGeometry(L, H, T0, T0)
                 : this.trapezoidGeometry(L, H, T0, T1);
             const mat = Materials.wall.clone();
-            // Cara simple: las geometrias tienen el cierre correcto (BoxGeometry
-            // y trapezoidGeometry con normales hacia fuera). DoubleSide pintaba
-            // cada cara dos veces y dejaba artefactos al mirar los bordes.
-            mat.side = THREE.FrontSide;
+            // DoubleSide: el tabique se ve SOLIDO desde ambos lados. Antes con
+            // FrontSide, quien entraba en el bolsillo detras de un tabique (o
+            // lo miraba desde atras) veia ATRAVES de la pared diagonal: el
+            // muro desaparecia y se veian las salas y jugadores de detras.
+            mat.side = THREE.DoubleSide;
             const mesh = new THREE.Mesh(geo, mat);
             mesh.position.set(cx, H / 2, cz);
             mesh.rotation.y = ang;
@@ -5305,13 +5412,17 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         // ================================================================
         //  MUEBLES (permanecen en el mundo aunque el chunk se descargue)
         // ================================================================
-        canPlaceFurniture(x, z, radius) {
-            for (let box of this.wallBoxes) {
+        // Comprueba si cabe un mueble usando SOLO datos de SU chunk (cajas de
+        // muros y ocupacion propia): el resultado no depende de que chunks
+        // vecinos esten cargados, asi todos los jugadores colocan los muebles
+        // exactamente en los mismos sitios (requisito del multijugador).
+        canPlaceFurniture(ch, x, z, radius) {
+            for (let box of ch.wallBoxes) {
                 if (x + radius > box.minX && x - radius < box.maxX && z + radius > box.minZ && z - radius < box.maxZ) {
                     return false;
                 }
             }
-            for (let occ of this.occupiedFurnitureBoxes) {
+            for (let occ of ch.occ) {
                 if (Math.hypot(x - occ.x, z - occ.z) < radius + occ.radius + 0.45) {
                     return false;
                 }
@@ -5364,7 +5475,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         const variant = vr < 0.4 ? 0 : (vr < 0.6 ? 1 : (vr < 0.8 ? 2 : 3));
                         const deskX = rx + (Math.random() - 0.5) * 1.5;
                         const deskZ = rz + (Math.random() - 0.5) * 1.5;
-                        if (this.canPlaceFurniture(deskX, deskZ, 0.95)) {
+                        if (this.canPlaceFurniture(ch, deskX, deskZ, 0.95)) {
                             const desk = ModelBuilder.createOfficeDesk(variant);
                             desk.position.set(deskX, 0, deskZ);
                             snapToFloor(desk, 0);
@@ -5372,8 +5483,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             // tipo se decide AQUI con el rng del chunk: todos
                             // los clientes abren el mismo cajon con el mismo
                             // contenido (y el objeto se reclama por red).
+                            // Tambien las mesas CAIDAS DE LADO conservan su
+                            // cajon (abre hacia arriba, como pide el jugador).
                             const dr = desk.userData.drawer;
-                            if (dr && variant === 0 && Math.random() < 0.35) {
+                            if (dr && (variant === 0 || variant === 1) && Math.random() < 0.35) {
                                 const ir = Math.random();
                                 dr.itemType = ir < 0.4 ? 'almond' : (ir < 0.75 ? 'battery' : (ir < 0.9 ? 'chalk' : 'note'));
                                 if (dr.itemType === 'chalk') {
@@ -5389,7 +5502,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             this.scene.add(desk);
                             this.furnitureMeshes.push(desk);
                             this.dynamicFurniture.push({ mesh: desk, x: deskX, z: deskZ });
-                            this.occupiedFurnitureBoxes.push({ x: deskX, z: deskZ, radius: 0.95 });
+                            ch.occ.push({ x: deskX, z: deskZ, radius: 0.95 });
                         }
                     } else if (choice < 0.6) {
                         // Poses de silla: 0 de pie, 1 caida de lado,
@@ -5398,17 +5511,17 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         const variant = vr < 0.55 ? 0 : (vr < 0.8 ? 1 : 2);
                         const chairX = rx + (Math.random() - 0.5) * 1.8;
                         const chairZ = rz + (Math.random() - 0.5) * 1.8;
-                        if (this.canPlaceFurniture(chairX, chairZ, 0.55)) {
+                        if (this.canPlaceFurniture(ch, chairX, chairZ, 0.55)) {
                             const chair = ModelBuilder.createOfficeChair(variant);
                             chair.position.set(chairX, 0, chairZ);
                             snapToFloor(chair, 0);
                             this.scene.add(chair);
                             this.furnitureMeshes.push(chair);
                             this.dynamicFurniture.push({ mesh: chair, x: chairX, z: chairZ });
-                            this.occupiedFurnitureBoxes.push({ x: chairX, z: chairZ, radius: 0.55 });
+                            ch.occ.push({ x: chairX, z: chairZ, radius: 0.55 });
                         }
                     } else {
-                        this.placeCabinetInRoom(rw);
+                        this.placeCabinetInRoom(rw, ch);
                     }
                 }
             }
@@ -5477,18 +5590,20 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             return Math.hypot(tx, tz) < r + 0.5;
         }
 
-        cabinetSpotFree(cx, cz, r, d) {
-            for (const box of this.wallBoxes) {
+        // Igual que canPlaceFurniture: comprobaciones SOLO contra el chunk
+        // propio (muros y ocupacion del chunk), determinista para la sala.
+        cabinetSpotFree(ch, cx, cz, r, d) {
+            for (const box of ch.wallBoxes) {
                 if (d && this.isSupportBox(box, cx, cz, r, d)) continue;
                 if (this.circleTouchesBox(cx, cz, r, box)) return false;
             }
-            for (const occ of this.occupiedFurnitureBoxes) {
+            for (const occ of ch.occ) {
                 if (Math.hypot(cx - occ.x, cz - occ.z) < r + occ.radius + 0.35) return false;
             }
             return true;
         }
 
-        placeOneCabinet(cx, cz, yaw, style, r, d) {
+        placeOneCabinet(cx, cz, yaw, style, r, d, ch) {
             const opts = Object.assign({}, style);
             if (style.pose === 'lean') {
                 opts.lean = 0.13 + Math.random() * 0.07;
@@ -5507,14 +5622,14 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const hz = (bb.max.z - bb.min.z) / 2;
 
             const occupiedRadius = Math.max(r, Math.hypot(hx, hz));
-            const ok = this.cabinetSpotFree(bx, bz, occupiedRadius, d);
+            const ok = this.cabinetSpotFree(ch, bx, bz, occupiedRadius, d);
             if (!ok) {
                 this.scene.remove(group);
                 return null;
             }
             this.scene.add(group);
             this.furnitureMeshes.push(group);
-            this.occupiedFurnitureBoxes.push({ x: bx, z: bz, radius: occupiedRadius * 0.9 });
+            if (ch) ch.occ.push({ x: bx, z: bz, radius: occupiedRadius * 0.9 });
             this.furnitureBoxes.push({
                 minX: bb.min.x - 0.04, maxX: bb.max.x + 0.04,
                 minZ: bb.min.z - 0.04, maxZ: bb.max.z + 0.04
@@ -5526,7 +5641,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }
 
         // Armario apoyado en una pared (sala o pasillo), coordenadas de mundo
-        trySpawnCabinetOnWall(faceCoord, d, tanAxis, a, b, poseHint) {
+        trySpawnCabinetOnWall(faceCoord, d, tanAxis, a, b, poseHint, ch) {
             const C = CELL_SIZE;
             const style = this.rollCabinetStyle(poseHint);
             const fallen = style.pose === 'back' || style.pose === 'face' || style.pose === 'side';
@@ -5581,9 +5696,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 const fcz = gcz + d[1];
                 const ftype = this.gridAt(fcx, fcz);
                 if (ftype !== 0 && ftype !== 2) continue;
-                if (!this.cabinetSpotFree(cx, cz, fallen ? 1.35 : 0.7, d)) continue;
+                if (!this.cabinetSpotFree(ch, cx, cz, fallen ? 1.35 : 0.7, d)) continue;
 
-                const g = this.placeOneCabinet(cx, cz, yaw, style, fallen ? 1.35 : 0.7, d);
+                const g = this.placeOneCabinet(cx, cz, yaw, style, fallen ? 1.35 : 0.7, d, ch);
                 if (g) return true;
             }
             return false;
@@ -5600,7 +5715,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             return box.maxZ;
         }
 
-        placeCabinetInRoom(r) {
+        placeCabinetInRoom(r, ch) {
             const C = CELL_SIZE;
             const sides = ['n', 's', 'e', 'w'].sort(() => Math.random() - 0.5);
             for (const side of sides) {
@@ -5633,7 +5748,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     a = (r.z + 0.5) * C;
                     b = (r.z + r.h - 0.5) * C;
                 }
-                if (this.trySpawnCabinetOnWall(faceCoord, d, tanAxis, a, b, poseHint)) {
+                if (this.trySpawnCabinetOnWall(faceCoord, d, tanAxis, a, b, poseHint, ch)) {
                     return true;
                 }
             }
@@ -5704,7 +5819,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 const fallenPoses = ['back', 'side', 'face'];
                 const poseHint = poseRoll < 0.55 ? 'stand' : (poseRoll < 0.75 ? 'lean' : fallenPoses[Math.floor(Math.random() * 3)]);
                 const centerTan = tanAxis === 'x' ? (cx + 0.5) * C : (cz + 0.5) * C;
-                if (this.trySpawnCabinetOnWall(faceCoord, d, tanAxis, centerTan - C / 2, centerTan + C / 2, poseHint)) {
+                if (this.trySpawnCabinetOnWall(faceCoord, d, tanAxis, centerTan - C / 2, centerTan + C / 2, poseHint, ch)) {
                     placedCount++;
                 }
             }
@@ -5741,13 +5856,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             for (const [lx, lz] of pool) {
                 const wx = (ch.cx * N + lx + 0.5) * CELL_SIZE;
                 const wz = (ch.cz * N + lz + 0.5) * CELL_SIZE;
-                // Separacion minima de otros objetos y muebles
+                // Separacion minima de otros objetos y muebles del PROPIO
+                // chunk (antes se comprobaba el mundo entero y la posicion de
+                // cada objeto dependia de que chunks vecinos estuvieran
+                // cargados: cada jugador veia los objetos en sitios distintos)
                 let ok = true;
-                for (const p of this.pickupData) {
+                for (const p of ch.pickupList) {
                     if (Math.hypot(p.x - wx, p.z - wz) < CELL_SIZE * 2.2) { ok = false; break; }
                 }
                 if (ok) {
-                    for (const occ of this.occupiedFurnitureBoxes) {
+                    for (const occ of ch.occ) {
                         if (Math.hypot(occ.x - wx, occ.z - wz) < occ.radius + 1.2) { ok = false; break; }
                     }
                 }
@@ -7113,6 +7231,17 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 let data = {};
                 try { data = JSON.parse(m.payloadString); } catch (e) { return; }
                 if (!data.n) return;
+                // DUPLICADO DE MI MISMA SESION: si cierras la pestana y
+                // vuelves, el broker conserva la presencia RETAINED de tu
+                // sesion anterior (y si esa pestana sigue viva en segundo
+                // plano, hasta su estado): aparecias como OTRO jugador con tu
+                // mismo nombre ("veo una duplica mia"). Se limpia aqui y en
+                // el temporizador de mantenimiento, sin avisar.
+                if (pid !== this.pid && data.n === this.playerName) {
+                    try { this.client.send(this.presenceTopic(pid), '', 0, true); } catch (e) { /* noop */ }
+                    this.removePeerSilent(pid);
+                    return;
+                }
                 const isNew = !this.peers.has(pid);
                 if (isNew) {
                     // hasState=false: el modelo NO se crea aqui (apareceria en
@@ -7156,6 +7285,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 p.tyaw = d.yaw || 0;
                 p.f = !!d.f;
                 p.lastSeen = Date.now();
+                p.lastStateAt = Date.now();
                 if (!p.hasState) {
                     // Primer estado: crear el modelo YA en su posicion real
                     // (sin aparecer en el origen ni volar hasta aqui)
@@ -7224,6 +7354,26 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const group = model.group;
             const headY = model.headY;
 
+            // FANTASMA X-RAY: clon del modelo con material que ignora la
+            // profundidad. Se muestra SOLO cuando un muro tapa al jugador
+            // (linea de vision bloqueada): asi nunca se pierde de vista a un
+            // companero entre las paredes, aunque el mapa falle o el pasillo
+            // de en medio no se haya explorado.
+            const ghost = group.clone();
+            ghost.traverse((o) => {
+                if (o.isMesh) {
+                    o.material = new THREE.MeshBasicMaterial({
+                        color: col,
+                        transparent: true,
+                        opacity: 0.22,
+                        depthTest: false,
+                        depthWrite: false
+                    });
+                }
+            });
+            ghost.visible = false;
+            this.scene.add(ghost);
+
             // Etiqueta con el nombre sobre la cabeza
             const sprite = this.makeNameSprite(p.name);
             sprite.position.y = headY + 0.44;
@@ -7239,7 +7389,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
             group.visible = false;
             this.scene.add(group);
-            this.remotePlayers.set(pid, { group, spot, tgt, sprite });
+            this.remotePlayers.set(pid, { group, spot, tgt, sprite, ghost });
         }
 
         makeNameSprite(name) {
@@ -7277,6 +7427,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             if (r) {
                 this.scene.remove(r.group);
                 this.scene.remove(r.tgt);
+                if (r.ghost) this.scene.remove(r.ghost);
                 this.remotePlayers.delete(pid);
             }
             this.peers.delete(pid);
@@ -7363,11 +7514,26 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this._lastState = { x: playerPos.x, y: playerPos.y, z: playerPos.z, yaw, pitch, flashlightOn };
 
             if (this.connected && this.joined && !this.roomFull) {
-                // Estado propio ~12 Hz
+                // Estado propio ~12 Hz pero SOLO cuando hay movimiento real:
+                // un jugador quieto no necesita 12 mensajes/s. Menos trafico
+                // en el broker = menos lag cuando la sala esta llena (y se
+                // sigue publicando al menos cada 0,5 s para que el timeout de
+                // 45 s de los demas nunca te eche de la sala).
                 this.pubTimer += dt;
                 if (this.pubTimer > 0.083) {
                     this.pubTimer = 0;
-                    this.publishState(playerPos, yaw, pitch, flashlightOn);
+                    const moved = !this._lastPubPos ||
+                        Math.hypot(playerPos.x - this._lastPubPos.x, playerPos.z - this._lastPubPos.z) > 0.05 ||
+                        Math.abs(yaw - this._lastPubYaw) > 0.02 ||
+                        Math.abs(pitch - this._lastPubPitch) > 0.08;
+                    const idleBeat = Date.now() - (this._lastPubAt || 0) > 500;
+                    if (moved || idleBeat) {
+                        this._lastPubPos = playerPos.clone();
+                        this._lastPubYaw = yaw;
+                        this._lastPubPitch = pitch;
+                        this._lastPubAt = Date.now();
+                        this.publishState(playerPos, yaw, pitch, flashlightOn);
+                    }
                 }
                 // Posicion de la entidad (solo el host la simula y publica)
                 this.entPubTimer += dt;
@@ -7410,6 +7576,15 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     // publico o una pestana en segundo plano no hagan
                     // desaparecer a los companeros
                     for (const [pid, p] of [...this.peers]) {
+                        // Duplicado de mi sesion anterior (pestana vieja aun
+                        // viva en segundo plano publicando estado): se limpia
+                        // en silencio y ademas se borra su presencia retenida
+                        // para que el resto de la sala tambien la descarte
+                        if (p.name === this.playerName) {
+                            try { this.client.send(this.presenceTopic(pid), '', 0, true); } catch (e) { /* noop */ }
+                            this.removePeerSilent(pid);
+                            continue;
+                        }
                         if (now - p.lastSeen > 45000) this.removePeer(pid);
                     }
                     if (this.entityActive && now - this.entityLastMsg > 3000) {
@@ -7420,7 +7595,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             }
 
             // Interpolacion y render de los jugadores remotos
-            const k = 1 - Math.pow(0.0005, dt);
+            const k = 1 - Math.pow(0.0001, dt);
+            const nowMs = Date.now();
             for (const [pid, p] of this.peers) {
                 const r = this.remotePlayers.get(pid);
                 if (!r) continue;
@@ -7432,10 +7608,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     p.z = p.tz;
                     p.yaw = p.tyaw;
                 }
-                p.x += (p.tx - p.x) * k;
-                p.y += (p.ty - p.y) * k;
-                p.z += (p.tz - p.z) * k;
-                p.yaw = lerpAngleShort(p.yaw, p.tyaw, k);
+                // Si no llegan estados nuevos (micro-corte del broker, lag
+                // con la sala llena), se CONGELA la interpolacion: antes se
+                // seguia convergiendo hacia el ultimo punto recibido y el
+                // modelo se arrastraba en camara lenta hacia una posicion
+                // vieja ("me ve que me muevo lento" aunque yo ya estaba
+                // lejos). Al volver los mensajes, retoma.
+                const stale = nowMs - (p.lastStateAt || 0) > 350;
+                if (!stale) {
+                    p.x += (p.tx - p.x) * k;
+                    p.y += (p.ty - p.y) * k;
+                    p.z += (p.tz - p.z) * k;
+                    p.yaw = lerpAngleShort(p.yaw, p.tyaw, k);
+                }
                 // Red de seguridad: el modelo remoto SIEMPRE con los pies en el
                 // suelo (ninguna version vieja de otro jugador puede hacerlo
                 // volar con la cabeza en el techo)
@@ -7461,6 +7646,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         r.sprite.material.opacity = o;
                         r.sprite.visible = o > 0.02;
                     }
+                    // Fantasma X-RAY: visible solo cuando un muro tapa al
+                    // jugador (la linea de vision de la camara al modelo pasa
+                    // por alguna caja de colision)
+                    if (r.ghost) {
+                        r.ghost.position.copy(r.group.position);
+                        r.ghost.rotation.y = r.group.rotation.y;
+                        r.ghost.visible = !this.hasLOS(
+                            this.camera.position.x, this.camera.position.z,
+                            p.x, p.z, wallBoxes
+                        );
+                    }
+                } else if (r.ghost) {
+                    r.ghost.visible = false;
                 }
             }
 
@@ -7513,7 +7711,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.6.0';
+    const GAME_VERSION = '1.7.1';
 
     class BackroomsGame {
         constructor() {
@@ -7613,6 +7811,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // inicial permite fijar una y regenerar el mundo al empezar)
             this.worldSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
             setWorldSeed(this.worldSeed);
+            // Codigo de sala compartido: por defecto la semilla numerica;
+            // si el jugador escribe una semilla con LETRAS, el codigo es el
+            // propio texto (saneado) y asi se comparte tal cual se escribe.
+            this.roomCode = null;
             this.updateSeedLabel();
 
             this.worldSystem = new WorldGridSystem(this.scene);
@@ -8072,7 +8274,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
         updateSeedLabel() {
             const el = document.getElementById('seed-label');
-            if (el) el.textContent = 'SEMILLA: ' + this.worldSeed;
+            if (el) el.textContent = 'SEMILLA: ' + (this.roomCode !== null ? this.roomCode : this.worldSeed);
         }
 
         initUI() {
@@ -8105,11 +8307,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 // distinta, se regenera TODO el mundo antes de empezar.
                 // Las semillas NUMERICAS se usan tal cual (escribir "1" genera
                 // la semilla 1, no un hash que siempre lleva al mismo mundo de
-                // siempre); los textos se convierten con un hash estable.
+                // siempre); los textos se convierten con un hash estable y
+                // ADEMAS se normalizan (minusculas, sin tildes): "Casa" y
+                // "CÁSA" generan el MISMO mundo, asi nadie acaba en una sala
+                // distinta por escribir la semilla de otra forma.
                 const seedInput = document.getElementById('seed-input');
                 const seedText = seedInput ? seedInput.value.trim() : '';
-                if (seedText) {
-                    const seed = /^\d+$/.test(seedText) ? (parseInt(seedText, 10) >>> 0) : stringSeed(seedText);
+                const normSeed = seedText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                const seedIsNum = /^\d+$/.test(normSeed);
+                if (normSeed) {
+                    const seed = seedIsNum ? (parseInt(normSeed, 10) >>> 0) : stringSeed(normSeed);
                     if (seed !== this.worldSeed) {
                         this.worldSeed = seed;
                         this.worldSystem.rebuild(seed);
@@ -8117,19 +8324,22 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         // Los cuerpos fisicos apuntaban a muebles del mundo viejo
                         this.furnitureBodies = [];
                         this.syncFurnitureBodies();
-                        this.updateSeedLabel();
                     }
+                    // Codigo de sala: el texto con letras se comparte tal cual
+                    // (saneado para los topicos MQTT); las numericas, el numero.
+                    this.roomCode = seedIsNum ? seed : (normSeed.replace(/[^a-z0-9_-]/g, '') || seed);
+                    this.updateSeedLabel();
                 }
 
                 // Multijugador: la SEMILLA es el codigo de sala. Quienes usen
-                // la misma semilla (o el mismo numero mostrado en el HUD)
+                // la misma semilla (o el mismo codigo mostrado en el HUD)
                 // caen en el mismo backroom, hasta 6 exploradores.
                 const nameInput = document.getElementById('name-input');
                 const name = nameInput ? nameInput.value.trim() : '';
                 if (name) {
                     try { localStorage.setItem('backrooms-name', name); } catch (e) { /* noop */ }
                 }
-                this.net.join(this.worldSeed, name);
+                this.net.join(this.roomCode !== null ? this.roomCode : this.worldSeed, name);
 
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
@@ -8526,9 +8736,14 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     }
                 }
                 ctx.fillStyle = '#090b07';
-                if (ch.loaded && ch.wallBoxes && ch.wallBoxes.length) {
-                    // Chunk cargado: paredes REALES (finas, curvas, tabiques
-                    // inclinados y pilares) desde las cajas de colision
+                if (ch.wallBoxes && ch.wallBoxes.length) {
+                    // Paredes REALES (finas, curvas, tabiques inclinados y
+                    // pilares) desde las cajas de colision. Las cajas se
+                    // CONSERVAN aunque el chunk este descargado (world.js ya
+                    // no las borra al descargar): antes, al alejarse, el mapa
+                    // caia a la aproximacion por rejilla y dibujaba muros que
+                    // no existian en el 3D ("puedo estar en una pared que el
+                    // mapa dice que no existe").
                     for (const b of ch.wallBoxes) {
                         const lcx = Math.floor(((b.minX + b.maxX) / 2 - gx * CS) / C);
                         const lcz = Math.floor(((b.minZ + b.maxZ) / 2 - gz * CS) / C);
@@ -9204,9 +9419,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 const tgt = pos.clone().addScaledVector(dir, 12);
                 tgt.y = Math.max(0.5, pos.y - 0.5);
                 this._feedCam.lookAt(tgt);
+                // Evitar el bucle de realimentacion de GL: el monitor usa como
+                // textura el propio render target y, si la camara de seguridad
+                // lo ve mientras se renderiza el feed, WebGL descarta el frame
+                // (GL_INVALID_OPERATION) y el monitor puede quedarse negro.
+                const hidden = [];
+                for (const r of this.worldSystem.securityRooms) {
+                    if (r.monitor) { hidden.push(r.monitor); r.monitor.visible = false; }
+                    if (r.panelGroup) { hidden.push(r.panelGroup); r.panelGroup.visible = false; }
+                }
                 this.renderer.setRenderTarget(this._feedRT);
                 this.renderer.render(this.scene, this._feedCam);
                 this.renderer.setRenderTarget(null);
+                for (const m of hidden) m.visible = true;
             }
             for (const r of this.worldSystem.securityRooms) {
                 if (!r.monitor) continue;

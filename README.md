@@ -31,7 +31,7 @@ Juego de terror procedural estilo Backrooms en el navegador (Three.js).
 
 ## Versión
 
-La versión actual (`v1.6.0`) se muestra en el menú principal y en el HUD. Al hacer cambios:
+La versión actual (`v1.7.1`) se muestra en el menú principal y en el HUD. Al hacer cambios:
 
 1. Sube `GAME_VERSION` en `js/game.js` (p. ej. `1.5.0`).
 2. Actualiza el `?v=...` de los `<script>`/`<link>` de `index.html` al mismo número (así el navegador descarta la caché vieja y los jugadores ven la versión nueva sin Ctrl+F5).
@@ -62,6 +62,21 @@ Abre el juego desde el móvil y se activan los controles táctiles automáticame
 - **Pilas almacenables**: mantén **[I]** para recargar la linterna con las pilas de repuesto guardadas; úsalas también para dar energía a las puertas de metal.
 - **Callejones sin salida variados**: rectos, en L, anchos, con alcoba lateral o con habitación muerta al fondo (a veces con un pilar que obliga a rodearlo).
 
+## Novedades de v1.7.1
+
+- **Puertas dobles con las dos hojas dentro del marco**: la hoja derecha se construía hacia el lado equivocado y colgaba pegada por FUERA de la jamba ("la puerta 2 no está ni en el marco"). Ahora su bisagra está en la jamba derecha y cierra hacia el centro, como la izquierda.
+
+## Novedades de v1.7.0
+
+- **Compañeros visibles a través de las paredes**: si un muro tapa a otro jugador, su fantasma translúcido del color de su chaqueta se ve a través del muro (ya no se pierden de vista entre pasillos).
+- **Paredes diagonales sólidas por ambos lados**: antes, al mirarlas desde detrás (o desde el bolsillo que forman), desaparecían y se veían las salas y jugadores de detrás ("entre las paredes se ven los jugadores").
+- **Mesas caídas apoyadas planas en la moqueta**: antes rotaban mal y quedaban medio flotando apoyadas en el canto del tablero, con las patas en el aire. Ahora reposan sobre toda su cara lateral y su **cajón se abre** (hacia arriba) y puede esconder un objeto reclamable.
+- **Semillas con letras de verdad**: "casa", "Casa" o "CÁSA" generan el MISMO mundo (se normalizan mayúsculas y tildes) y el HUD muestra el código de sala tal cual se escribió, listo para compartir.
+- **Mundo 100% determinista entre jugadores**: los muebles, armarios, objetos y flechas se colocan siempre en los mismos sitios para toda la sala (antes dependían de qué trozos vecinos estuvieran cargados y cada jugador podía ver paredes/cosas distintas: "yo veo cosas que los otros no").
+- **Flechas del suelo arregladas**: ya no parpadean "dentro y fuera del suelo" (z-fighting con la moqueta) ni se duplican apiladas al recargar trozos; toda la sala ve exactamente las mismas.
+- **Mapa fiel a la realidad también en la distancia**: los muros reales (finos, curvos, inclinados y pilares) se conservan y dibujan aunque el trozo esté descargado; ya no aparece una "pared que no existe" por la que se camina en el 3D.
+- **Multijugador más robusto**: al volver a entrar tras cerrar la pestaña ya no apareces como otro jugador duplicado con tu mismo nombre (se limpia tu presencia anterior); si el broker se micro-corta, los demás no te ven arrastrarte en cámara lenta (la interpolación se congela hasta que llegan datos nuevos); y se publica solo cuando hay movimiento real, así la sala llena va más fluida.
+
 ## Novedades de v1.6.0
 
 - **La Entidad ya no atraviesa paredes**: navega por la rejilla de celdas transitables (BFS) con deslizamiento por ejes contra muros, tabiques y muebles; nunca se cruza un muro ni te persigue a través de ellos. Además es menos invasiva: vaga más lenta, aparece más lejos, se pierde si pierde tu rastro y desaparece si te alejas demasiado (vuelve a aparecer más tarde).
@@ -70,6 +85,6 @@ Abre el juego desde el móvil y se activan los controles táctiles automáticame
 - **Puertas falsas raras** (~1 de cada 6 chunks) y con mejor modelo: hojas con bisagra real en su canto y dobles puertas de verdad (dos hojas que cierran al centro).
 - **Paredes en diagonal con textura correcta**: los tabiques rectangulares usan la textura del papel pintado repetida por celda (antes salía estirada). Más esquinas recortadas, contrafuertes y tabiques sueltos: el mundo ya no parece hecho solo de cuadrados.
 - **Pasillos de ancho variable**: un mismo pasillo puede estrecharse o ensancharse a mitad de recorrido.
-- **Cajón con hueco real**: el pedestal de la mesa es hueco de verdad y la bandeja sale por una boca abierta (antes parecía atravesar un bloque macizo). Las mesas caídas/tumbadas ya no tienen cajón que se abra (antes la bandeja se hundía en el suelo o flotaba).
+- **Cajón con hueco real**: el pedestal de la mesa es hueco de verdad y la bandeja sale por una boca abierta (antes parecía atravesar un bloque macizo). Las mesas caídas de lado conservan su cajón (abre hacia arriba); solo las patas-arriba y volcadas no tienen cajón (antes la bandeja se hundía en el suelo o flotaba).
 - **Tiza de colores**: el rojo y el negro se dibujan de su color (antes todo salía blanco).
 - **Multijugador más robusto**: si minimizas la pestaña ya no te echan de la sala (latido de presencia en segundo plano + reconexión automática), y los demás jugadores te ven de frente (antes veían tu espalda y la linterna apuntaba hacia atrás).

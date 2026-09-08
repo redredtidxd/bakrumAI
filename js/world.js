@@ -509,6 +509,8 @@
             this.collectedNoteIndices = new Set();
             this.pickupById = new Map();      // id persistente -> datos del objeto
             this.claimedPickupIds = new Set(); // objetos reclamados por CUALQUIER jugador
+            this._arrowCells = new Set();     // flechas del suelo ya colocadas (dedup por celda)
+            this._arrowDoorCount = new Map(); // flechas colocadas por puerta (limite de 3)
             this._lcx = undefined;
             this._lcz = undefined;
             this._playerPos = new THREE.Vector3(0, 0, 0);
@@ -575,6 +577,9 @@
                     doorCells: [],      // celdas interiores de las puertas (locales)
                     wallBoxes: [],      // cajas de muros/pilares (mundo)
                     slantedAABBs: [],   // cajas envolventes de tabiques inclinados
+                    occ: [],            // ocupacion de muebles de ESTE chunk (colocar)
+                    arrowKeys: [],      // claves de flechas colocadas (dedup por celda)
+                    arrowDoorKeys: [],  // puerta de cada flecha (recuento por puerta)
                     lamps: [],
                     meshes: [],
                     pickupList: [],
@@ -624,11 +629,28 @@
             ch.loaded = false;
             for (const m of ch.meshes) this.scene.remove(m);
             ch.meshes = [];
-            ch.wallBoxes = [];
-            // Al recargar el chunk la generacion determinista los vuelve a
-            // calcular: si no se limpiaran aqui, se duplicarian cada recarga
-            ch.slantedAABBs = [];
-            ch.lamps = [];
+            // Las cajas de colision SE CONSERVAN al descargar: son datos
+            // deterministas y el MAPA las dibuja (muros reales tambien en
+            // chunks lejanos). Al recargar, buildChunkMeshes las regenera
+            // desde cero (las resetea al empezar), asi no se duplican.
+            // ch.wallBoxes NO se limpia aqui (antes el mapa caia a la
+            // aproximacion por rejilla y dibujaba muros que no existian).
+            // Las flechas del suelo las limpia el chunk que las contiene:
+            // se liberan sus claves de dedup (celda y recuento de su puerta)
+            // para que al recargar se puedan volver a colocar sin apilarse.
+            const ak = ch.arrowKeys || [];
+            const adk = ch.arrowDoorKeys || [];
+            for (let i = 0; i < ak.length; i++) {
+                this._arrowCells.delete(ak[i]);
+                const dk = adk[i];
+                if (dk) {
+                    const c = (this._arrowDoorCount.get(dk) || 1) - 1;
+                    if (c <= 0) this._arrowDoorCount.delete(dk);
+                    else this._arrowDoorCount.set(dk, c);
+                }
+            }
+            ch.arrowKeys = [];
+            ch.arrowDoorKeys = [];
             // Los objetos guardan su estado: al recargar el chunk reaparecen
             for (const p of ch.pickupList) {
                 if (p.mesh) {
@@ -1407,6 +1429,22 @@
             const oz = ch.cz * N * C;
             const g = ch.grid;
 
+            // Las cajas se regeneran en CADA construccion (tambien en las
+            // recargas) y se CONSERVAN al descargar: el mapa las dibuja como
+            // muros reales aunque el chunk este lejos.
+            ch.wallBoxes = [];
+            ch.slantedAABBs = [];
+
+            // RNG PROPIO DE CADA CONSTRUCCION. La rejilla (generateLayout)
+            // se genera UNA sola vez por chunk, pero las MALLAS se
+            // reconstruyen en cada carga. Si se usara ch.rng (el mismo de la
+            // rejilla), la segunda construccion leia la secuencia YA
+            // consumida y los grosores de pared y las curvas cambiaban en
+            // cada recarga: el mundo no era estable ("hay paredes y cosas
+            // que yo veo y otros no", flechas que se movian solas...).
+            const buildRng = mulberry32((hash2(ch.cx, ch.cz) ^ 0x6A09E667) >>> 0);
+            ch.buildRng = buildRng;
+
             // Suelo y techo se solapan 0,12 m con los chunks vecinos: las losas
             // contiguas (misma altura, misma textura y misma fase de azulejo)
             // quedan selladas sin la grieta de un pixel que delataba la rejilla
@@ -1480,10 +1518,10 @@
                     const k = key(x, z);
                     const kind = wallKind.get(k);
                     if (!kind || kind === 'border' || kind === 'post' || wallTMap.has(k)) continue;
-                    const rv = ch.rng();
-                    const T = rv < 0.25 ? 0.3 + ch.rng() * 0.15      // fina
-                        : rv < 0.7 ? 0.55 + ch.rng() * 0.3           // normal
-                        : 0.95 + ch.rng() * 0.35;                    // muy gruesa
+                    const rv = buildRng();
+                    const T = rv < 0.25 ? 0.3 + buildRng() * 0.15    // fina
+                        : rv < 0.7 ? 0.55 + buildRng() * 0.3         // normal
+                        : 0.95 + buildRng() * 0.35;                  // muy gruesa
                     const q = [[x, z]];
                     wallTMap.set(k, T);
                     while (q.length) {
@@ -1908,6 +1946,27 @@
             // integradas en la generacion: esquinas recortadas de salas,
             // contrafuertes en pasillos y tabiques sueltos en campo abierto ----
             this.placeChunkSlantedWalls(ch, wallKind, key, curvedCells);
+
+            // Flechas de las PUERTAS FALSAS de los chunks vecinos (hasta 2
+            // chunks: el radio de colocacion de las flechas): al reconstruir
+            // este chunk se recolocan las que habia perdido. El dedup global
+            // evita duplicados y el conjunto es determinista (las rejillas
+            // usadas son las de los chunks cargados, que son los mismos para
+            // todos los jugadores en la misma posicion).
+            for (let dx = -2; dx <= 2; dx++) {
+                for (let dz = -2; dz <= 2; dz++) {
+                    if (dx === 0 && dz === 0) continue;
+                    const n = this.chunks.get((ch.cx + dx) + ',' + (ch.cz + dz));
+                    // Solo vecinos CARGADOS: los chunks cargados son los
+                    // mismos para todos los jugadores en la misma posicion,
+                    // asi el conjunto de flechas es identico para la sala
+                    // (un chunk descargado tendria puertas segun el historial
+                    // de cada jugador y las flechas variarian entre ellos)
+                    if (n && n.loaded && n.fakeDoors && n.fakeDoors.length) {
+                        this.placeChunkArrowSigns(n);
+                    }
+                }
+            }
         }
 
         // ---- SALA DE SEGURIDAD: construye la puerta de metal (que sube al
@@ -2319,16 +2378,31 @@
             const C = CELL_SIZE;
             const N = CHUNK_SIZE;
             const CS = N * C;
+            // IMPORTANTE: el dedup es GLOBAL de sesion (por celda y por
+            // puerta) y las claves solo se liberan cuando el chunk que
+            // CONTIENE la flecha se descarga (ahi si se retiran sus meshes).
+            // Asi, aunque esta funcion se invoque muchas veces (al construir
+            // este chunk y al reconstruir sus vecinos), nunca se apilan dos
+            // flechas en la misma celda ni una puerta pasa de sus 3 flechas.
             const rng = mulberry32(hash2(ch.cx * 3187 + 61, ch.cz * 5233 + 919));
-            for (const door of ch.fakeDoors) {
-                // Candidatas: celdas abiertas de los chunks cercanos
+            for (let di = 0; di < ch.fakeDoors.length; di++) {
+                const door = ch.fakeDoors[di];
+                const doorKey = ch.key + '#' + di;
+                // Limite de 3 flechas POR PUERTA contado en toda la sesion
+                // (antes el limite era por llamada y cada recarga del chunk
+                // anadia 3 flechas mas a la misma puerta)
+                if ((this._arrowDoorCount.get(doorKey) || 0) >= 3) continue;
+                // Candidatas: celdas abiertas de los chunks CARGADOS (una
+                // flecha nunca se coloca sobre un chunk descargado: flotaria
+                // sobre el vacio). Las rejillas vienen del propio chunk o de
+                // getLayout (determinista: misma semilla -> misma rejilla).
                 const cands = [];
                 const dgx = Math.floor(door.x / CS);
                 const dgz = Math.floor(door.z / CS);
                 for (let gx = dgx - 2; gx <= dgx + 2; gx++) {
                     for (let gz = dgz - 2; gz <= dgz + 2; gz++) {
                         const lc = this.chunks.get(gx + ',' + gz);
-                        if (!lc) continue;   // solo chunks cargados (los vecinos quizá no)
+                        if (!lc || !lc.loaded || !lc.grid) continue;
                         const g = lc.grid;
                         const ox = gx * CS, oz = gz * CS;
                         for (let x = 0; x < N; x++) {
@@ -2338,33 +2412,53 @@
                                 const wz = oz + (z + 0.5) * C;
                                 const dist = Math.hypot(wx - door.x, wz - door.z);
                                 if (dist < 8 || dist > 34) continue;
-                                cands.push([wx, wz]);
+                                cands.push([gx, gz, x, z, wx, wz]);
                             }
                         }
                     }
                 }
                 if (!cands.length) continue;
-                // Mezcla determinista: misma semilla -> mismas flechas para todos
+                // Mezcla determinista: misma semilla -> mismas flechas
                 for (let i = cands.length - 1; i > 0; i--) {
                     const j = Math.floor(rng() * (i + 1));
                     [cands[i], cands[j]] = [cands[j], cands[i]];
                 }
-                let placed = 0;
-                for (const [wx, wz] of cands) {
-                    if (placed >= 3) break;
+                for (const [gx, gz, x, z, wx, wz] of cands) {
+                    if ((this._arrowDoorCount.get(doorKey) || 0) >= 3) break;
                     if (!this.lineClear(wx, wz, door.x, door.z)) continue;
+                    // UNA flecha por celda, vengan de la puerta que vengan:
+                    // antes dos puertas falsas cercanas apilaban flechas
+                    // identicas que parpadeaban "dentro y fuera del suelo"
+                    const ck = gx + ':' + x + ':' + gz + ':' + z;
+                    if (this._arrowCells.has(ck)) continue;
+                    this._arrowCells.add(ck);
+                    this._arrowDoorCount.set(doorKey, (this._arrowDoorCount.get(doorKey) || 0) + 1);
                     const dx = door.x - wx, dz = door.z - wz;
                     const mesh = new THREE.Mesh(
                         new THREE.PlaneGeometry(1.05, 0.58),
-                        new THREE.MeshBasicMaterial({ map: arrowTexture(), transparent: true, depthWrite: false })
+                        new THREE.MeshBasicMaterial({
+                            map: arrowTexture(),
+                            transparent: true,
+                            depthWrite: false,
+                            // El plano a 2 cm del suelo peleaba con la moqueta
+                            // al mirarlo de lejos (parpadeaba dentro/fuera):
+                            // se sube un poco y se desplaza contra la camara
+                            polygonOffset: true,
+                            polygonOffsetFactor: -2,
+                            polygonOffsetUnits: -1
+                        })
                     );
-                    mesh.position.set(wx, 0.02, wz);
+                    mesh.position.set(wx, 0.05, wz);
                     mesh.rotation.set(-Math.PI / 2, 0, 0);
                     mesh.rotation.y = Math.atan2(-dx, -dz);
                     this.scene.add(mesh);
-                    const own = this.chunks.get(Math.floor(wx / CS) + ',' + Math.floor(wz / CS));
-                    (own || ch).meshes.push(mesh);
-                    placed++;
+                    const own = this.chunks.get(gx + ',' + gz);
+                    const host = own || ch;
+                    host.meshes.push(mesh);
+                    host.arrowKeys = host.arrowKeys || [];
+                    host.arrowKeys.push(ck);
+                    host.arrowDoorKeys = host.arrowDoorKeys || [];
+                    host.arrowDoorKeys.push(doorKey);
                 }
             }
         }
@@ -2405,7 +2499,7 @@
         pickCurvedRuns(ch, wallKind, key) {
             const N = CHUNK_SIZE;
             const g = ch.grid;
-            const r = ch.rng;
+            const r = ch.buildRng || ch.rng;
             const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
             // "De vez en cuando": ~1 de cada 5 chunks tiene una pared curva
             if (r() >= 0.2) return [];
@@ -2511,9 +2605,9 @@
             let dir;
             if (wOpen && !eOpen) dir = -1;
             else if (eOpen && !wOpen) dir = 1;
-            else dir = ch.rng() < 0.5 ? -1 : 1;
+            else dir = (ch.buildRng || ch.rng)() < 0.5 ? -1 : 1;
             const cap = C - T / 2 - 1.2;   // el paso nunca baja de ~1,2 m
-            const B = Math.min(cap, (0.30 + ch.rng() * 0.40) * C);
+            const B = Math.min(cap, (0.30 + (ch.buildRng || ch.rng)() * 0.40) * C);
 
             // Muestras a lo largo del tramo (~0,5 m) para que el arco se vea liso
             const n = Math.max(6, Math.ceil((sweep1 - sweep0) / 0.5));
@@ -2995,10 +3089,11 @@
                 ? this.trapezoidGeometry(L, H, T0, T0)
                 : this.trapezoidGeometry(L, H, T0, T1);
             const mat = Materials.wall.clone();
-            // Cara simple: las geometrias tienen el cierre correcto (BoxGeometry
-            // y trapezoidGeometry con normales hacia fuera). DoubleSide pintaba
-            // cada cara dos veces y dejaba artefactos al mirar los bordes.
-            mat.side = THREE.FrontSide;
+            // DoubleSide: el tabique se ve SOLIDO desde ambos lados. Antes con
+            // FrontSide, quien entraba en el bolsillo detras de un tabique (o
+            // lo miraba desde atras) veia ATRAVES de la pared diagonal: el
+            // muro desaparecia y se veian las salas y jugadores de detras.
+            mat.side = THREE.DoubleSide;
             const mesh = new THREE.Mesh(geo, mat);
             mesh.position.set(cx, H / 2, cz);
             mesh.rotation.y = ang;
@@ -3047,13 +3142,17 @@
         // ================================================================
         //  MUEBLES (permanecen en el mundo aunque el chunk se descargue)
         // ================================================================
-        canPlaceFurniture(x, z, radius) {
-            for (let box of this.wallBoxes) {
+        // Comprueba si cabe un mueble usando SOLO datos de SU chunk (cajas de
+        // muros y ocupacion propia): el resultado no depende de que chunks
+        // vecinos esten cargados, asi todos los jugadores colocan los muebles
+        // exactamente en los mismos sitios (requisito del multijugador).
+        canPlaceFurniture(ch, x, z, radius) {
+            for (let box of ch.wallBoxes) {
                 if (x + radius > box.minX && x - radius < box.maxX && z + radius > box.minZ && z - radius < box.maxZ) {
                     return false;
                 }
             }
-            for (let occ of this.occupiedFurnitureBoxes) {
+            for (let occ of ch.occ) {
                 if (Math.hypot(x - occ.x, z - occ.z) < radius + occ.radius + 0.45) {
                     return false;
                 }
@@ -3106,7 +3205,7 @@
                         const variant = vr < 0.4 ? 0 : (vr < 0.6 ? 1 : (vr < 0.8 ? 2 : 3));
                         const deskX = rx + (Math.random() - 0.5) * 1.5;
                         const deskZ = rz + (Math.random() - 0.5) * 1.5;
-                        if (this.canPlaceFurniture(deskX, deskZ, 0.95)) {
+                        if (this.canPlaceFurniture(ch, deskX, deskZ, 0.95)) {
                             const desk = ModelBuilder.createOfficeDesk(variant);
                             desk.position.set(deskX, 0, deskZ);
                             snapToFloor(desk, 0);
@@ -3114,8 +3213,10 @@
                             // tipo se decide AQUI con el rng del chunk: todos
                             // los clientes abren el mismo cajon con el mismo
                             // contenido (y el objeto se reclama por red).
+                            // Tambien las mesas CAIDAS DE LADO conservan su
+                            // cajon (abre hacia arriba, como pide el jugador).
                             const dr = desk.userData.drawer;
-                            if (dr && variant === 0 && Math.random() < 0.35) {
+                            if (dr && (variant === 0 || variant === 1) && Math.random() < 0.35) {
                                 const ir = Math.random();
                                 dr.itemType = ir < 0.4 ? 'almond' : (ir < 0.75 ? 'battery' : (ir < 0.9 ? 'chalk' : 'note'));
                                 if (dr.itemType === 'chalk') {
@@ -3131,7 +3232,7 @@
                             this.scene.add(desk);
                             this.furnitureMeshes.push(desk);
                             this.dynamicFurniture.push({ mesh: desk, x: deskX, z: deskZ });
-                            this.occupiedFurnitureBoxes.push({ x: deskX, z: deskZ, radius: 0.95 });
+                            ch.occ.push({ x: deskX, z: deskZ, radius: 0.95 });
                         }
                     } else if (choice < 0.6) {
                         // Poses de silla: 0 de pie, 1 caida de lado,
@@ -3140,17 +3241,17 @@
                         const variant = vr < 0.55 ? 0 : (vr < 0.8 ? 1 : 2);
                         const chairX = rx + (Math.random() - 0.5) * 1.8;
                         const chairZ = rz + (Math.random() - 0.5) * 1.8;
-                        if (this.canPlaceFurniture(chairX, chairZ, 0.55)) {
+                        if (this.canPlaceFurniture(ch, chairX, chairZ, 0.55)) {
                             const chair = ModelBuilder.createOfficeChair(variant);
                             chair.position.set(chairX, 0, chairZ);
                             snapToFloor(chair, 0);
                             this.scene.add(chair);
                             this.furnitureMeshes.push(chair);
                             this.dynamicFurniture.push({ mesh: chair, x: chairX, z: chairZ });
-                            this.occupiedFurnitureBoxes.push({ x: chairX, z: chairZ, radius: 0.55 });
+                            ch.occ.push({ x: chairX, z: chairZ, radius: 0.55 });
                         }
                     } else {
-                        this.placeCabinetInRoom(rw);
+                        this.placeCabinetInRoom(rw, ch);
                     }
                 }
             }
@@ -3219,18 +3320,20 @@
             return Math.hypot(tx, tz) < r + 0.5;
         }
 
-        cabinetSpotFree(cx, cz, r, d) {
-            for (const box of this.wallBoxes) {
+        // Igual que canPlaceFurniture: comprobaciones SOLO contra el chunk
+        // propio (muros y ocupacion del chunk), determinista para la sala.
+        cabinetSpotFree(ch, cx, cz, r, d) {
+            for (const box of ch.wallBoxes) {
                 if (d && this.isSupportBox(box, cx, cz, r, d)) continue;
                 if (this.circleTouchesBox(cx, cz, r, box)) return false;
             }
-            for (const occ of this.occupiedFurnitureBoxes) {
+            for (const occ of ch.occ) {
                 if (Math.hypot(cx - occ.x, cz - occ.z) < r + occ.radius + 0.35) return false;
             }
             return true;
         }
 
-        placeOneCabinet(cx, cz, yaw, style, r, d) {
+        placeOneCabinet(cx, cz, yaw, style, r, d, ch) {
             const opts = Object.assign({}, style);
             if (style.pose === 'lean') {
                 opts.lean = 0.13 + Math.random() * 0.07;
@@ -3249,14 +3352,14 @@
             const hz = (bb.max.z - bb.min.z) / 2;
 
             const occupiedRadius = Math.max(r, Math.hypot(hx, hz));
-            const ok = this.cabinetSpotFree(bx, bz, occupiedRadius, d);
+            const ok = this.cabinetSpotFree(ch, bx, bz, occupiedRadius, d);
             if (!ok) {
                 this.scene.remove(group);
                 return null;
             }
             this.scene.add(group);
             this.furnitureMeshes.push(group);
-            this.occupiedFurnitureBoxes.push({ x: bx, z: bz, radius: occupiedRadius * 0.9 });
+            if (ch) ch.occ.push({ x: bx, z: bz, radius: occupiedRadius * 0.9 });
             this.furnitureBoxes.push({
                 minX: bb.min.x - 0.04, maxX: bb.max.x + 0.04,
                 minZ: bb.min.z - 0.04, maxZ: bb.max.z + 0.04
@@ -3268,7 +3371,7 @@
         }
 
         // Armario apoyado en una pared (sala o pasillo), coordenadas de mundo
-        trySpawnCabinetOnWall(faceCoord, d, tanAxis, a, b, poseHint) {
+        trySpawnCabinetOnWall(faceCoord, d, tanAxis, a, b, poseHint, ch) {
             const C = CELL_SIZE;
             const style = this.rollCabinetStyle(poseHint);
             const fallen = style.pose === 'back' || style.pose === 'face' || style.pose === 'side';
@@ -3323,9 +3426,9 @@
                 const fcz = gcz + d[1];
                 const ftype = this.gridAt(fcx, fcz);
                 if (ftype !== 0 && ftype !== 2) continue;
-                if (!this.cabinetSpotFree(cx, cz, fallen ? 1.35 : 0.7, d)) continue;
+                if (!this.cabinetSpotFree(ch, cx, cz, fallen ? 1.35 : 0.7, d)) continue;
 
-                const g = this.placeOneCabinet(cx, cz, yaw, style, fallen ? 1.35 : 0.7, d);
+                const g = this.placeOneCabinet(cx, cz, yaw, style, fallen ? 1.35 : 0.7, d, ch);
                 if (g) return true;
             }
             return false;
@@ -3342,7 +3445,7 @@
             return box.maxZ;
         }
 
-        placeCabinetInRoom(r) {
+        placeCabinetInRoom(r, ch) {
             const C = CELL_SIZE;
             const sides = ['n', 's', 'e', 'w'].sort(() => Math.random() - 0.5);
             for (const side of sides) {
@@ -3375,7 +3478,7 @@
                     a = (r.z + 0.5) * C;
                     b = (r.z + r.h - 0.5) * C;
                 }
-                if (this.trySpawnCabinetOnWall(faceCoord, d, tanAxis, a, b, poseHint)) {
+                if (this.trySpawnCabinetOnWall(faceCoord, d, tanAxis, a, b, poseHint, ch)) {
                     return true;
                 }
             }
@@ -3446,7 +3549,7 @@
                 const fallenPoses = ['back', 'side', 'face'];
                 const poseHint = poseRoll < 0.55 ? 'stand' : (poseRoll < 0.75 ? 'lean' : fallenPoses[Math.floor(Math.random() * 3)]);
                 const centerTan = tanAxis === 'x' ? (cx + 0.5) * C : (cz + 0.5) * C;
-                if (this.trySpawnCabinetOnWall(faceCoord, d, tanAxis, centerTan - C / 2, centerTan + C / 2, poseHint)) {
+                if (this.trySpawnCabinetOnWall(faceCoord, d, tanAxis, centerTan - C / 2, centerTan + C / 2, poseHint, ch)) {
                     placedCount++;
                 }
             }
@@ -3483,13 +3586,16 @@
             for (const [lx, lz] of pool) {
                 const wx = (ch.cx * N + lx + 0.5) * CELL_SIZE;
                 const wz = (ch.cz * N + lz + 0.5) * CELL_SIZE;
-                // Separacion minima de otros objetos y muebles
+                // Separacion minima de otros objetos y muebles del PROPIO
+                // chunk (antes se comprobaba el mundo entero y la posicion de
+                // cada objeto dependia de que chunks vecinos estuvieran
+                // cargados: cada jugador veia los objetos en sitios distintos)
                 let ok = true;
-                for (const p of this.pickupData) {
+                for (const p of ch.pickupList) {
                     if (Math.hypot(p.x - wx, p.z - wz) < CELL_SIZE * 2.2) { ok = false; break; }
                 }
                 if (ok) {
-                    for (const occ of this.occupiedFurnitureBoxes) {
+                    for (const occ of ch.occ) {
                         if (Math.hypot(occ.x - wx, occ.z - wz) < occ.radius + 1.2) { ok = false; break; }
                     }
                 }

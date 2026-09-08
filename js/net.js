@@ -418,6 +418,17 @@
                 let data = {};
                 try { data = JSON.parse(m.payloadString); } catch (e) { return; }
                 if (!data.n) return;
+                // DUPLICADO DE MI MISMA SESION: si cierras la pestana y
+                // vuelves, el broker conserva la presencia RETAINED de tu
+                // sesion anterior (y si esa pestana sigue viva en segundo
+                // plano, hasta su estado): aparecias como OTRO jugador con tu
+                // mismo nombre ("veo una duplica mia"). Se limpia aqui y en
+                // el temporizador de mantenimiento, sin avisar.
+                if (pid !== this.pid && data.n === this.playerName) {
+                    try { this.client.send(this.presenceTopic(pid), '', 0, true); } catch (e) { /* noop */ }
+                    this.removePeerSilent(pid);
+                    return;
+                }
                 const isNew = !this.peers.has(pid);
                 if (isNew) {
                     // hasState=false: el modelo NO se crea aqui (apareceria en
@@ -461,6 +472,7 @@
                 p.tyaw = d.yaw || 0;
                 p.f = !!d.f;
                 p.lastSeen = Date.now();
+                p.lastStateAt = Date.now();
                 if (!p.hasState) {
                     // Primer estado: crear el modelo YA en su posicion real
                     // (sin aparecer en el origen ni volar hasta aqui)
@@ -529,6 +541,26 @@
             const group = model.group;
             const headY = model.headY;
 
+            // FANTASMA X-RAY: clon del modelo con material que ignora la
+            // profundidad. Se muestra SOLO cuando un muro tapa al jugador
+            // (linea de vision bloqueada): asi nunca se pierde de vista a un
+            // companero entre las paredes, aunque el mapa falle o el pasillo
+            // de en medio no se haya explorado.
+            const ghost = group.clone();
+            ghost.traverse((o) => {
+                if (o.isMesh) {
+                    o.material = new THREE.MeshBasicMaterial({
+                        color: col,
+                        transparent: true,
+                        opacity: 0.22,
+                        depthTest: false,
+                        depthWrite: false
+                    });
+                }
+            });
+            ghost.visible = false;
+            this.scene.add(ghost);
+
             // Etiqueta con el nombre sobre la cabeza
             const sprite = this.makeNameSprite(p.name);
             sprite.position.y = headY + 0.44;
@@ -544,7 +576,7 @@
 
             group.visible = false;
             this.scene.add(group);
-            this.remotePlayers.set(pid, { group, spot, tgt, sprite });
+            this.remotePlayers.set(pid, { group, spot, tgt, sprite, ghost });
         }
 
         makeNameSprite(name) {
@@ -582,6 +614,7 @@
             if (r) {
                 this.scene.remove(r.group);
                 this.scene.remove(r.tgt);
+                if (r.ghost) this.scene.remove(r.ghost);
                 this.remotePlayers.delete(pid);
             }
             this.peers.delete(pid);
@@ -668,11 +701,26 @@
             this._lastState = { x: playerPos.x, y: playerPos.y, z: playerPos.z, yaw, pitch, flashlightOn };
 
             if (this.connected && this.joined && !this.roomFull) {
-                // Estado propio ~12 Hz
+                // Estado propio ~12 Hz pero SOLO cuando hay movimiento real:
+                // un jugador quieto no necesita 12 mensajes/s. Menos trafico
+                // en el broker = menos lag cuando la sala esta llena (y se
+                // sigue publicando al menos cada 0,5 s para que el timeout de
+                // 45 s de los demas nunca te eche de la sala).
                 this.pubTimer += dt;
                 if (this.pubTimer > 0.083) {
                     this.pubTimer = 0;
-                    this.publishState(playerPos, yaw, pitch, flashlightOn);
+                    const moved = !this._lastPubPos ||
+                        Math.hypot(playerPos.x - this._lastPubPos.x, playerPos.z - this._lastPubPos.z) > 0.05 ||
+                        Math.abs(yaw - this._lastPubYaw) > 0.02 ||
+                        Math.abs(pitch - this._lastPubPitch) > 0.08;
+                    const idleBeat = Date.now() - (this._lastPubAt || 0) > 500;
+                    if (moved || idleBeat) {
+                        this._lastPubPos = playerPos.clone();
+                        this._lastPubYaw = yaw;
+                        this._lastPubPitch = pitch;
+                        this._lastPubAt = Date.now();
+                        this.publishState(playerPos, yaw, pitch, flashlightOn);
+                    }
                 }
                 // Posicion de la entidad (solo el host la simula y publica)
                 this.entPubTimer += dt;
@@ -715,6 +763,15 @@
                     // publico o una pestana en segundo plano no hagan
                     // desaparecer a los companeros
                     for (const [pid, p] of [...this.peers]) {
+                        // Duplicado de mi sesion anterior (pestana vieja aun
+                        // viva en segundo plano publicando estado): se limpia
+                        // en silencio y ademas se borra su presencia retenida
+                        // para que el resto de la sala tambien la descarte
+                        if (p.name === this.playerName) {
+                            try { this.client.send(this.presenceTopic(pid), '', 0, true); } catch (e) { /* noop */ }
+                            this.removePeerSilent(pid);
+                            continue;
+                        }
                         if (now - p.lastSeen > 45000) this.removePeer(pid);
                     }
                     if (this.entityActive && now - this.entityLastMsg > 3000) {
@@ -725,7 +782,8 @@
             }
 
             // Interpolacion y render de los jugadores remotos
-            const k = 1 - Math.pow(0.0005, dt);
+            const k = 1 - Math.pow(0.0001, dt);
+            const nowMs = Date.now();
             for (const [pid, p] of this.peers) {
                 const r = this.remotePlayers.get(pid);
                 if (!r) continue;
@@ -737,10 +795,19 @@
                     p.z = p.tz;
                     p.yaw = p.tyaw;
                 }
-                p.x += (p.tx - p.x) * k;
-                p.y += (p.ty - p.y) * k;
-                p.z += (p.tz - p.z) * k;
-                p.yaw = lerpAngleShort(p.yaw, p.tyaw, k);
+                // Si no llegan estados nuevos (micro-corte del broker, lag
+                // con la sala llena), se CONGELA la interpolacion: antes se
+                // seguia convergiendo hacia el ultimo punto recibido y el
+                // modelo se arrastraba en camara lenta hacia una posicion
+                // vieja ("me ve que me muevo lento" aunque yo ya estaba
+                // lejos). Al volver los mensajes, retoma.
+                const stale = nowMs - (p.lastStateAt || 0) > 350;
+                if (!stale) {
+                    p.x += (p.tx - p.x) * k;
+                    p.y += (p.ty - p.y) * k;
+                    p.z += (p.tz - p.z) * k;
+                    p.yaw = lerpAngleShort(p.yaw, p.tyaw, k);
+                }
                 // Red de seguridad: el modelo remoto SIEMPRE con los pies en el
                 // suelo (ninguna version vieja de otro jugador puede hacerlo
                 // volar con la cabeza en el techo)
@@ -766,6 +833,19 @@
                         r.sprite.material.opacity = o;
                         r.sprite.visible = o > 0.02;
                     }
+                    // Fantasma X-RAY: visible solo cuando un muro tapa al
+                    // jugador (la linea de vision de la camara al modelo pasa
+                    // por alguna caja de colision)
+                    if (r.ghost) {
+                        r.ghost.position.copy(r.group.position);
+                        r.ghost.rotation.y = r.group.rotation.y;
+                        r.ghost.visible = !this.hasLOS(
+                            this.camera.position.x, this.camera.position.z,
+                            p.x, p.z, wallBoxes
+                        );
+                    }
+                } else if (r.ghost) {
+                    r.ghost.visible = false;
                 }
             }
 

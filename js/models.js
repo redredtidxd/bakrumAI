@@ -63,12 +63,14 @@
             panel(0.04, 0.02, 0.42, -0.20, -PH / 2 + PT + 0.005, 0);
             panel(0.04, 0.02, 0.42, 0.20, -PH / 2 + PT + 0.005, 0);
 
-            // Cajon HUECO (bandeja abierta por arriba): SOLO en las mesas de
-            // pie (variant 0). Las mesas caidas o tumbadas no tienen cajon
-            // que se abra: antes la bandeja se deslizaba en TODAS las
+            // Cajon HUECO (bandeja abierta por arriba): en las mesas de pie
+            // (variant 0) y en las CAIDAS DE LADO (variant 1), cuyo hueco
+            // queda mirando hacia arriba: el cajon se desliza hacia arriba al
+            // abrirlo. Las demas tumbadas (patas arriba / volcada) no tienen
+            // cajon que se abra: antes la bandeja se deslizaba en TODAS las
             // variantes y en las mesas tumbadas se hundia en el suelo o salia
             // flotando al aire (las mesas "flotantes" que se veian).
-            if (variant === 0) {
+            if (variant === 0 || variant === 1) {
                 const drawer = new THREE.Group();
                 const dp = (w, h, d, x, y, z) => {
                     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
@@ -94,8 +96,13 @@
                 group.rotation.z = (Math.random() - 0.5) * 0.12;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else if (variant === 1) {
-                // Pata rota: CAIDA DE LADO, plana sobre la moqueta
-                group.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.18;
+                // Pata rota: CAIDA DE LADO, apoyada PLANA sobre la moqueta.
+                // Se rota alrededor de X (no de Z): la mesa reposa sobre toda
+                // su cara lateral (1,6 x 0,77 m), el tablero queda vertical y
+                // las patas tumbadas en el suelo. Antes se rotaba alrededor
+                // de Z y la mesa se apoyaba en el CANTO del tablero con las
+                // patas en el aire: parecia medio flotando.
+                group.rotation.x = -Math.PI / 2 + (Math.random() - 0.5) * 0.14;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else if (variant === 3) {
                 // Volcada hacia delante: el tablero queda vertical y las
@@ -694,23 +701,29 @@
 
         // Hoja con bisagra REAL en su canto: gira alrededor del borde de la
         // bisagra, no de su centro (antes la hoja se clavaba en el marco al
-        // entornarse). La hoja se construye desplazada +X respecto al pivote.
-        const leaf = (pw, pivotX, ajar) => {
+        // entornarse). La hoja se construye desplazada respecto al pivote:
+        // hacia +X en las hojas normales (mirror=false) y espejada hacia -X
+        // en la hoja derecha de las dobles (mirror=true), cuya bisagra esta
+        // en la jamba derecha y debe cerrar hacia el CENTRO. Sin el espejo,
+        // las dos hojas se construian hacia +X y la derecha quedaba FUERA
+        // del marco, pegada por fuera de la jamba.
+        const leaf = (pw, pivotX, ajar, mirror) => {
             const pivot = new THREE.Group();
             pivot.position.x = pivotX;
+            const m = mirror ? -1 : 1;
             const face = new THREE.Mesh(new THREE.BoxGeometry(pw, H, T), doorMat);
-            face.position.set(pw / 2, H / 2, 0);
+            face.position.set(m * pw / 2, H / 2, 0);
             pivot.add(face);
             // Recuadros de panel (2 por hoja), enrasados con la cara frontal
             const iw = pw * 0.78, ih = H * 0.3;
             for (const iy of [H * 0.28, H * 0.62]) {
                 const inset = new THREE.Mesh(new THREE.BoxGeometry(iw, ih, 0.022), insetMat);
-                inset.position.set(pw / 2, iy, T / 2 + 0.012);
+                inset.position.set(m * pw / 2, iy, T / 2 + 0.012);
                 pivot.add(inset);
             }
-            // Tirador junto al canto LIBRE de la hoja
+            // Tirador junto al canto LIBRE de la hoja (el interior)
             const handle = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.24, 0.028), darkMat);
-            handle.position.set(pw - 0.1, H * 0.48, T / 2 + 0.022);
+            handle.position.set(m * (pw - 0.1), H * 0.48, T / 2 + 0.022);
             pivot.add(handle);
             // Grafiti pintado encima de la hoja (opcional)
             if (o.graffitiTex) {
@@ -718,7 +731,7 @@
                     new THREE.PlaneGeometry(pw - 0.08, H - 0.25),
                     new THREE.MeshBasicMaterial({ map: o.graffitiTex, transparent: true, depthWrite: false })
                 );
-                g.position.set(pw / 2, H / 2 + 0.05, T / 2 + 0.022);
+                g.position.set(m * pw / 2, H / 2 + 0.05, T / 2 + 0.022);
                 pivot.add(g);
             }
             pivot.rotation.y = ajar;
@@ -733,8 +746,8 @@
             // sobre su propio centro)
             const pw = W / 2 - 0.03;
             const a = o.ajar || 0.0;
-            leaf(pw, -W / 2 + 0.005, -a);   // hoja izquierda
-            leaf(pw, W / 2 - 0.005, a);     // hoja derecha
+            leaf(pw, -W / 2 + 0.005, -a, false);   // hoja izquierda: bisagra en la jamba izquierda
+            leaf(pw, W / 2 - 0.005, a, true);       // hoja derecha: bisagra en la jamba derecha, espejada al centro
         } else {
             leaf(W - 0.01, -W / 2 + 0.005, o.ajar || 0.0);   // hoja unica
         }

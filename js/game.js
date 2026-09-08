@@ -10,7 +10,7 @@
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.6.0';
+    const GAME_VERSION = '1.7.1';
 
     class BackroomsGame {
         constructor() {
@@ -110,6 +110,10 @@
             // inicial permite fijar una y regenerar el mundo al empezar)
             this.worldSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
             setWorldSeed(this.worldSeed);
+            // Codigo de sala compartido: por defecto la semilla numerica;
+            // si el jugador escribe una semilla con LETRAS, el codigo es el
+            // propio texto (saneado) y asi se comparte tal cual se escribe.
+            this.roomCode = null;
             this.updateSeedLabel();
 
             this.worldSystem = new WorldGridSystem(this.scene);
@@ -569,7 +573,7 @@
 
         updateSeedLabel() {
             const el = document.getElementById('seed-label');
-            if (el) el.textContent = 'SEMILLA: ' + this.worldSeed;
+            if (el) el.textContent = 'SEMILLA: ' + (this.roomCode !== null ? this.roomCode : this.worldSeed);
         }
 
         initUI() {
@@ -602,11 +606,16 @@
                 // distinta, se regenera TODO el mundo antes de empezar.
                 // Las semillas NUMERICAS se usan tal cual (escribir "1" genera
                 // la semilla 1, no un hash que siempre lleva al mismo mundo de
-                // siempre); los textos se convierten con un hash estable.
+                // siempre); los textos se convierten con un hash estable y
+                // ADEMAS se normalizan (minusculas, sin tildes): "Casa" y
+                // "CÁSA" generan el MISMO mundo, asi nadie acaba en una sala
+                // distinta por escribir la semilla de otra forma.
                 const seedInput = document.getElementById('seed-input');
                 const seedText = seedInput ? seedInput.value.trim() : '';
-                if (seedText) {
-                    const seed = /^\d+$/.test(seedText) ? (parseInt(seedText, 10) >>> 0) : stringSeed(seedText);
+                const normSeed = seedText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                const seedIsNum = /^\d+$/.test(normSeed);
+                if (normSeed) {
+                    const seed = seedIsNum ? (parseInt(normSeed, 10) >>> 0) : stringSeed(normSeed);
                     if (seed !== this.worldSeed) {
                         this.worldSeed = seed;
                         this.worldSystem.rebuild(seed);
@@ -614,19 +623,22 @@
                         // Los cuerpos fisicos apuntaban a muebles del mundo viejo
                         this.furnitureBodies = [];
                         this.syncFurnitureBodies();
-                        this.updateSeedLabel();
                     }
+                    // Codigo de sala: el texto con letras se comparte tal cual
+                    // (saneado para los topicos MQTT); las numericas, el numero.
+                    this.roomCode = seedIsNum ? seed : (normSeed.replace(/[^a-z0-9_-]/g, '') || seed);
+                    this.updateSeedLabel();
                 }
 
                 // Multijugador: la SEMILLA es el codigo de sala. Quienes usen
-                // la misma semilla (o el mismo numero mostrado en el HUD)
+                // la misma semilla (o el mismo codigo mostrado en el HUD)
                 // caen en el mismo backroom, hasta 6 exploradores.
                 const nameInput = document.getElementById('name-input');
                 const name = nameInput ? nameInput.value.trim() : '';
                 if (name) {
                     try { localStorage.setItem('backrooms-name', name); } catch (e) { /* noop */ }
                 }
-                this.net.join(this.worldSeed, name);
+                this.net.join(this.roomCode !== null ? this.roomCode : this.worldSeed, name);
 
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
@@ -1023,9 +1035,14 @@
                     }
                 }
                 ctx.fillStyle = '#090b07';
-                if (ch.loaded && ch.wallBoxes && ch.wallBoxes.length) {
-                    // Chunk cargado: paredes REALES (finas, curvas, tabiques
-                    // inclinados y pilares) desde las cajas de colision
+                if (ch.wallBoxes && ch.wallBoxes.length) {
+                    // Paredes REALES (finas, curvas, tabiques inclinados y
+                    // pilares) desde las cajas de colision. Las cajas se
+                    // CONSERVAN aunque el chunk este descargado (world.js ya
+                    // no las borra al descargar): antes, al alejarse, el mapa
+                    // caia a la aproximacion por rejilla y dibujaba muros que
+                    // no existian en el 3D ("puedo estar en una pared que el
+                    // mapa dice que no existe").
                     for (const b of ch.wallBoxes) {
                         const lcx = Math.floor(((b.minX + b.maxX) / 2 - gx * CS) / C);
                         const lcz = Math.floor(((b.minZ + b.maxZ) / 2 - gz * CS) / C);
@@ -1701,9 +1718,19 @@
                 const tgt = pos.clone().addScaledVector(dir, 12);
                 tgt.y = Math.max(0.5, pos.y - 0.5);
                 this._feedCam.lookAt(tgt);
+                // Evitar el bucle de realimentacion de GL: el monitor usa como
+                // textura el propio render target y, si la camara de seguridad
+                // lo ve mientras se renderiza el feed, WebGL descarta el frame
+                // (GL_INVALID_OPERATION) y el monitor puede quedarse negro.
+                const hidden = [];
+                for (const r of this.worldSystem.securityRooms) {
+                    if (r.monitor) { hidden.push(r.monitor); r.monitor.visible = false; }
+                    if (r.panelGroup) { hidden.push(r.panelGroup); r.panelGroup.visible = false; }
+                }
                 this.renderer.setRenderTarget(this._feedRT);
                 this.renderer.render(this.scene, this._feedCam);
                 this.renderer.setRenderTarget(null);
+                for (const m of hidden) m.visible = true;
             }
             for (const r of this.worldSystem.securityRooms) {
                 if (!r.monitor) continue;
