@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Backrooms: Nivel 0 - Las Oficinas Infinitas</title>
-    <!-- Three.js CDN -->
+    <!-- Three.js CDN + Paho MQTT (multijugador) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
     <style>
 /* ============================================================
    THE BACKROOMS: NIVEL 0 - estilos (extraidos de index.html)
@@ -423,7 +424,7 @@
             border-color: #bda052;
         }
 
-        #seed-input {
+        #seed-input, #name-input {
             width: 260px;
             max-width: 90%;
             padding: 9px 12px;
@@ -437,11 +438,11 @@
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
-        #seed-input:focus {
+        #seed-input:focus, #name-input:focus {
             border-color: #bda052;
             box-shadow: 0 0 10px rgba(189, 160, 82, 0.25);
         }
-        #seed-input::placeholder {
+        #seed-input::placeholder, #name-input::placeholder {
             color: #4f4833;
             letter-spacing: 1px;
             font-size: 11px;
@@ -517,7 +518,8 @@
                 <div id="coords-label" class="coords-label">POS X:+0000.0 Y:+0001.6 Z:+0000.0</div>
                 <div class="sanity-label"><span>ESTABILIDAD MENTAL</span><span id="sanity-num">100%</span></div>
                 <div class="sanity-bar"><div id="sanity-fill" class="sanity-fill"></div></div>
-                <div id="seed-label" class="coords-label" style="margin-top: 5px; margin-bottom: 0; color: #756a47;">SEMILLA: --</div>
+                <div id="seed-label" class="coords-label" style="margin-top: 5px; color: #756a47;">SEMILLA: --</div>
+                <div id="net-status" class="coords-label" style="margin-top: 3px; margin-bottom: 0; color: #756a47;">🛰 MULTIJUGADOR: SOLO</div>
             </div>
         </div>
 
@@ -579,9 +581,19 @@
                 • <b>La Entidad:</b> Usa los pilares centrales de las salas para romper su campo de visión y escapar.
             </p>
             <div style="margin-bottom: 16px;">
-                <label for="seed-input" style="font-size: 11px; letter-spacing: 2px; color: #8c8266; display: block; margin-bottom: 7px;">SEMILLA DEL MUNDO (OPCIONAL)</label>
-                <input type="text" id="seed-input" placeholder="Deja vacío para una semilla aleatoria" autocomplete="off" spellcheck="false" maxlength="32">
+                <label for="seed-input" style="font-size: 11px; letter-spacing: 2px; color: #8c8266; display: block; margin-bottom: 7px;">SEMILLA DEL MUNDO / CÓDIGO DE SALA</label>
+                <div style="display: flex; gap: 8px; justify-content: center;">
+                    <input type="text" id="seed-input" placeholder="Deja vacío para una semilla aleatoria" autocomplete="off" spellcheck="false" maxlength="32">
+                    <button id="btn-random-seed" class="btn" style="padding: 9px 13px; font-size: 14px; margin: 0;" title="Generar semilla aleatoria">🎲</button>
+                </div>
             </div>
+            <div style="margin-bottom: 16px;">
+                <label for="name-input" style="font-size: 11px; letter-spacing: 2px; color: #8c8266; display: block; margin-bottom: 7px;">NOMBRE (MULTIJUGADOR)</label>
+                <input type="text" id="name-input" placeholder="Explorador" autocomplete="off" spellcheck="false" maxlength="14">
+            </div>
+            <p style="font-size: 11px; line-height: 1.7; color: #7d7355; margin-bottom: 14px;">
+                🛰 <b style="color:#a39879;">MULTIJUGADOR · HASTA 6 EXPLORADORES:</b> quienes escriban la <b style="color:#a39879;">MISMA SEMILLA</b> caen en la misma sala. El número del HUD (SEMILLA) es el código para compartir. Si la sala está llena jugarás en solitario.
+            </p>
             <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
             <div style="margin-top: 18px; font-size: 12px;">
                 <label for="vol-slider">VOLUMEN:</label>
@@ -614,15 +626,7 @@
         </div>
     </div>
 
-    <script src="js/textures-data.js"></script>
-    <script src="js/textures.js"></script>
-    <script src="js/audio.js"></script>
-    <script src="js/models.js"></script>
-    <script src="js/world.js"></script>
-    <script src="js/chalk.js"></script>
-    <script src="js/entity.js"></script>
-    <script src="js/game.js"></script>
-</body>
+    </body>
     <script>
 /* GENERADO AUTOMATICAMENTE - no editar a mano.
    Textura del suelo (assets/floor-texture.png) embebida en base64 para que
@@ -636,6 +640,22 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 /* ==========================================================================
        1. TEXTURAS PROCEDURALES CANVAS 2D
        ========================================================================== */
+    // RNG de texturas con semilla FIJA: el papel pintado y el techo se generan
+    // identicos en cada partida y en cada cliente (antes usaban Math.random y
+    // la misma semilla "1" daba texturas distintas cada vez que se abria el
+    // juego, como si el backroom cambiase de partida a partida).
+    function mulberry32Tex(seed) {
+        let a = seed >>> 0;
+        return function () {
+            a |= 0;
+            a = (a + 0x6D2B79F5) | 0;
+            let t = Math.imul(a ^ (a >>> 15), 1 | a);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+    const texRng = mulberry32Tex(0x9E3779B9);
+
     const TextureGenerator = {
         createWallpaperTexture() {
             const canvas = document.createElement('canvas');
@@ -653,7 +673,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const imgData = ctx.getImageData(0, 0, 512, 512);
             const d = imgData.data;
             for (let i = 0; i < d.length; i += 4) {
-                const noise = (Math.random() - 0.5) * 18;
+                const noise = (texRng() - 0.5) * 18;
                 d[i] = Math.min(255, Math.max(0, d[i] + noise));
                 d[i+1] = Math.min(255, Math.max(0, d[i+1] + noise));
                 d[i+2] = Math.min(255, Math.max(0, d[i+2] + noise * 0.6));
@@ -694,7 +714,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
             ctx.fillStyle = '#4c493c';
             for (let i = 0; i < 400; i++) {
-                ctx.fillRect(Math.random() * 504 + 4, Math.random() * 504 + 4, 2, 2);
+                ctx.fillRect(texRng() * 504 + 4, texRng() * 504 + 4, 2, 2);
             }
 
             const tex = new THREE.CanvasTexture(canvas);
@@ -1487,15 +1507,15 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         // Tulipas emisivas: los paneles lejanos brillan siempre a traves de la niebla,
         // sin necesidad de cientos de PointLights dinamicos
         lampLit: new THREE.MeshStandardMaterial({
-            color: 0xfff4b2,
-            emissive: new THREE.Color(0xfff0ba),
-            emissiveIntensity: 0.14,
+            color: 0xffe69a,
+            emissive: new THREE.Color(0xffe38a),
+            emissiveIntensity: 0.55,
             roughness: 0.4
         }),
         lampFlicker: new THREE.MeshStandardMaterial({
-            color: 0xfff4b2,
-            emissive: new THREE.Color(0xfff0ba),
-            emissiveIntensity: 0.14,
+            color: 0xffe69a,
+            emissive: new THREE.Color(0xffe38a),
+            emissiveIntensity: 0.55,
             roughness: 0.4
         }),
         lampOff: new THREE.MeshStandardMaterial({ color: 0x11100c, roughness: 0.9 }),
@@ -1990,8 +2010,6 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 rects.push({ x: rx, z: rz, w, h });
                 ch.rooms.push({ x: rx, z: rz, w, h });
             }
-            // Repeticion limitada: hileras de salas identicas (backrooms)
-            this.repeatStructure(ch, rects);
 
             // Conecta salas entre si y con las puertas
             const targets = ch.doorCells.slice().map(c => ({ x: c.x, z: c.z }));
@@ -2002,18 +2020,18 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             if (r() < 0.7) this.addStub(ch);
         }
 
-        // Pilares CENTRALES dispersos (bloquean la vista de la entidad): finos,
-        // sin rejillas repetitivas y nunca a menos de 2 celdas de una pared.
-        // Toda sala amplia (4+ celdas) garantiza pilares: es raro que una zona
-        // con espacio quede completamente despejada, y las grandes suelen
-        // llevar varios.
+        // Pilares ASIMETRICOS (bloquean la vista de la entidad): finos, en
+        // posiciones aleatorias por TODA la sala (antes solo la franja central,
+        // que dejaba las salas con aire simetrico). Cantidad aleatoria
+        // proporcional al tamano; toda sala amplia (4+ celdas) garantiza al
+        // menos uno. El pase 3c retira los que quedan pegados a una pared.
         placeRoomPillars(ch, room) {
             const { x: rx, z: rz, w, h } = room;
             if (w < 4 || h < 4) return;
             const r = ch.rng;
             const cands = [];
-            for (let px = rx + Math.ceil(w / 2) - 1; px <= rx + w - Math.ceil(w / 2); px++) {
-                for (let pz = rz + Math.ceil(h / 2) - 1; pz <= rz + h - Math.ceil(h / 2); pz++) {
+            for (let px = rx + 1; px <= rx + w - 2; px++) {
+                for (let pz = rz + 1; pz <= rz + h - 2; pz++) {
                     cands.push([px, pz]);
                 }
             }
@@ -2021,9 +2039,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 const j = Math.floor(r() * (i + 1));
                 [cands[i], cands[j]] = [cands[j], cands[i]];
             }
-            const guaranteed = Math.min(2, cands.length);
-            for (let i = 0; i < cands.length; i++) {
-                if (i >= guaranteed && r() >= 0.65) continue;
+            const area = w * h;
+            const maxPillars = area >= 30 ? 4 : (area >= 16 ? 3 : 2);
+            const n = Math.min(cands.length, 1 + Math.floor(r() * maxPillars));
+            for (let i = 0; i < n; i++) {
                 ch.grid[cands[i][0]][cands[i][1]] = 3;
             }
         }
@@ -2039,14 +2058,24 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 for (let z = hz; z < hz + h; z++) ch.grid[x][z] = 2;
             }
             ch.rooms.push({ x: hx, z: hz, w, h });
-            // Divisor interior: un trozo de pared corto separa el salon sin
-            // cerrarlo (deja paso por ambos lados): menos campo abierto
-            if (w >= 6 && r() < 0.6) {
+            // Divisor interior: un trozo de pared corto (horizontal o vertical,
+            // en posicion aleatoria, nunca centrado) separa el salon sin
+            // cerrarlo (deja paso por ambos lados): menos campo abierto y
+            // menos simetria
+            if (r() < 0.65) {
                 const dl = 1 + Math.floor(r() * 2); // 1-2 celdas de largo
-                const px = hx + 1 + Math.floor(r() * (w - 2 - dl));
-                const pz = hz + Math.floor(h / 2);
-                for (let i = 0; i < dl; i++) {
-                    if (ch.grid[px + i][pz] === 2) ch.grid[px + i][pz] = 1;
+                if (w >= 6 && (h < 6 || r() < 0.5)) {
+                    const px = hx + 1 + Math.floor(r() * (w - 2 - dl));
+                    const pz = hz + 1 + Math.floor(r() * (h - 2));
+                    for (let i = 0; i < dl; i++) {
+                        if (ch.grid[px + i][pz] === 2) ch.grid[px + i][pz] = 1;
+                    }
+                } else if (h >= 6) {
+                    const px = hx + 1 + Math.floor(r() * (w - 2));
+                    const pz = hz + 1 + Math.floor(r() * (h - 2 - dl));
+                    for (let i = 0; i < dl; i++) {
+                        if (ch.grid[px][pz + i] === 2) ch.grid[px][pz + i] = 1;
+                    }
                 }
             }
             // A veces una salita lateral pequeña, separada del salon
@@ -2065,9 +2094,6 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     }
                     const sr = { x: sx, z: sz, w: sw, h: sh };
                     ch.rooms.push(sr);
-                    // Repeticion limitada de la salita lateral (hilera identica);
-                    // el salon entra en la lista para que las copias no lo pisen
-                    this.repeatStructure(ch, [{ x: hx, z: hz, w, h }, sr]);
                 }
             }
             // El salon conecta con todas las puertas (pasillos anchos de acceso)
@@ -2134,8 +2160,6 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 }
                 ch.rooms.push({ x: x - 1, z: z - 1, w, h });
             }
-            // Repeticion limitada de la celdita escondida (hilera identica)
-            if (ch.rooms.length) this.repeatStructure(ch, [ch.rooms[ch.rooms.length - 1]]);
 
             // Callejon sin salida: el pasadizo tambien engana a veces
             if (r() < 0.8) this.addStub(ch);
@@ -2144,61 +2168,6 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const targets = ch.doorCells.slice().map(c => ({ x: c.x, z: c.z }));
             targets.push({ x, z });
             this.connectTargets(ch, targets);
-        }
-
-        // Repeticion LIMITADA de una estructura pequena: una sala pequena con
-        // su marco de paredes se estampa 1-2 veces mas en el mismo chunk,
-        // formando una hilera de salas IDENTICAS (clasico del backrooms). Solo
-        // en algunos chunks (~13%), solo salas pequenas, y nunca mas de 3
-        // copias en total: la repeticion siempre tiene limite.
-        repeatStructure(ch, rects) {
-            const N = CHUNK_SIZE;
-            const g = ch.grid;
-            const r = ch.rng;
-            if (r() >= 0.13) return;
-            const cand = rects.filter(rt => rt.w <= 4 && rt.h <= 4);
-            if (!cand.length) return;
-            const src = cand[Math.floor(r() * cand.length)];
-            const pw = src.w + 2, ph = src.h + 2; // patron = sala + marco
-            const copies = 1 + Math.floor(r() * 2); // 1-2 copias (total 2-3)
-
-            // Leer el patron completo (sala + marco de paredes + pilares)
-            const pat = [];
-            for (let dx = -1; dx <= src.w; dx++) {
-                const row = [];
-                for (let dz = -1; dz <= src.h; dz++) row.push(g[src.x + dx][src.z + dz]);
-                pat.push(row);
-            }
-
-            const occupied = rects.map(rt => ({ x: rt.x - 1, z: rt.z - 1, w: rt.w + 2, h: rt.h + 2 }));
-            const fits = (ox, oz) =>
-                ox >= 1 && oz >= 1 && ox + pw <= N - 1 && oz + ph <= N - 1 &&
-                occupied.every(o => ox + pw <= o.x || o.x + o.w <= ox || oz + ph <= o.z || o.z + o.h <= oz);
-
-            // Hilera: copias alineadas con la original (este, oeste, sur, norte)
-            let spots = null;
-            for (const [dx, dz] of [[pw + 1, 0], [-(pw + 1), 0], [0, ph + 1], [0, -(ph + 1)]]) {
-                const trySpots = [];
-                let ok = true;
-                for (let k = 1; k <= copies && ok; k++) {
-                    const ox = src.x - 1 + dx * k;
-                    const oz = src.z - 1 + dz * k;
-                    if (fits(ox, oz)) trySpots.push({ x: ox, z: oz });
-                    else ok = false;
-                }
-                if (ok) { spots = trySpots; break; }
-            }
-            if (!spots) return;
-
-            // Estampar las copias (patron identico: misma estructura repetida)
-            for (const s of spots) {
-                for (let dx = 0; dx < pw; dx++) {
-                    for (let dz = 0; dz < ph; dz++) g[s.x + dx][s.z + dz] = pat[dx][dz];
-                }
-                const nr = { x: s.x + 1, z: s.z + 1, w: src.w, h: src.h };
-                rects.push(nr);
-                ch.rooms.push(nr);
-            }
         }
 
         // Une una lista de puntos con pasillos de ancho aleatorio
@@ -2448,7 +2417,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const curved = this.pickCurvedRuns(ch, wallKind, key);
             const curvedCells = new Set();
             for (const run of curved) {
-                const built = this.buildCurvedWall(ch, run, wallTMap, key);
+                const built = this.buildCurvedWall(ch, run, wallTMap, key, wallKind);
                 for (const c of built.cells) curvedCells.add(key(c[0], c[1]));
                 ch.wallBoxes.push(...built.boxes);
             }
@@ -2686,8 +2655,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const g = ch.grid;
             const r = ch.rng;
             const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
-            // "De vez en cuando": ~1 de cada 4 chunks tiene una pared curva
-            if (r() >= 0.28) return [];
+            // "De vez en cuando": ~1 de cada 5 chunks tiene una pared curva
+            if (r() >= 0.2) return [];
 
             const runs = [];
             const visited = new Set();
@@ -2736,7 +2705,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         // es un tabique libre) y su amplitud se limita para que el paso nunca
         // quede por debajo de ~1,2 m. Devuelve las celdas sustituidas y las
         // cajas de colision (una por celda, centradas en la curva).
-        buildCurvedWall(ch, run, wallTMap, key) {
+        buildCurvedWall(ch, run, wallTMap, key, wallKind) {
             const C = CELL_SIZE;
             const H = WALL_HEIGHT;
             const N = CHUNK_SIZE;
@@ -2755,6 +2724,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const along1 = kind === 'x' ? oz + (last[1] + 1) * C : ox + (last[0] + 1) * C;
             const fixed0 = kind === 'x' ? ox + (first[0] + 0.5) * C : oz + (first[1] + 0.5) * C;
 
+            // Sellado de extremos: como las paredes rectas, la pared curva se
+            // ALARGA hacia el poste/borde contiguo (misma extension: 1,12 m a
+            // postes, 2,45 m a bordes de chunk). Sin esto, un tramo curvo que
+            // terminaba en un borde dejaba un hueco de ~2 m por el que se
+            // colaba a la zona de atras de la pared.
+            const nk0 = kind === 'x' ? wallKind.get(key(first[0], first[1] - 1)) : wallKind.get(key(first[0] - 1, first[1]));
+            const nk1 = kind === 'x' ? wallKind.get(key(last[0], last[1] + 1)) : wallKind.get(key(last[0] + 1, last[1]));
+            const extFor = (nk) => nk === 'border' ? 2.45 : (nk === 'post' ? 1.12 : 0);
+            const ext0 = extFor(nk0);
+            const ext1 = extFor(nk1);
+            const sweep0 = along0 - ext0;
+            const sweep1 = along1 + ext1;
+
             // Lado del arco: hacia el pasillo abierto (o al azar si esta libre)
             let wOpen = false, eOpen = false;
             for (const [cx, cz] of cells) {
@@ -2769,17 +2751,20 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const B = Math.min(cap, (0.30 + ch.rng() * 0.40) * C);
 
             // Muestras a lo largo del tramo (~0,5 m) para que el arco se vea liso
-            const n = Math.max(6, Math.ceil((along1 - along0) / 0.5));
+            const n = Math.max(6, Math.ceil((sweep1 - sweep0) / 0.5));
             const pos = [], uv = [], idx = [];
             const vert = (x, y, z, u, vv) => { pos.push(x, y, z); uv.push(u, vv); return pos.length / 3 - 1; };
             const quad = (a, b, c, d) => { idx.push(a, b, c, a, c, d); };
 
-            // Barrido: cada muestra es una seccion rectangular de grosor T
+            // Barrido: cada muestra es una seccion rectangular de grosor T. El
+            // arco (sinusoide) solo se aplica entre along0 y along1; las colas
+            // rectas de los extremos alargan la pared hasta el poste/borde.
             const edges = [];
             for (let i = 0; i <= n; i++) {
                 const t = i / n;
-                const along = along0 + t * (along1 - along0);
-                const off = dir * B * Math.sin(Math.PI * t);
+                const along = sweep0 + t * (sweep1 - sweep0);
+                const tt = Math.min(1, Math.max(0, (along - along0) / (along1 - along0)));
+                const off = dir * B * Math.sin(Math.PI * tt);
                 if (kind === 'x') {
                     const f = fixed0 + off;
                     edges.push([[f - T / 2, along], [f + T / 2, along]]);
@@ -2788,7 +2773,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     edges.push([[along, f - T / 2], [along, f + T / 2]]);
                 }
             }
-            const alongU = (along1 - along0) / C;   // textura ~1 vez por celda
+            const alongU = (sweep1 - sweep0) / C;   // textura ~1 vez por celda
             for (let i = 0; i < n; i++) {
                 const A = edges[i], Bb = edges[i + 1];
                 const u0 = (i / n) * alongU, u1 = ((i + 1) / n) * alongU;
@@ -2826,21 +2811,44 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.scene.add(mesh);
             ch.meshes.push(mesh);
 
-            // Colision: una caja por celda sustituida, centrada en la curva
-            // (el parametro t se calcula en coordenadas de MUNDO: sin el
-            // desplazamiento del chunk las cajas se descuadraban del arco)
+            // Colision: una caja por celda sustituida que cubre TODO el barrido
+            // del arco dentro de la celda. Antes la caja se centraba en el punto
+            // central de la celda: el arco sobresalia hasta ~0,5 m por los
+            // bordes de cada celda y se podia ATRAVESAR la pared curva por esos
+            // huecos ("una puertecita para entrar por detras de la pared").
+            // Se muestrea la curva en el inicio, centro y fin de cada celda
+            // (la sinusoide es monotona entre medias) y la caja abarca el
+            // minimo y el maximo: cubre exactamente la malla.
             const boxes = [];
+            const offAt = (t) => dir * B * Math.sin(Math.PI * t);
             for (const [cx, cz] of cells) {
-                const cellAlong = kind === 'x' ? oz + (cz + 0.5) * C : ox + (cx + 0.5) * C;
-                const t = (cellAlong - along0) / (along1 - along0);
-                const off = dir * B * Math.sin(Math.PI * t);
+                let cellStart = kind === 'x' ? oz + cz * C : ox + cx * C;
+                let cellEnd = kind === 'x' ? oz + (cz + 1) * C : ox + (cx + 1) * C;
+                // Colas de sellado en las celdas de los extremos
                 if (kind === 'x') {
-                    boxes.push({ minX: fixed0 + off - T / 2, maxX: fixed0 + off + T / 2, minZ: oz + cz * C, maxZ: oz + (cz + 1) * C });
+                    if (cz === first[1]) cellStart -= ext0;
+                    if (cz === last[1]) cellEnd += ext1;
                 } else {
-                    boxes.push({ minX: ox + cx * C, maxX: ox + (cx + 1) * C, minZ: fixed0 + off - T / 2, maxZ: fixed0 + off + T / 2 });
+                    if (cx === first[0]) cellStart -= ext0;
+                    if (cx === last[0]) cellEnd += ext1;
+                }
+                const t0 = (cellStart - along0) / (along1 - along0);
+                const t1 = (cellEnd - along0) / (along1 - along0);
+                // En las colas rectas (fuera del tramo curvo) el arco no se
+                // aplica: las muestras se limitan al rango real de la curva
+                const tt0 = Math.min(1, Math.max(0, t0));
+                const tt1 = Math.min(1, Math.max(0, t1));
+                const offs = [offAt(tt0), offAt((tt0 + tt1) / 2), offAt(tt1)];
+                if (tt0 < 0.5 && tt1 > 0.5) offs.push(offAt(0.5)); // pico de la curva
+                const minOff = Math.min(...offs) - T / 2;
+                const maxOff = Math.max(...offs) + T / 2;
+                if (kind === 'x') {
+                    boxes.push({ minX: fixed0 + minOff, maxX: fixed0 + maxOff, minZ: cellStart, maxZ: cellEnd });
+                } else {
+                    boxes.push({ minX: cellStart, maxX: cellEnd, minZ: fixed0 + minOff, maxZ: fixed0 + maxOff });
                 }
             }
-            return { cells, boxes };
+            return { cells, boxes, kind, along0, along1, sweep0, sweep1, fixed0, dir, B, T, ext0, ext1 };
         }
 
         // ================================================================
@@ -2860,10 +2868,31 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             return true;
         }
 
+        // Ejecuta un bloque con Math.random sustituido por un generador
+        // DETERMINISTA del chunk (muebles, armarios, escombros y detalles de
+        // los modelos). Antes usaban Math.random global: con la misma semilla
+        // cada partida colocaba muebles distintos y parecía otro backroom.
+        // Ahora el mismo chunk con la misma semilla SIEMPRE genera el mismo
+        // mobiliario (requisito también del multijugador: todos comparten
+        // exactamente el mismo mundo).
+        withChunkRng(ch, fn) {
+            const rng = mulberry32(hash2(ch.cx * 262147 + 17, ch.cz * 262147 + 31));
+            const saved = Math.random;
+            Math.random = rng;
+            try {
+                return fn();
+            } finally {
+                Math.random = saved;
+            }
+        }
+
         placeChunkFurniture(ch) {
             if (ch.furnitureDone) return;
             ch.furnitureDone = true;
+            this.withChunkRng(ch, () => this.placeChunkFurnitureInner(ch));
+        }
 
+        placeChunkFurnitureInner(ch) {
             for (const r of ch.rooms) {
                 // Coordenadas de mundo para la sala
                 const rw = { x: ch.cx * CHUNK_SIZE + r.x, z: ch.cz * CHUNK_SIZE + r.z, w: r.w, h: r.h };
@@ -3286,6 +3315,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }
 
         spawnChunkPickups(ch) {
+            // El materializado de objetos tambien usa el RNG del chunk: las
+            // rotaciones de pilas y notas son identicas para todos los clientes
+            this.withChunkRng(ch, () => this.spawnChunkPickupsInner(ch));
+        }
+
+        spawnChunkPickupsInner(ch) {
             if (!ch.pickupsDone) {
                 ch.pickupsDone = true;
                 const r = ch.rng;
@@ -3428,6 +3463,43 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 /* ==========================================================================
        6. INTELIGENCIA ARTIFICIAL DEL MONSTRUO: PATRULLA, FOV Y SIGILO
        ========================================================================== */
+    // Construye el modelo 3D de la entidad (cuerpo de tentaculos negros).
+    // Se usa tanto para la entidad local como para el ESPECTRO sincronizado
+    // que ven los demas jugadores en multijugador.
+    function createEntityModel() {
+        const group = new THREE.Group();
+        const tentacles = [];
+        const blackMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.1, metalness: 0.95 });
+
+        for (let i = 0; i < 6; i++) {
+            const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, 0.35, 6), blackMat);
+            seg.position.y = 0.2 + i * 0.28;
+            group.add(seg);
+            tentacles.push(seg);
+        }
+
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), blackMat);
+        head.position.y = 1.9;
+        group.add(head);
+
+        const redEyeMat = new THREE.MeshBasicMaterial({ color: 0xff1111 });
+        const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), redEyeMat);
+        eye1.position.set(0.06, 1.93, 0.14);
+        const eye2 = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), redEyeMat);
+        eye2.position.set(-0.06, 1.93, 0.14);
+        group.add(eye1, eye2);
+
+        for (let i = 0; i < 4; i++) {
+            const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.05, 1.4, 5), blackMat);
+            arm.position.set((i % 2 === 0 ? 0.3 : -0.3), 1.2, 0);
+            arm.rotation.z = (i % 2 === 0 ? 0.4 : -0.4);
+            group.add(arm);
+            tentacles.push(arm);
+        }
+
+        return { group, tentacles };
+    }
+
     class BacteriophageEntity {
         constructor(scene) {
             this.scene = scene;
@@ -3443,39 +3515,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.lastKnownPos = new THREE.Vector3();
             this.tentacles = [];
 
-            this.buildModel();
+            const model = createEntityModel();
+            this.mesh = model.group;
+            this.tentacles = model.tentacles;
             this.mesh.visible = false;
             this.scene.add(this.mesh);
-        }
-
-        buildModel() {
-            const blackMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.1, metalness: 0.95 });
-
-            for (let i = 0; i < 6; i++) {
-                const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, 0.35, 6), blackMat);
-                seg.position.y = 0.2 + i * 0.28;
-                this.mesh.add(seg);
-                this.tentacles.push(seg);
-            }
-
-            const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), blackMat);
-            head.position.y = 1.9;
-            this.mesh.add(head);
-
-            const redEyeMat = new THREE.MeshBasicMaterial({ color: 0xff1111 });
-            const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), redEyeMat);
-            eye1.position.set(0.06, 1.93, 0.14);
-            const eye2 = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), redEyeMat);
-            eye2.position.set(-0.06, 1.93, 0.14);
-            this.mesh.add(eye1, eye2);
-
-            for (let i = 0; i < 4; i++) {
-                const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.05, 1.4, 5), blackMat);
-                arm.position.set((i % 2 === 0 ? 0.3 : -0.3), 1.2, 0);
-                arm.rotation.z = (i % 2 === 0 ? 0.4 : -0.4);
-                this.mesh.add(arm);
-                this.tentacles.push(arm);
-            }
         }
 
         spawnDistant(walkableCells, playerPos) {
@@ -3680,6 +3724,618 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
     </script>
     <script>
 /* ==========================================================================
+       9. MODELO DEL EXPLORADOR (jugadores remotos del multijugador)
+       ==========================================================================
+       Humanoides procedimentales con primitivas: pantalon oscuro, torso con
+       el color del jugador (para distinguirlos en la sala), cabeza, mochila y
+       una linterna en la mano derecha. Devuelve { group, headY } para que el
+       HUD de nombres y el foco de luz se coloquen a la altura correcta.
+       ========================================================================== */
+    function createExplorerModel(colorHex) {
+        const jacket = new THREE.Color(colorHex || 0x9a8b4f);
+
+        const darkMat = new THREE.MeshStandardMaterial({ color: 0x2e2e38, roughness: 0.85 });
+        const clothMat = new THREE.MeshStandardMaterial({
+            color: jacket,
+            roughness: 0.85,
+            emissive: jacket,
+            emissiveIntensity: 0.08
+        });
+        const skinMat = new THREE.MeshStandardMaterial({ color: 0xc99a73, roughness: 0.7 });
+        const metalMat = new THREE.MeshStandardMaterial({ color: 0x55555e, metalness: 0.6, roughness: 0.4 });
+        const lensMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
+
+        const group = new THREE.Group();
+
+        // Piernas
+        const legGeo = new THREE.CylinderGeometry(0.055, 0.065, 0.62, 8);
+        const legL = new THREE.Mesh(legGeo, darkMat);
+        legL.position.set(-0.09, 0.31, 0);
+        const legR = new THREE.Mesh(legGeo, darkMat);
+        legR.position.set(0.09, 0.31, 0);
+        group.add(legL, legR);
+
+        // Torso (cazadora del color del jugador)
+        const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.13, 0.5, 10), clothMat);
+        torso.position.y = 0.87;
+        group.add(torso);
+
+        // Brazos
+        const armGeo = new THREE.CylinderGeometry(0.045, 0.05, 0.55, 8);
+        const armL = new THREE.Mesh(armGeo, clothMat);
+        armL.position.set(-0.21, 1.0, 0);
+        armL.rotation.z = 0.14;
+        const armR = new THREE.Mesh(armGeo, clothMat);
+        armR.position.set(0.21, 1.0, 0);
+        armR.rotation.z = -0.14;
+        group.add(armL, armR);
+
+        // Cabeza
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), skinMat);
+        head.position.y = 1.38;
+        group.add(head);
+
+        // Mochila a la espalda
+        const pack = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.4, 0.16), darkMat);
+        pack.position.set(0, 0.95, -0.16);
+        group.add(pack);
+
+        // Linterna en la mano derecha, apuntando hacia delante
+        const torch = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.2, 8), metalMat);
+        torch.rotation.x = -Math.PI / 2;
+        torch.position.set(0.3, 0.92, 0.2);
+        const lens = new THREE.Mesh(new THREE.CircleGeometry(0.026, 8), lensMat);
+        lens.rotation.y = Math.PI / 2;
+        lens.position.set(0.3, 0.92, 0.31);
+        group.add(torch, lens);
+
+        return { group, headY: 1.38 };
+    }
+    </script>
+    <script>
+/* ==========================================================================
+   8. MULTIJUGADOR (HASTA 6 JUGADORES) VIA MQTT PUBLICO + MUNDO DETERMINISTA
+   ==========================================================================
+   El juego no tiene servidor propio: se usa un broker MQTT publico (EMQX)
+   por WebSockets. Todos los clientes que escriben la MISMA SEMILLA caen en
+   la misma sala (el mundo es determinista: misma semilla -> mismo backroom,
+   asi que cada uno ve exactamente el mismo laberinto con los demas dentro).
+
+   - Presencia: mensajes RETAINED por jugador; si un cliente se cae sin
+     avisar, su presencia se limpia sola con el heartbeat (12 s).
+   - Estado: posicion/rotacion/linterna a ~12 Hz, interpolados en remoto.
+   - Entidad: SOLO el cliente con el pid mas bajo simula al monstruo y
+     publica su posicion; el resto lo ve como espectro sincronizado y sufre
+     el contacto/vision igualmente (mundo identico -> muros identicos).
+   - Limite: maximo 6 jugadores por sala (mejor esfuerzo, sin servidor).
+   ========================================================================== */
+    class MultiplayerManager {
+        constructor(scene, camera, opts = {}) {
+            this.scene = scene;
+            this.camera = camera;
+            this.onToast = opts.onToast || (() => {});
+            this.onKill = opts.onKill || (() => {});
+            this.MAX_PLAYERS = 6;
+
+            // Identidad unica de esta sesion (solo [0-9a-zA-Z], requisito MQTT)
+            this.pid = 'p' + Math.random().toString(36).slice(2, 8);
+            this.roomKey = null;
+            this.playerName = 'EXPLORADOR';
+
+            // Brokers publicos probados (WebSocket seguro + MQTT anonimo);
+            // si el primero no responde se prueba el siguiente.
+            this.brokers = [
+                { host: 'broker.hivemq.com', port: 8884, path: '/mqtt' },
+                { host: 'broker.emqx.io', port: 8084, path: '/mqtt' }
+            ];
+            this.brokerIdx = 0;
+
+            this.client = null;
+            this.connected = false;   // socket MQTT arriba
+            this.joined = false;      // presencia publicada y sala confirmada
+            this.snapshotDone = false;
+            this.roomFull = false;
+            this.isHost = true;       // quien simula la entidad (pid mas bajo)
+
+            this.peers = new Map();   // pid -> { name, lastSeen, x,y,z,yaw, tx,ty,tz,tyaw, f }
+            this.remotePlayers = new Map(); // pid -> { group, spot, tgt }
+            this.entityGhost = null;
+            this.entityTentacles = [];
+            this.entityActive = false;
+            this.entityLastMsg = 0;
+            this.entity = null;       // entidad local (solo la usa el host)
+
+            this.pubTimer = 0;
+            this.entPubTimer = 0;
+            this.presenceTimer = 0;
+            this.cleanTimer = 0;
+            this._netHud = '';
+        }
+
+        // ----------------------------------------------------------------
+        //  CONEXION / SALA
+        // ----------------------------------------------------------------
+        join(roomKey, playerName) {
+            this.roomKey = String(roomKey);
+            this.playerName = (playerName || 'EXPLORADOR').slice(0, 14).toUpperCase();
+            this.isHost = true;
+
+            if (typeof Paho === 'undefined') {
+                this.onToast('⚠ MULTIJUGADOR NO DISPONIBLE · modo solitario');
+                return;
+            }
+            this.brokerIdx = 0;
+            this.connectNextBroker();
+        }
+
+        connectNextBroker() {
+            if (this.brokerIdx >= this.brokers.length) {
+                this.connected = false;
+                this.onToast('⚠ MULTIJUGADOR SIN CONEXIÓN · sigues en solitario');
+                return;
+            }
+            const b = this.brokers[this.brokerIdx++];
+            const cid = 'fb' + Math.random().toString(36).slice(2, 10);
+            // Paho 1.0.x expone Paho.MQTT.Client; 1.1.x (cdnjs) expone Paho.Client
+            const PahoClient = (Paho.MQTT && Paho.MQTT.Client) || Paho.Client;
+            try {
+                this.client = new PahoClient(b.host, b.port, b.path, cid);
+                this.client.onMessageArrived = (m) => this.handleMessage(m);
+                this.client.onConnectionLost = (r) => {
+                    if (r.errorCode !== 0 && this.joined) {
+                        this.connected = false;
+                        this.joined = false;
+                        this.onToast('⚠ CONEXIÓN DE SALA PERDIDA · sigues en solitario');
+                    }
+                };
+                this.client.connect({
+                    useSSL: true,
+                    timeout: 8,
+                    keepAliveInterval: 20,
+                    cleanSession: true,
+                    onSuccess: () => this.onConnect(),
+                    onFailure: () => this.connectNextBroker()
+                });
+            } catch (e) {
+                this.connectNextBroker();
+            }
+        }
+
+        onConnect() {
+            this.connected = true;
+            const sub = (t) => this.client.subscribe(t, { qos: 0 });
+            sub(this.presenceTopic('+'));
+            sub(this.stateTopic('+'));
+            sub(this.entTopic());
+            this.publishPresence();
+            this.onToast('🛰 CONECTADO · sala ' + this.roomKey);
+            // Pequena espera para recibir las presencias retenidas de los que
+            // ya estaban, y asi saber cuantos somos antes de entrar de verdad
+            setTimeout(() => this.snapshot(), 1300);
+        }
+
+        snapshot() {
+            if (!this.connected) return;
+            const others = [...this.peers.keys()].filter((pid) => pid !== this.pid);
+            if (others.length >= this.MAX_PLAYERS) {
+                this.roomFull = true;
+                this.leave();
+                this.onToast('🚫 SALA LLENA (' + this.MAX_PLAYERS + '/' + this.MAX_PLAYERS + ') · prueba otra semilla o juega en solitario');
+                return;
+            }
+            this.snapshotDone = true;
+            this.joined = true;
+            this.updateHost();
+            const total = others.length + 1;
+            this.onToast('👥 SALA ' + this.roomKey + ' · ' + total + '/' + this.MAX_PLAYERS + ' EXPLORADORES');
+            for (const pid of others) {
+                const p = this.peers.get(pid);
+                if (p) this.onToast('👤 ' + p.name + ' ya está en la sala');
+            }
+        }
+
+        // Desconexion limpia: se borra la presencia retenida y se sale
+        leave() {
+            this.snapshotDone = false;
+            this.joined = false;
+            this.connected = false;
+            if (this.client) {
+                try {
+                    this.client.send(this.presenceTopic(this.pid), '', 0, true);
+                    this.client.send(this.stateTopic(this.pid), '', 0, true);
+                } catch (e) { /* noop */ }
+                try { this.client.disconnect(); } catch (e) { /* noop */ }
+                this.client = null;
+            }
+            for (const pid of [...this.peers.keys()]) this.removePeerSilent(pid);
+            if (this.entityGhost) {
+                this.entityGhost.visible = false;
+                this.entityActive = false;
+            }
+        }
+
+        isEntityHost() {
+            // Sin sala (solitario o sin conexion) uno es siempre su propio host
+            if (!this.connected) return true;
+            return this.joined && this.snapshotDone && this.isHost && !this.roomFull;
+        }
+
+        updateHost() {
+            this.isHost = true;
+            for (const pid of this.peers.keys()) {
+                if (pid < this.pid) { this.isHost = false; break; }
+            }
+        }
+
+        // ----------------------------------------------------------------
+        //  TOPICOS
+        // ----------------------------------------------------------------
+        presenceTopic(pid) { return 'br0/' + this.roomKey + '/presence/' + pid; }
+        stateTopic(pid) { return 'br0/' + this.roomKey + '/state/' + pid; }
+        entTopic() { return 'br0/' + this.roomKey + '/ent'; }
+
+        publishPresence() {
+            if (!this.client || !this.connected) return;
+            try {
+                this.client.send(this.presenceTopic(this.pid), JSON.stringify({ n: this.playerName, j: Date.now() }), 0, true);
+            } catch (e) { /* noop */ }
+        }
+
+        publishState(pos, yaw, pitch, flashlightOn) {
+            if (!this.client || !this.connected || !this.joined) return;
+            try {
+                this.client.send(this.stateTopic(this.pid), JSON.stringify({
+                    x: pos.x, y: pos.y, z: pos.z,
+                    yaw: yaw, pitch: pitch,
+                    f: flashlightOn ? 1 : 0, t: Date.now()
+                }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
+        // ----------------------------------------------------------------
+        //  MENSAJES ENTRANTES
+        // ----------------------------------------------------------------
+        handleMessage(m) {
+            const parts = m.destinationName.split('/');
+            const kind = parts[2];
+
+            // Topico de la entidad (br0/sala/ent): sin pid, 3 segmentos
+            if (kind === 'ent') {
+                this.handleEntityMessage(m);
+                return;
+            }
+
+            if (parts.length < 4) return;
+            const pid = parts[3];
+            if (pid === this.pid) return;   // eco de mi propia presencia/estado
+
+            if (kind === 'presence') {
+                if (m.payloadBytes.length === 0) { this.removePeer(pid); return; }
+                let data = {};
+                try { data = JSON.parse(m.payloadString); } catch (e) { return; }
+                if (!data.n) return;
+                const isNew = !this.peers.has(pid);
+                this.peers.set(pid, {
+                    name: String(data.n),
+                    lastSeen: Date.now(),
+                    x: 0, y: 1.55, z: 0, yaw: 0,
+                    tx: 0, ty: 1.55, tz: 0, tyaw: 0,
+                    f: false
+                });
+                if (isNew) {
+                    this.addRemotePlayer(pid, this.peers.get(pid));
+                    if (this.snapshotDone && this.joined && !this.roomFull) {
+                        this.onToast('👤 ' + this.peers.get(pid).name + ' entró en la sala');
+                        this.updateHost();
+                    }
+                } else {
+                    this.peers.get(pid).lastSeen = Date.now();
+                }
+                return;
+            }
+
+            if (kind === 'state') {
+                const p = this.peers.get(pid);
+                if (!p) return;
+                let d = {};
+                try { d = JSON.parse(m.payloadString); } catch (e) { return; }
+                p.tx = d.x || 0;
+                p.ty = d.y != null ? d.y : 1.55;
+                p.tz = d.z || 0;
+                p.tyaw = d.yaw || 0;
+                p.f = !!d.f;
+                p.lastSeen = Date.now();
+                return;
+            }
+        }
+
+        // Topico de la entidad (br0/sala/ent): el host publica su posicion y
+        // cualquiera puede pedir un aturdimiento con el flash de la camara
+        handleEntityMessage(m) {
+            let d = {};
+            try { d = JSON.parse(m.payloadString); } catch (e) { return; }
+
+            // Aturdimiento remoto: el flash de la camara de CUALQUIER jugador
+            // aturde a la entidad para todos (el host lo aplica a su simulacion
+            // y el resto lo ve congelarse)
+            if (d.s && this.entity && this.entity.active && this.isHost) {
+                const ox = d.x || 0, oz = d.z || 0;
+                const ex = this.entity.pos.x - ox;
+                const ez = this.entity.pos.z - oz;
+                const dist = Math.hypot(ex, ez);
+                if (dist > 0.01 && dist < 24) {
+                    const dot = (ex * (d.dx || 0) + ez * (d.dz || 0)) / dist;
+                    if (dot > 0.45) this.entity.stun(4.0);
+                }
+            }
+
+            // El anfitrion ya renderiza su entidad local: no duplicar
+            if (this.isHost) return;
+
+            if (d.gone) {
+                if (this.entityGhost) this.entityGhost.visible = false;
+                this.entityActive = false;
+                return;
+            }
+            if (!this.entityGhost) this.buildEntityGhost();
+            this.entityActive = !!d.a;
+            if (this.entityGhost) this.entityGhost.visible = this.entityActive;
+            if (this.entityActive && this.entityGhost) {
+                this.entityGhost.position.set(d.x || 0, 0, d.z || 0);
+                this.entityGhost.rotation.y = d.yaw || 0;
+                this.entityLastMsg = Date.now();
+            }
+            if (d.spawned) audio.playMonsterRoar();
+        }
+
+        // ----------------------------------------------------------------
+        //  JUGADORES REMOTOS (render)
+        // ----------------------------------------------------------------
+        addRemotePlayer(pid, p) {
+            const palette = [0xff6b6b, 0x6bc9ff, 0x8aff6b, 0xffd93b, 0xc77dff, 0xff9a3d];
+            let h = 0;
+            for (let i = 0; i < pid.length; i++) h = (h * 31 + pid.charCodeAt(i)) >>> 0;
+            const col = palette[h % palette.length];
+
+            // Explorador humanoido completo (js/explorer.js), con el torso del
+            // color del jugador para distinguirlos en la sala
+            const model = createExplorerModel(col);
+            const group = model.group;
+            const headY = model.headY;
+
+            // Etiqueta con el nombre sobre la cabeza
+            const sprite = this.makeNameSprite(p.name);
+            sprite.position.y = headY + 0.44;
+            group.add(sprite);
+
+            // Linterna del otro jugador: un foco suave para ver hacia donde mira
+            const spot = new THREE.SpotLight(0xfff0b0, 1.7, 16, Math.PI / 6, 0.95, 2);
+            spot.position.set(0, headY - 0.05, 0.15);
+            group.add(spot);
+            const tgt = new THREE.Object3D();
+            this.scene.add(tgt);
+            spot.target = tgt;
+
+            group.visible = false;
+            this.scene.add(group);
+            this.remotePlayers.set(pid, { group, spot, tgt });
+        }
+
+        makeNameSprite(name) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.font = 'bold 34px Courier New';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+            ctx.fillRect(8, 8, 240, 48);
+            ctx.fillStyle = '#ffe9a0';
+            ctx.fillText(name, 128, 34);
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.anisotropy = Math.min(4, this.scene.__r128maxAniso || 4);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: true }));
+            sprite.scale.set(1.3, 0.33, 1);
+            return sprite;
+        }
+
+        removePeer(pid) {
+            const p = this.peers.get(pid);
+            if (p) this.onToast('👤 ' + p.name + ' abandonó la sala');
+            // Si el cliente se cayo sin avisar, se limpia tambien su presencia
+            // retenida en el broker (mensaje vacio con retain)
+            if (this.client && this.connected) {
+                try { this.client.send(this.presenceTopic(pid), '', 0, true); } catch (e) { /* noop */ }
+            }
+            this.removePeerSilent(pid);
+        }
+
+        removePeerSilent(pid) {
+            const r = this.remotePlayers.get(pid);
+            if (r) {
+                this.scene.remove(r.group);
+                this.scene.remove(r.tgt);
+                this.remotePlayers.delete(pid);
+            }
+            this.peers.delete(pid);
+            this.updateHost();
+        }
+
+        // ----------------------------------------------------------------
+        //  ESPECTRO DE LA ENTIDAD (para los que no son host)
+        // ----------------------------------------------------------------
+        buildEntityGhost() {
+            const model = createEntityModel();
+            model.group.visible = false;
+            this.scene.add(model.group);
+            this.entityGhost = model.group;
+            this.entityTentacles = model.tentacles;
+        }
+
+        onEntitySpawned() {
+            if (!this.client || !this.connected || !this.joined) return;
+            try {
+                this.client.send(this.entTopic(), JSON.stringify({
+                    a: 1, spawned: 1,
+                    x: this.entity.pos.x, z: this.entity.pos.z, yaw: this.entity.yaw
+                }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
+        requestStun(originPos, dir) {
+            if (!this.client || !this.connected || !this.joined || !this.entity) return;
+            try {
+                this.client.send(this.entTopic(), JSON.stringify({
+                    s: 1,
+                    x: originPos.x, y: originPos.y, z: originPos.z,
+                    dx: dir.x, dy: dir.y, dz: dir.z
+                }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
+        // La entidad sincronizada esta cerca del jugador (para drenar cordura)
+        entityNear(playerPos, range) {
+            if (!this.entityActive || !this.entityGhost) return false;
+            if (Date.now() - this.entityLastMsg > 3000) return false;
+            const g = this.entityGhost.position;
+            return Math.hypot(g.x - playerPos.x, g.z - playerPos.z) < range;
+        }
+
+        // Linea de vision 2D para el contacto con el espectro (mismos muros
+        // en todos los clientes: el mundo es deterministico)
+        hasLOS(x0, z0, x1, z1, wallBoxes) {
+            const dx = x1 - x0;
+            const dz = z1 - z0;
+            for (let box of wallBoxes) {
+                let tmin = 0, tmax = 1;
+                if (Math.abs(dx) < 0.0001) {
+                    if (x0 < box.minX || x0 > box.maxX) continue;
+                } else {
+                    let t1 = (box.minX - x0) / dx;
+                    let t2 = (box.maxX - x0) / dx;
+                    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+                    tmin = Math.max(tmin, t1);
+                    tmax = Math.min(tmax, t2);
+                    if (tmin > tmax) continue;
+                }
+                if (Math.abs(dz) < 0.0001) {
+                    if (z0 < box.minZ || z0 > box.maxZ) continue;
+                } else {
+                    let t1 = (box.minZ - z0) / dz;
+                    let t2 = (box.maxZ - z0) / dz;
+                    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+                    tmin = Math.max(tmin, t1);
+                    tmax = Math.min(tmax, t2);
+                    if (tmin > tmax) continue;
+                }
+                return false;
+            }
+            return true;
+        }
+
+        // ----------------------------------------------------------------
+        //  BUCLE POR FRAME
+        // ----------------------------------------------------------------
+        update(dt, playerPos, yaw, pitch, flashlightOn, wallBoxes, entity) {
+            this.entity = entity;
+
+            if (this.connected && this.joined && !this.roomFull) {
+                // Estado propio ~12 Hz
+                this.pubTimer += dt;
+                if (this.pubTimer > 0.083) {
+                    this.pubTimer = 0;
+                    this.publishState(playerPos, yaw, pitch, flashlightOn);
+                }
+                // Posicion de la entidad (solo el host la simula y publica)
+                this.entPubTimer += dt;
+                if (this.isHost && entity && entity.active && this.entPubTimer > 0.1) {
+                    this.entPubTimer = 0;
+                    try {
+                        this.client.send(this.entTopic(), JSON.stringify({
+                            a: 1, x: entity.pos.x, z: entity.pos.z, yaw: entity.yaw
+                        }), 0, false);
+                    } catch (e) { /* noop */ }
+                }
+                // Refrescar presencia cada 10 s (broker con TTL de retenidos)
+                this.presenceTimer += dt;
+                if (this.presenceTimer > 10) {
+                    this.presenceTimer = 0;
+                    this.publishPresence();
+                }
+                // Limpieza: jugadores caidos y entidad muda
+                this.cleanTimer += dt;
+                if (this.cleanTimer > 3) {
+                    this.cleanTimer = 0;
+                    const now = Date.now();
+                    for (const [pid, p] of [...this.peers]) {
+                        if (now - p.lastSeen > 12000) this.removePeer(pid);
+                    }
+                    if (this.entityActive && now - this.entityLastMsg > 3000) {
+                        this.entityActive = false;
+                        if (this.entityGhost) this.entityGhost.visible = false;
+                    }
+                }
+            }
+
+            // Interpolacion y render de los jugadores remotos
+            const k = 1 - Math.pow(0.0005, dt);
+            for (const [pid, p] of this.peers) {
+                const r = this.remotePlayers.get(pid);
+                if (!r) continue;
+                p.x += (p.tx - p.x) * k;
+                p.y += (p.ty - p.y) * k;
+                p.z += (p.tz - p.z) * k;
+                p.yaw = lerpAngleShort(p.yaw, p.tyaw, k);
+                r.group.position.set(p.x, p.y, p.z);
+                r.group.rotation.y = p.yaw;
+                const dist = this.camera.position.distanceTo(r.group.position);
+                r.group.visible = dist < 110;
+                if (r.group.visible) {
+                    const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw);
+                    r.tgt.position.set(p.x + fx * 3, p.y + 1.2, p.z + fz * 3);
+                    r.spot.visible = p.f;
+                }
+            }
+
+            // Espectro de la entidad: animacion suave de tentaculos
+            if (this.entityGhost && this.entityGhost.visible) {
+                const t = Date.now() * 0.02;
+                for (let i = 0; i < this.entityTentacles.length; i++) {
+                    this.entityTentacles[i].rotation.x = Math.sin(t + i) * 0.18;
+                }
+                // Contacto directo con el espectro = muerte (igual que el host)
+                const g = this.entityGhost.position;
+                if (Math.hypot(g.x - playerPos.x, g.z - playerPos.z) < 0.85 &&
+                    this.hasLOS(g.x, g.z, playerPos.x, playerPos.z, wallBoxes)) {
+                    audio.playJumpscare();
+                    this.onKill('LA ENTIDAD TE ALCANZÓ Y TE DEVORÓ EN LA PENUMBRA');
+                }
+            }
+        }
+
+        // Texto para el HUD: sala, ocupacion y rol
+        hudText() {
+            if (!this.connected && !this.joined) {
+                return this.roomKey ? ('SALA ' + this.roomKey + ' · SOLO (SIN CONEXIÓN)') : 'MULTIJUGADOR: SOLO';
+            }
+            if (this.roomFull) return 'SALA LLENA (' + this.MAX_PLAYERS + '/' + this.MAX_PLAYERS + ') · SOLO';
+            const count = this.peers.size + 1;
+            return 'SALA ' + this.roomKey + ' · ' + count + '/' + this.MAX_PLAYERS +
+                (this.isHost ? ' · ANFITRIÓN' : '');
+        }
+    }
+
+    // Interpolacion angular por el camino mas corto
+    function lerpAngleShort(a, b, t) {
+        let d = (b - a) % (Math.PI * 2);
+        if (d > Math.PI) d -= Math.PI * 2;
+        if (d < -Math.PI) d += Math.PI * 2;
+        return a + d * t;
+    }
+    </script>
+    <script>
+/* ==========================================================================
        7. CONTROLADOR PRINCIPAL, ILUMINACIÓN Y NIEBLA AMARILLENTA CONTINUA
        ========================================================================== */
     class BackroomsGame {
@@ -3704,7 +4360,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.renderer.setClearColor(FOG_COLOR);
             // Control de exposición: mapeado de tonos oscuro y aterrador
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            this.renderer.toneMappingExposure = 0.56;
+            this.renderer.toneMappingExposure = 0.58;
             this.container.appendChild(this.renderer.domElement);
 
             // Anisotropía: paredes y moqueta se ven nítidas incluso en ángulo rasante
@@ -3714,15 +4370,18 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             });
 
             // Luz ambiental casi nula: paredes y moqueta en penumbra ocre
-            this.ambientLight = new THREE.AmbientLight(0xd8d4c6, 0.055);
+            // AMARILLENTA (el backroom fluorescente, no blanco).
+            this.ambientLight = new THREE.AmbientLight(0xded187, 0.11);
             this.scene.add(this.ambientLight);
 
             // Relleno hemisférico mínimo para evitar el aspecto lavado
-            this.hemiLight = new THREE.HemisphereLight(0xfff9ec, 0x6a5d30, 0.07);
+            this.hemiLight = new THREE.HemisphereLight(0xfff3c0, 0x6a5d30, 0.10);
             this.scene.add(this.hemiLight);
 
             this.flashlightOn = true;
-            this.flashlight = new THREE.SpotLight(0xfffae6, 1.35, 26, Math.PI / 6.5, 0.85, 2.0);
+            // Linterna mejorada: mas alcance, tono calido amarillento y un cono
+            // algo mas cerrado con borde suave (penumbra alta)
+            this.flashlight = new THREE.SpotLight(0xfff0b0, 2.0, 36, Math.PI / 6, 0.95, 2.0);
             this.flashlight.position.set(0, 0, 0);
             this.flashlight.target = new THREE.Object3D();
             this.camera.add(this.flashlight.target);
@@ -3733,11 +4392,14 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.camera.add(this.flashLight);
             this.scene.add(this.camera);
 
+            // Piscina de luces de techo AMARILLENTAS (0xffd878): antes eran 8
+            // focos con radio 9 m que no llegaban ni a la lampara vecina y el
+            // pasillo quedaba negro hasta pisar cada foco. Ahora 28 focos con
+            // radio 16 m, repartidos con prioridad a las lamparas VISIBLES en
+            // pantalla: toda lampara a la vista tiene su luz.
             this.lightPool = [];
-            for (let i = 0; i < 8; i++) {
-                // Alcance corto: la luz no traspasa las paredes finas hacia
-                // las zonas de apagon vecinas
-                const pl = new THREE.PointLight(0xffe899, 0, 9, 2.0);
+            for (let i = 0; i < 28; i++) {
+                const pl = new THREE.PointLight(0xffd878, 0, 16, 2.0);
                 this.scene.add(pl);
                 this.lightPool.push(pl);
             }
@@ -3778,6 +4440,15 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.chalkSystem = new ChalkDrawingSystem(this.scene, this.camera);
             this.entity = new BacteriophageEntity(this.scene);
 
+            // Multijugador (hasta 6): mismo mundo deterministico + broker MQTT
+            this.net = new MultiplayerManager(this.scene, this.camera, {
+                onToast: (msg) => this.notify(msg),
+                onKill: (reason) => this.triggerGameOver(reason)
+            });
+
+            window.addEventListener('beforeunload', () => this.net.leave());
+            window.addEventListener('pagehide', () => this.net.leave());
+
             // Muebles con física: visibles y asentados desde el inicio (cero
             // flotación); se sincronizan tambien al cargar chunks nuevos
             this.furnitureBodies = [];
@@ -3800,7 +4471,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.updateFlashlightHUD();
 
             setTimeout(() => {
-                if (this.gameActive) this.entity.spawnDistant(this.worldSystem.walkableCells, this.player.pos);
+                // Solo el ANFITRIÓN de la sala (o el jugador solitario) genera
+                // la entidad; el resto la ve como espectro sincronizado
+                if (this.gameActive && this.net.isEntityHost()) {
+                    this.entity.spawnDistant(this.worldSystem.walkableCells, this.player.pos);
+                    this.net.onEntitySpawned();
+                }
             }, 50000);
 
             window.addEventListener('resize', () => this.onResize());
@@ -3822,7 +4498,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             }
 
             this.flashlightOn = !this.flashlightOn;
-            this.flashlight.intensity = this.flashlightOn ? 1.6 : 0;
+            this.flashlight.intensity = this.flashlightOn ? 2.0 : 0;
             if (this.flashlightOn) audio.playSwitchClick();
             this.updateFlashlightHUD();
         }
@@ -3859,10 +4535,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     }
                 } else if (this.inventory.flashBattery < 20) {
                     // Parpadeo agonizante antes de agotarse
-                    this.flashlight.intensity = 0.9 + Math.random() * 1.0;
+                    this.flashlight.intensity = 1.1 + Math.random() * 1.0;
                     if (Math.random() < 0.06) audio.flickerHum();
                 } else {
-                    this.flashlight.intensity = 1.6;
+                    this.flashlight.intensity = 2.0;
                 }
             }
             this.updateFlashlightHUD();
@@ -3894,7 +4570,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const cells = this.worldSystem.walkableCells;
             const near = cells.filter(c => Math.max(Math.abs(c.x), Math.abs(c.z)) < CHUNK_SIZE * 3);
             const pool = near.length >= 20 ? near : cells;
-            const spawnCell = pool[Math.floor(Math.random() * pool.length)];
+            // Determinista: misma semilla -> SIEMPRE el mismo punto de aparicion
+            // (antes Math.random: cada partida empezaba en un sitio distinto y
+            // con la misma semilla parecia un backroom diferente)
+            const rng = mulberry32((this.worldSeed ^ 0x9E3779B9) >>> 0);
+            const spawnCell = pool[Math.floor(rng() * pool.length)];
             const spawnX = (spawnCell.x + 0.5) * CELL_SIZE;
             const spawnZ = (spawnCell.z + 0.5) * CELL_SIZE;
 
@@ -4011,15 +4691,34 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }
 
         initUI() {
+            // Recuerda el nombre entre partidas
+            const nameInput = document.getElementById('name-input');
+            if (nameInput) {
+                try { nameInput.value = localStorage.getItem('backrooms-name') || ''; } catch (e) { /* noop */ }
+            }
+
+            // Dado: rellena el campo con una semilla aleatoria nueva
+            const seedInputEl = document.getElementById('seed-input');
+            const randomSeedBtn = document.getElementById('btn-random-seed');
+            if (randomSeedBtn) {
+                randomSeedBtn.onclick = () => {
+                    if (!seedInputEl) return;
+                    seedInputEl.value = String((1 + Math.floor(Math.random() * 0xFFFFFFFE)) >>> 0);
+                };
+            }
+
             document.getElementById('btn-start').onclick = () => {
                 audio.init();
 
                 // Semilla personalizada: si el campo del menu trae una semilla
-                // distinta, se regenera TODO el mundo antes de empezar
+                // distinta, se regenera TODO el mundo antes de empezar.
+                // Las semillas NUMERICAS se usan tal cual (escribir "1" genera
+                // la semilla 1, no un hash que siempre lleva al mismo mundo de
+                // siempre); los textos se convierten con un hash estable.
                 const seedInput = document.getElementById('seed-input');
                 const seedText = seedInput ? seedInput.value.trim() : '';
                 if (seedText) {
-                    const seed = stringSeed(seedText);
+                    const seed = /^\d+$/.test(seedText) ? (parseInt(seedText, 10) >>> 0) : stringSeed(seedText);
                     if (seed !== this.worldSeed) {
                         this.worldSeed = seed;
                         this.worldSystem.rebuild(seed);
@@ -4030,6 +4729,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         this.updateSeedLabel();
                     }
                 }
+
+                // Multijugador: la SEMILLA es el codigo de sala. Quienes usen
+                // la misma semilla (o el mismo numero mostrado en el HUD)
+                // caen en el mismo backroom, hasta 6 exploradores.
+                const nameInput = document.getElementById('name-input');
+                const name = nameInput ? nameInput.value.trim() : '';
+                if (name) {
+                    try { localStorage.setItem('backrooms-name', name); } catch (e) { /* noop */ }
+                }
+                this.net.join(this.worldSeed, name);
 
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
@@ -4075,16 +4784,18 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 }
             }, 50);
 
+            // Aturde a la entidad (local) y avisa a la sala: el flash de
+            // cualquier jugador aturde al monstruo para todos
+            const camDir = new THREE.Vector3();
+            this.camera.getWorldDirection(camDir);
             if (this.entity.active) {
                 const toEntity = this.entity.pos.clone().sub(this.camera.position);
-                const camDir = new THREE.Vector3();
-                this.camera.getWorldDirection(camDir);
                 const dot = camDir.dot(toEntity.clone().normalize());
-
                 if (dot > 0.45 && toEntity.length() < 24) {
                     this.entity.stun(4.0);
                 }
             }
+            this.net.requestStun(this.camera.position, camDir);
         }
 
         drinkAlmondWater() {
@@ -4278,18 +4989,28 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }
 
         updateLights(dt) {
-            const sorted = this.worldSystem.lamps
-                .map(l => ({ lamp: l, dist: this.camera.position.distanceTo(l.pos) }))
-                .sort((a, b) => a.dist - b.dist);
+            // Prioridad a las lamparas VISIBLES en pantalla: primero las que
+            // caen dentro (o casi dentro) del frustum, y entre ellas las mas
+            // cercanas. Asi toda luz a la vista tiene foco aunque la piscina
+            // no alcance para todas las del nivel.
+            const v = new THREE.Vector3();
+            const sorted = this.worldSystem.lamps.map(l => {
+                v.copy(l.pos).project(this.camera);
+                const onScreen = v.z < 1 && v.x > -1.2 && v.x < 1.2 && v.y > -1.2 && v.y < 1.2;
+                return { lamp: l, dist: this.camera.position.distanceTo(l.pos), onScreen };
+            }).sort((a, b) => {
+                if (a.onScreen !== b.onScreen) return a.onScreen ? -1 : 1;
+                return a.dist - b.dist;
+            });
 
             this.lightPool.forEach((light, i) => {
-                if (sorted[i] && sorted[i].dist < 12) {
+                if (sorted[i] && sorted[i].dist < 21) {
                     const l = sorted[i].lamp;
                     light.position.copy(l.pos);
 
                     if (l.state === 1) {
-                        // Paneles muy tenues: quedan grandes charcos de oscuridad entre lámpara y lámpara
-                        light.intensity = 0.34;
+                        // Paneles encendidos: luz continua, visible de lejos
+                        light.intensity = 0.68;
                     } else if (l.state === 2) {
                         l.flickerTimer -= dt;
                         if (l.flickerTimer <= 0) {
@@ -4297,7 +5018,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             l.flickerTimer = Math.random() * 0.25 + 0.05;
                             if (!l.isLitNow && Math.random() < 0.15) audio.flickerHum();
                         }
-                        light.intensity = l.isLitNow ? (0.34 + Math.random() * 0.1) : 0.03;
+                        light.intensity = l.isLitNow ? (0.72 + Math.random() * 0.2) : 0.06;
                     }
                 } else {
                     light.intensity = 0;
@@ -4522,6 +5243,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.player.sanity -= 0.12 * dt;
             if (this.entity.active && this.entity.state === 'CHASING') {
                 this.player.sanity -= 4.0 * dt;
+            } else if (this.net.entityNear(this.player.pos, 14)) {
+                // En multijugador el espectro sincronizado tambien drena cordura
+                this.player.sanity -= 3.0 * dt;
             }
             this.updateSanityHUD();
 
@@ -4536,6 +5260,18 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             document.getElementById('hud').style.display = 'none';
             document.getElementById('game-over-reason').textContent = reason;
             document.getElementById('game-over-screen').style.display = 'flex';
+            this.net.leave();
+        }
+
+        updateNetHUD() {
+            const el = document.getElementById('net-status');
+            if (!el) return;
+            const txt = this.net.hudText();
+            if (txt !== this._netHud) {
+                this._netHud = txt;
+                el.textContent = '🛰 ' + txt;
+                el.style.color = this.net.roomFull ? '#d15b4a' : (this.net.joined ? '#8fa336' : '#756a47');
+            }
         }
 
         onResize() {
@@ -4560,6 +5296,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 this.updateFlashlightBattery(dt);
                 this.updateChalkDrawing();
                 this.checkInteractionsPrompt();
+                this.net.update(dt, this.player.pos, this.yaw, this.pitch, this.flashlightOn, this.worldSystem.wallBoxes, this.entity);
+                this.updateNetHUD();
                 this.entity.update(
                     dt,
                     this.player.pos,

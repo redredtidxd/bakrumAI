@@ -1,6 +1,22 @@
 /* ==========================================================================
        1. TEXTURAS PROCEDURALES CANVAS 2D
        ========================================================================== */
+    // RNG de texturas con semilla FIJA: el papel pintado y el techo se generan
+    // identicos en cada partida y en cada cliente (antes usaban Math.random y
+    // la misma semilla "1" daba texturas distintas cada vez que se abria el
+    // juego, como si el backroom cambiase de partida a partida).
+    function mulberry32Tex(seed) {
+        let a = seed >>> 0;
+        return function () {
+            a |= 0;
+            a = (a + 0x6D2B79F5) | 0;
+            let t = Math.imul(a ^ (a >>> 15), 1 | a);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+    const texRng = mulberry32Tex(0x9E3779B9);
+
     const TextureGenerator = {
         createWallpaperTexture() {
             const canvas = document.createElement('canvas');
@@ -18,7 +34,7 @@
             const imgData = ctx.getImageData(0, 0, 512, 512);
             const d = imgData.data;
             for (let i = 0; i < d.length; i += 4) {
-                const noise = (Math.random() - 0.5) * 18;
+                const noise = (texRng() - 0.5) * 18;
                 d[i] = Math.min(255, Math.max(0, d[i] + noise));
                 d[i+1] = Math.min(255, Math.max(0, d[i+1] + noise));
                 d[i+2] = Math.min(255, Math.max(0, d[i+2] + noise * 0.6));
@@ -59,7 +75,7 @@
 
             ctx.fillStyle = '#4c493c';
             for (let i = 0; i < 400; i++) {
-                ctx.fillRect(Math.random() * 504 + 4, Math.random() * 504 + 4, 2, 2);
+                ctx.fillRect(texRng() * 504 + 4, texRng() * 504 + 4, 2, 2);
             }
 
             const tex = new THREE.CanvasTexture(canvas);

@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Backrooms: Nivel 0 - Las Oficinas Infinitas</title>
-    <!-- Three.js CDN -->
+    <!-- Three.js CDN + Paho MQTT (multijugador) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -31,7 +32,8 @@
                 <div id="coords-label" class="coords-label">POS X:+0000.0 Y:+0001.6 Z:+0000.0</div>
                 <div class="sanity-label"><span>ESTABILIDAD MENTAL</span><span id="sanity-num">100%</span></div>
                 <div class="sanity-bar"><div id="sanity-fill" class="sanity-fill"></div></div>
-                <div id="seed-label" class="coords-label" style="margin-top: 5px; margin-bottom: 0; color: #756a47;">SEMILLA: --</div>
+                <div id="seed-label" class="coords-label" style="margin-top: 5px; color: #756a47;">SEMILLA: --</div>
+                <div id="net-status" class="coords-label" style="margin-top: 3px; margin-bottom: 0; color: #756a47;">🛰 MULTIJUGADOR: SOLO</div>
             </div>
         </div>
 
@@ -93,9 +95,19 @@
                 • <b>La Entidad:</b> Usa los pilares centrales de las salas para romper su campo de visión y escapar.
             </p>
             <div style="margin-bottom: 16px;">
-                <label for="seed-input" style="font-size: 11px; letter-spacing: 2px; color: #8c8266; display: block; margin-bottom: 7px;">SEMILLA DEL MUNDO (OPCIONAL)</label>
-                <input type="text" id="seed-input" placeholder="Deja vacío para una semilla aleatoria" autocomplete="off" spellcheck="false" maxlength="32">
+                <label for="seed-input" style="font-size: 11px; letter-spacing: 2px; color: #8c8266; display: block; margin-bottom: 7px;">SEMILLA DEL MUNDO / CÓDIGO DE SALA</label>
+                <div style="display: flex; gap: 8px; justify-content: center;">
+                    <input type="text" id="seed-input" placeholder="Deja vacío para una semilla aleatoria" autocomplete="off" spellcheck="false" maxlength="32">
+                    <button id="btn-random-seed" class="btn" style="padding: 9px 13px; font-size: 14px; margin: 0;" title="Generar semilla aleatoria">🎲</button>
+                </div>
             </div>
+            <div style="margin-bottom: 16px;">
+                <label for="name-input" style="font-size: 11px; letter-spacing: 2px; color: #8c8266; display: block; margin-bottom: 7px;">NOMBRE (MULTIJUGADOR)</label>
+                <input type="text" id="name-input" placeholder="Explorador" autocomplete="off" spellcheck="false" maxlength="14">
+            </div>
+            <p style="font-size: 11px; line-height: 1.7; color: #7d7355; margin-bottom: 14px;">
+                🛰 <b style="color:#a39879;">MULTIJUGADOR · HASTA 6 EXPLORADORES:</b> quienes escriban la <b style="color:#a39879;">MISMA SEMILLA</b> caen en la misma sala. El número del HUD (SEMILLA) es el código para compartir. Si la sala está llena jugarás en solitario.
+            </p>
             <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
             <div style="margin-top: 18px; font-size: 12px;">
                 <label for="vol-slider">VOLUMEN:</label>
@@ -135,6 +147,8 @@
     <script src="js/world.js"></script>
     <script src="js/chalk.js"></script>
     <script src="js/entity.js"></script>
+    <script src="js/explorer.js"></script>
+    <script src="js/net.js"></script>
     <script src="js/game.js"></script>
 </body>
 </html>

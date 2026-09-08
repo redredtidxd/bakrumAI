@@ -32,15 +32,15 @@
         // Tulipas emisivas: los paneles lejanos brillan siempre a traves de la niebla,
         // sin necesidad de cientos de PointLights dinamicos
         lampLit: new THREE.MeshStandardMaterial({
-            color: 0xfff4b2,
-            emissive: new THREE.Color(0xfff0ba),
-            emissiveIntensity: 0.14,
+            color: 0xffe69a,
+            emissive: new THREE.Color(0xffe38a),
+            emissiveIntensity: 0.55,
             roughness: 0.4
         }),
         lampFlicker: new THREE.MeshStandardMaterial({
-            color: 0xfff4b2,
-            emissive: new THREE.Color(0xfff0ba),
-            emissiveIntensity: 0.14,
+            color: 0xffe69a,
+            emissive: new THREE.Color(0xffe38a),
+            emissiveIntensity: 0.55,
             roughness: 0.4
         }),
         lampOff: new THREE.MeshStandardMaterial({ color: 0x11100c, roughness: 0.9 }),
@@ -535,8 +535,6 @@
                 rects.push({ x: rx, z: rz, w, h });
                 ch.rooms.push({ x: rx, z: rz, w, h });
             }
-            // Repeticion limitada: hileras de salas identicas (backrooms)
-            this.repeatStructure(ch, rects);
 
             // Conecta salas entre si y con las puertas
             const targets = ch.doorCells.slice().map(c => ({ x: c.x, z: c.z }));
@@ -547,18 +545,18 @@
             if (r() < 0.7) this.addStub(ch);
         }
 
-        // Pilares CENTRALES dispersos (bloquean la vista de la entidad): finos,
-        // sin rejillas repetitivas y nunca a menos de 2 celdas de una pared.
-        // Toda sala amplia (4+ celdas) garantiza pilares: es raro que una zona
-        // con espacio quede completamente despejada, y las grandes suelen
-        // llevar varios.
+        // Pilares ASIMETRICOS (bloquean la vista de la entidad): finos, en
+        // posiciones aleatorias por TODA la sala (antes solo la franja central,
+        // que dejaba las salas con aire simetrico). Cantidad aleatoria
+        // proporcional al tamano; toda sala amplia (4+ celdas) garantiza al
+        // menos uno. El pase 3c retira los que quedan pegados a una pared.
         placeRoomPillars(ch, room) {
             const { x: rx, z: rz, w, h } = room;
             if (w < 4 || h < 4) return;
             const r = ch.rng;
             const cands = [];
-            for (let px = rx + Math.ceil(w / 2) - 1; px <= rx + w - Math.ceil(w / 2); px++) {
-                for (let pz = rz + Math.ceil(h / 2) - 1; pz <= rz + h - Math.ceil(h / 2); pz++) {
+            for (let px = rx + 1; px <= rx + w - 2; px++) {
+                for (let pz = rz + 1; pz <= rz + h - 2; pz++) {
                     cands.push([px, pz]);
                 }
             }
@@ -566,9 +564,10 @@
                 const j = Math.floor(r() * (i + 1));
                 [cands[i], cands[j]] = [cands[j], cands[i]];
             }
-            const guaranteed = Math.min(2, cands.length);
-            for (let i = 0; i < cands.length; i++) {
-                if (i >= guaranteed && r() >= 0.65) continue;
+            const area = w * h;
+            const maxPillars = area >= 30 ? 4 : (area >= 16 ? 3 : 2);
+            const n = Math.min(cands.length, 1 + Math.floor(r() * maxPillars));
+            for (let i = 0; i < n; i++) {
                 ch.grid[cands[i][0]][cands[i][1]] = 3;
             }
         }
@@ -584,14 +583,24 @@
                 for (let z = hz; z < hz + h; z++) ch.grid[x][z] = 2;
             }
             ch.rooms.push({ x: hx, z: hz, w, h });
-            // Divisor interior: un trozo de pared corto separa el salon sin
-            // cerrarlo (deja paso por ambos lados): menos campo abierto
-            if (w >= 6 && r() < 0.6) {
+            // Divisor interior: un trozo de pared corto (horizontal o vertical,
+            // en posicion aleatoria, nunca centrado) separa el salon sin
+            // cerrarlo (deja paso por ambos lados): menos campo abierto y
+            // menos simetria
+            if (r() < 0.65) {
                 const dl = 1 + Math.floor(r() * 2); // 1-2 celdas de largo
-                const px = hx + 1 + Math.floor(r() * (w - 2 - dl));
-                const pz = hz + Math.floor(h / 2);
-                for (let i = 0; i < dl; i++) {
-                    if (ch.grid[px + i][pz] === 2) ch.grid[px + i][pz] = 1;
+                if (w >= 6 && (h < 6 || r() < 0.5)) {
+                    const px = hx + 1 + Math.floor(r() * (w - 2 - dl));
+                    const pz = hz + 1 + Math.floor(r() * (h - 2));
+                    for (let i = 0; i < dl; i++) {
+                        if (ch.grid[px + i][pz] === 2) ch.grid[px + i][pz] = 1;
+                    }
+                } else if (h >= 6) {
+                    const px = hx + 1 + Math.floor(r() * (w - 2));
+                    const pz = hz + 1 + Math.floor(r() * (h - 2 - dl));
+                    for (let i = 0; i < dl; i++) {
+                        if (ch.grid[px][pz + i] === 2) ch.grid[px][pz + i] = 1;
+                    }
                 }
             }
             // A veces una salita lateral pequeña, separada del salon
@@ -610,9 +619,6 @@
                     }
                     const sr = { x: sx, z: sz, w: sw, h: sh };
                     ch.rooms.push(sr);
-                    // Repeticion limitada de la salita lateral (hilera identica);
-                    // el salon entra en la lista para que las copias no lo pisen
-                    this.repeatStructure(ch, [{ x: hx, z: hz, w, h }, sr]);
                 }
             }
             // El salon conecta con todas las puertas (pasillos anchos de acceso)
@@ -679,8 +685,6 @@
                 }
                 ch.rooms.push({ x: x - 1, z: z - 1, w, h });
             }
-            // Repeticion limitada de la celdita escondida (hilera identica)
-            if (ch.rooms.length) this.repeatStructure(ch, [ch.rooms[ch.rooms.length - 1]]);
 
             // Callejon sin salida: el pasadizo tambien engana a veces
             if (r() < 0.8) this.addStub(ch);
@@ -689,61 +693,6 @@
             const targets = ch.doorCells.slice().map(c => ({ x: c.x, z: c.z }));
             targets.push({ x, z });
             this.connectTargets(ch, targets);
-        }
-
-        // Repeticion LIMITADA de una estructura pequena: una sala pequena con
-        // su marco de paredes se estampa 1-2 veces mas en el mismo chunk,
-        // formando una hilera de salas IDENTICAS (clasico del backrooms). Solo
-        // en algunos chunks (~13%), solo salas pequenas, y nunca mas de 3
-        // copias en total: la repeticion siempre tiene limite.
-        repeatStructure(ch, rects) {
-            const N = CHUNK_SIZE;
-            const g = ch.grid;
-            const r = ch.rng;
-            if (r() >= 0.13) return;
-            const cand = rects.filter(rt => rt.w <= 4 && rt.h <= 4);
-            if (!cand.length) return;
-            const src = cand[Math.floor(r() * cand.length)];
-            const pw = src.w + 2, ph = src.h + 2; // patron = sala + marco
-            const copies = 1 + Math.floor(r() * 2); // 1-2 copias (total 2-3)
-
-            // Leer el patron completo (sala + marco de paredes + pilares)
-            const pat = [];
-            for (let dx = -1; dx <= src.w; dx++) {
-                const row = [];
-                for (let dz = -1; dz <= src.h; dz++) row.push(g[src.x + dx][src.z + dz]);
-                pat.push(row);
-            }
-
-            const occupied = rects.map(rt => ({ x: rt.x - 1, z: rt.z - 1, w: rt.w + 2, h: rt.h + 2 }));
-            const fits = (ox, oz) =>
-                ox >= 1 && oz >= 1 && ox + pw <= N - 1 && oz + ph <= N - 1 &&
-                occupied.every(o => ox + pw <= o.x || o.x + o.w <= ox || oz + ph <= o.z || o.z + o.h <= oz);
-
-            // Hilera: copias alineadas con la original (este, oeste, sur, norte)
-            let spots = null;
-            for (const [dx, dz] of [[pw + 1, 0], [-(pw + 1), 0], [0, ph + 1], [0, -(ph + 1)]]) {
-                const trySpots = [];
-                let ok = true;
-                for (let k = 1; k <= copies && ok; k++) {
-                    const ox = src.x - 1 + dx * k;
-                    const oz = src.z - 1 + dz * k;
-                    if (fits(ox, oz)) trySpots.push({ x: ox, z: oz });
-                    else ok = false;
-                }
-                if (ok) { spots = trySpots; break; }
-            }
-            if (!spots) return;
-
-            // Estampar las copias (patron identico: misma estructura repetida)
-            for (const s of spots) {
-                for (let dx = 0; dx < pw; dx++) {
-                    for (let dz = 0; dz < ph; dz++) g[s.x + dx][s.z + dz] = pat[dx][dz];
-                }
-                const nr = { x: s.x + 1, z: s.z + 1, w: src.w, h: src.h };
-                rects.push(nr);
-                ch.rooms.push(nr);
-            }
         }
 
         // Une una lista de puntos con pasillos de ancho aleatorio
@@ -993,7 +942,7 @@
             const curved = this.pickCurvedRuns(ch, wallKind, key);
             const curvedCells = new Set();
             for (const run of curved) {
-                const built = this.buildCurvedWall(ch, run, wallTMap, key);
+                const built = this.buildCurvedWall(ch, run, wallTMap, key, wallKind);
                 for (const c of built.cells) curvedCells.add(key(c[0], c[1]));
                 ch.wallBoxes.push(...built.boxes);
             }
@@ -1231,8 +1180,8 @@
             const g = ch.grid;
             const r = ch.rng;
             const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
-            // "De vez en cuando": ~1 de cada 4 chunks tiene una pared curva
-            if (r() >= 0.28) return [];
+            // "De vez en cuando": ~1 de cada 5 chunks tiene una pared curva
+            if (r() >= 0.2) return [];
 
             const runs = [];
             const visited = new Set();
@@ -1281,7 +1230,7 @@
         // es un tabique libre) y su amplitud se limita para que el paso nunca
         // quede por debajo de ~1,2 m. Devuelve las celdas sustituidas y las
         // cajas de colision (una por celda, centradas en la curva).
-        buildCurvedWall(ch, run, wallTMap, key) {
+        buildCurvedWall(ch, run, wallTMap, key, wallKind) {
             const C = CELL_SIZE;
             const H = WALL_HEIGHT;
             const N = CHUNK_SIZE;
@@ -1300,6 +1249,19 @@
             const along1 = kind === 'x' ? oz + (last[1] + 1) * C : ox + (last[0] + 1) * C;
             const fixed0 = kind === 'x' ? ox + (first[0] + 0.5) * C : oz + (first[1] + 0.5) * C;
 
+            // Sellado de extremos: como las paredes rectas, la pared curva se
+            // ALARGA hacia el poste/borde contiguo (misma extension: 1,12 m a
+            // postes, 2,45 m a bordes de chunk). Sin esto, un tramo curvo que
+            // terminaba en un borde dejaba un hueco de ~2 m por el que se
+            // colaba a la zona de atras de la pared.
+            const nk0 = kind === 'x' ? wallKind.get(key(first[0], first[1] - 1)) : wallKind.get(key(first[0] - 1, first[1]));
+            const nk1 = kind === 'x' ? wallKind.get(key(last[0], last[1] + 1)) : wallKind.get(key(last[0] + 1, last[1]));
+            const extFor = (nk) => nk === 'border' ? 2.45 : (nk === 'post' ? 1.12 : 0);
+            const ext0 = extFor(nk0);
+            const ext1 = extFor(nk1);
+            const sweep0 = along0 - ext0;
+            const sweep1 = along1 + ext1;
+
             // Lado del arco: hacia el pasillo abierto (o al azar si esta libre)
             let wOpen = false, eOpen = false;
             for (const [cx, cz] of cells) {
@@ -1314,17 +1276,20 @@
             const B = Math.min(cap, (0.30 + ch.rng() * 0.40) * C);
 
             // Muestras a lo largo del tramo (~0,5 m) para que el arco se vea liso
-            const n = Math.max(6, Math.ceil((along1 - along0) / 0.5));
+            const n = Math.max(6, Math.ceil((sweep1 - sweep0) / 0.5));
             const pos = [], uv = [], idx = [];
             const vert = (x, y, z, u, vv) => { pos.push(x, y, z); uv.push(u, vv); return pos.length / 3 - 1; };
             const quad = (a, b, c, d) => { idx.push(a, b, c, a, c, d); };
 
-            // Barrido: cada muestra es una seccion rectangular de grosor T
+            // Barrido: cada muestra es una seccion rectangular de grosor T. El
+            // arco (sinusoide) solo se aplica entre along0 y along1; las colas
+            // rectas de los extremos alargan la pared hasta el poste/borde.
             const edges = [];
             for (let i = 0; i <= n; i++) {
                 const t = i / n;
-                const along = along0 + t * (along1 - along0);
-                const off = dir * B * Math.sin(Math.PI * t);
+                const along = sweep0 + t * (sweep1 - sweep0);
+                const tt = Math.min(1, Math.max(0, (along - along0) / (along1 - along0)));
+                const off = dir * B * Math.sin(Math.PI * tt);
                 if (kind === 'x') {
                     const f = fixed0 + off;
                     edges.push([[f - T / 2, along], [f + T / 2, along]]);
@@ -1333,7 +1298,7 @@
                     edges.push([[along, f - T / 2], [along, f + T / 2]]);
                 }
             }
-            const alongU = (along1 - along0) / C;   // textura ~1 vez por celda
+            const alongU = (sweep1 - sweep0) / C;   // textura ~1 vez por celda
             for (let i = 0; i < n; i++) {
                 const A = edges[i], Bb = edges[i + 1];
                 const u0 = (i / n) * alongU, u1 = ((i + 1) / n) * alongU;
@@ -1371,21 +1336,44 @@
             this.scene.add(mesh);
             ch.meshes.push(mesh);
 
-            // Colision: una caja por celda sustituida, centrada en la curva
-            // (el parametro t se calcula en coordenadas de MUNDO: sin el
-            // desplazamiento del chunk las cajas se descuadraban del arco)
+            // Colision: una caja por celda sustituida que cubre TODO el barrido
+            // del arco dentro de la celda. Antes la caja se centraba en el punto
+            // central de la celda: el arco sobresalia hasta ~0,5 m por los
+            // bordes de cada celda y se podia ATRAVESAR la pared curva por esos
+            // huecos ("una puertecita para entrar por detras de la pared").
+            // Se muestrea la curva en el inicio, centro y fin de cada celda
+            // (la sinusoide es monotona entre medias) y la caja abarca el
+            // minimo y el maximo: cubre exactamente la malla.
             const boxes = [];
+            const offAt = (t) => dir * B * Math.sin(Math.PI * t);
             for (const [cx, cz] of cells) {
-                const cellAlong = kind === 'x' ? oz + (cz + 0.5) * C : ox + (cx + 0.5) * C;
-                const t = (cellAlong - along0) / (along1 - along0);
-                const off = dir * B * Math.sin(Math.PI * t);
+                let cellStart = kind === 'x' ? oz + cz * C : ox + cx * C;
+                let cellEnd = kind === 'x' ? oz + (cz + 1) * C : ox + (cx + 1) * C;
+                // Colas de sellado en las celdas de los extremos
                 if (kind === 'x') {
-                    boxes.push({ minX: fixed0 + off - T / 2, maxX: fixed0 + off + T / 2, minZ: oz + cz * C, maxZ: oz + (cz + 1) * C });
+                    if (cz === first[1]) cellStart -= ext0;
+                    if (cz === last[1]) cellEnd += ext1;
                 } else {
-                    boxes.push({ minX: ox + cx * C, maxX: ox + (cx + 1) * C, minZ: fixed0 + off - T / 2, maxZ: fixed0 + off + T / 2 });
+                    if (cx === first[0]) cellStart -= ext0;
+                    if (cx === last[0]) cellEnd += ext1;
+                }
+                const t0 = (cellStart - along0) / (along1 - along0);
+                const t1 = (cellEnd - along0) / (along1 - along0);
+                // En las colas rectas (fuera del tramo curvo) el arco no se
+                // aplica: las muestras se limitan al rango real de la curva
+                const tt0 = Math.min(1, Math.max(0, t0));
+                const tt1 = Math.min(1, Math.max(0, t1));
+                const offs = [offAt(tt0), offAt((tt0 + tt1) / 2), offAt(tt1)];
+                if (tt0 < 0.5 && tt1 > 0.5) offs.push(offAt(0.5)); // pico de la curva
+                const minOff = Math.min(...offs) - T / 2;
+                const maxOff = Math.max(...offs) + T / 2;
+                if (kind === 'x') {
+                    boxes.push({ minX: fixed0 + minOff, maxX: fixed0 + maxOff, minZ: cellStart, maxZ: cellEnd });
+                } else {
+                    boxes.push({ minX: cellStart, maxX: cellEnd, minZ: fixed0 + minOff, maxZ: fixed0 + maxOff });
                 }
             }
-            return { cells, boxes };
+            return { cells, boxes, kind, along0, along1, sweep0, sweep1, fixed0, dir, B, T, ext0, ext1 };
         }
 
         // ================================================================
@@ -1405,10 +1393,31 @@
             return true;
         }
 
+        // Ejecuta un bloque con Math.random sustituido por un generador
+        // DETERMINISTA del chunk (muebles, armarios, escombros y detalles de
+        // los modelos). Antes usaban Math.random global: con la misma semilla
+        // cada partida colocaba muebles distintos y parecía otro backroom.
+        // Ahora el mismo chunk con la misma semilla SIEMPRE genera el mismo
+        // mobiliario (requisito también del multijugador: todos comparten
+        // exactamente el mismo mundo).
+        withChunkRng(ch, fn) {
+            const rng = mulberry32(hash2(ch.cx * 262147 + 17, ch.cz * 262147 + 31));
+            const saved = Math.random;
+            Math.random = rng;
+            try {
+                return fn();
+            } finally {
+                Math.random = saved;
+            }
+        }
+
         placeChunkFurniture(ch) {
             if (ch.furnitureDone) return;
             ch.furnitureDone = true;
+            this.withChunkRng(ch, () => this.placeChunkFurnitureInner(ch));
+        }
 
+        placeChunkFurnitureInner(ch) {
             for (const r of ch.rooms) {
                 // Coordenadas de mundo para la sala
                 const rw = { x: ch.cx * CHUNK_SIZE + r.x, z: ch.cz * CHUNK_SIZE + r.z, w: r.w, h: r.h };
@@ -1831,6 +1840,12 @@
         }
 
         spawnChunkPickups(ch) {
+            // El materializado de objetos tambien usa el RNG del chunk: las
+            // rotaciones de pilas y notas son identicas para todos los clientes
+            this.withChunkRng(ch, () => this.spawnChunkPickupsInner(ch));
+        }
+
+        spawnChunkPickupsInner(ch) {
             if (!ch.pickupsDone) {
                 ch.pickupsDone = true;
                 const r = ch.rng;

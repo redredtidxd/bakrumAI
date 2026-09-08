@@ -1,6 +1,43 @@
 /* ==========================================================================
        6. INTELIGENCIA ARTIFICIAL DEL MONSTRUO: PATRULLA, FOV Y SIGILO
        ========================================================================== */
+    // Construye el modelo 3D de la entidad (cuerpo de tentaculos negros).
+    // Se usa tanto para la entidad local como para el ESPECTRO sincronizado
+    // que ven los demas jugadores en multijugador.
+    function createEntityModel() {
+        const group = new THREE.Group();
+        const tentacles = [];
+        const blackMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.1, metalness: 0.95 });
+
+        for (let i = 0; i < 6; i++) {
+            const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, 0.35, 6), blackMat);
+            seg.position.y = 0.2 + i * 0.28;
+            group.add(seg);
+            tentacles.push(seg);
+        }
+
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), blackMat);
+        head.position.y = 1.9;
+        group.add(head);
+
+        const redEyeMat = new THREE.MeshBasicMaterial({ color: 0xff1111 });
+        const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), redEyeMat);
+        eye1.position.set(0.06, 1.93, 0.14);
+        const eye2 = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), redEyeMat);
+        eye2.position.set(-0.06, 1.93, 0.14);
+        group.add(eye1, eye2);
+
+        for (let i = 0; i < 4; i++) {
+            const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.05, 1.4, 5), blackMat);
+            arm.position.set((i % 2 === 0 ? 0.3 : -0.3), 1.2, 0);
+            arm.rotation.z = (i % 2 === 0 ? 0.4 : -0.4);
+            group.add(arm);
+            tentacles.push(arm);
+        }
+
+        return { group, tentacles };
+    }
+
     class BacteriophageEntity {
         constructor(scene) {
             this.scene = scene;
@@ -16,39 +53,11 @@
             this.lastKnownPos = new THREE.Vector3();
             this.tentacles = [];
 
-            this.buildModel();
+            const model = createEntityModel();
+            this.mesh = model.group;
+            this.tentacles = model.tentacles;
             this.mesh.visible = false;
             this.scene.add(this.mesh);
-        }
-
-        buildModel() {
-            const blackMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.1, metalness: 0.95 });
-
-            for (let i = 0; i < 6; i++) {
-                const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, 0.35, 6), blackMat);
-                seg.position.y = 0.2 + i * 0.28;
-                this.mesh.add(seg);
-                this.tentacles.push(seg);
-            }
-
-            const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), blackMat);
-            head.position.y = 1.9;
-            this.mesh.add(head);
-
-            const redEyeMat = new THREE.MeshBasicMaterial({ color: 0xff1111 });
-            const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), redEyeMat);
-            eye1.position.set(0.06, 1.93, 0.14);
-            const eye2 = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), redEyeMat);
-            eye2.position.set(-0.06, 1.93, 0.14);
-            this.mesh.add(eye1, eye2);
-
-            for (let i = 0; i < 4; i++) {
-                const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.05, 1.4, 5), blackMat);
-                arm.position.set((i % 2 === 0 ? 0.3 : -0.3), 1.2, 0);
-                arm.rotation.z = (i % 2 === 0 ? 0.4 : -0.4);
-                this.mesh.add(arm);
-                this.tentacles.push(arm);
-            }
         }
 
         spawnDistant(walkableCells, playerPos) {

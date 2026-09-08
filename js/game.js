@@ -23,7 +23,7 @@
             this.renderer.setClearColor(FOG_COLOR);
             // Control de exposición: mapeado de tonos oscuro y aterrador
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            this.renderer.toneMappingExposure = 0.56;
+            this.renderer.toneMappingExposure = 0.58;
             this.container.appendChild(this.renderer.domElement);
 
             // Anisotropía: paredes y moqueta se ven nítidas incluso en ángulo rasante
@@ -33,15 +33,18 @@
             });
 
             // Luz ambiental casi nula: paredes y moqueta en penumbra ocre
-            this.ambientLight = new THREE.AmbientLight(0xd8d4c6, 0.055);
+            // AMARILLENTA (el backroom fluorescente, no blanco).
+            this.ambientLight = new THREE.AmbientLight(0xded187, 0.11);
             this.scene.add(this.ambientLight);
 
             // Relleno hemisférico mínimo para evitar el aspecto lavado
-            this.hemiLight = new THREE.HemisphereLight(0xfff9ec, 0x6a5d30, 0.07);
+            this.hemiLight = new THREE.HemisphereLight(0xfff3c0, 0x6a5d30, 0.10);
             this.scene.add(this.hemiLight);
 
             this.flashlightOn = true;
-            this.flashlight = new THREE.SpotLight(0xfffae6, 1.35, 26, Math.PI / 6.5, 0.85, 2.0);
+            // Linterna mejorada: mas alcance, tono calido amarillento y un cono
+            // algo mas cerrado con borde suave (penumbra alta)
+            this.flashlight = new THREE.SpotLight(0xfff0b0, 2.0, 36, Math.PI / 6, 0.95, 2.0);
             this.flashlight.position.set(0, 0, 0);
             this.flashlight.target = new THREE.Object3D();
             this.camera.add(this.flashlight.target);
@@ -52,11 +55,14 @@
             this.camera.add(this.flashLight);
             this.scene.add(this.camera);
 
+            // Piscina de luces de techo AMARILLENTAS (0xffd878): antes eran 8
+            // focos con radio 9 m que no llegaban ni a la lampara vecina y el
+            // pasillo quedaba negro hasta pisar cada foco. Ahora 28 focos con
+            // radio 16 m, repartidos con prioridad a las lamparas VISIBLES en
+            // pantalla: toda lampara a la vista tiene su luz.
             this.lightPool = [];
-            for (let i = 0; i < 8; i++) {
-                // Alcance corto: la luz no traspasa las paredes finas hacia
-                // las zonas de apagon vecinas
-                const pl = new THREE.PointLight(0xffe899, 0, 9, 2.0);
+            for (let i = 0; i < 28; i++) {
+                const pl = new THREE.PointLight(0xffd878, 0, 16, 2.0);
                 this.scene.add(pl);
                 this.lightPool.push(pl);
             }
@@ -97,6 +103,15 @@
             this.chalkSystem = new ChalkDrawingSystem(this.scene, this.camera);
             this.entity = new BacteriophageEntity(this.scene);
 
+            // Multijugador (hasta 6): mismo mundo deterministico + broker MQTT
+            this.net = new MultiplayerManager(this.scene, this.camera, {
+                onToast: (msg) => this.notify(msg),
+                onKill: (reason) => this.triggerGameOver(reason)
+            });
+
+            window.addEventListener('beforeunload', () => this.net.leave());
+            window.addEventListener('pagehide', () => this.net.leave());
+
             // Muebles con física: visibles y asentados desde el inicio (cero
             // flotación); se sincronizan tambien al cargar chunks nuevos
             this.furnitureBodies = [];
@@ -119,7 +134,12 @@
             this.updateFlashlightHUD();
 
             setTimeout(() => {
-                if (this.gameActive) this.entity.spawnDistant(this.worldSystem.walkableCells, this.player.pos);
+                // Solo el ANFITRIÓN de la sala (o el jugador solitario) genera
+                // la entidad; el resto la ve como espectro sincronizado
+                if (this.gameActive && this.net.isEntityHost()) {
+                    this.entity.spawnDistant(this.worldSystem.walkableCells, this.player.pos);
+                    this.net.onEntitySpawned();
+                }
             }, 50000);
 
             window.addEventListener('resize', () => this.onResize());
@@ -141,7 +161,7 @@
             }
 
             this.flashlightOn = !this.flashlightOn;
-            this.flashlight.intensity = this.flashlightOn ? 1.6 : 0;
+            this.flashlight.intensity = this.flashlightOn ? 2.0 : 0;
             if (this.flashlightOn) audio.playSwitchClick();
             this.updateFlashlightHUD();
         }
@@ -178,10 +198,10 @@
                     }
                 } else if (this.inventory.flashBattery < 20) {
                     // Parpadeo agonizante antes de agotarse
-                    this.flashlight.intensity = 0.9 + Math.random() * 1.0;
+                    this.flashlight.intensity = 1.1 + Math.random() * 1.0;
                     if (Math.random() < 0.06) audio.flickerHum();
                 } else {
-                    this.flashlight.intensity = 1.6;
+                    this.flashlight.intensity = 2.0;
                 }
             }
             this.updateFlashlightHUD();
@@ -213,7 +233,11 @@
             const cells = this.worldSystem.walkableCells;
             const near = cells.filter(c => Math.max(Math.abs(c.x), Math.abs(c.z)) < CHUNK_SIZE * 3);
             const pool = near.length >= 20 ? near : cells;
-            const spawnCell = pool[Math.floor(Math.random() * pool.length)];
+            // Determinista: misma semilla -> SIEMPRE el mismo punto de aparicion
+            // (antes Math.random: cada partida empezaba en un sitio distinto y
+            // con la misma semilla parecia un backroom diferente)
+            const rng = mulberry32((this.worldSeed ^ 0x9E3779B9) >>> 0);
+            const spawnCell = pool[Math.floor(rng() * pool.length)];
             const spawnX = (spawnCell.x + 0.5) * CELL_SIZE;
             const spawnZ = (spawnCell.z + 0.5) * CELL_SIZE;
 
@@ -330,15 +354,34 @@
         }
 
         initUI() {
+            // Recuerda el nombre entre partidas
+            const nameInput = document.getElementById('name-input');
+            if (nameInput) {
+                try { nameInput.value = localStorage.getItem('backrooms-name') || ''; } catch (e) { /* noop */ }
+            }
+
+            // Dado: rellena el campo con una semilla aleatoria nueva
+            const seedInputEl = document.getElementById('seed-input');
+            const randomSeedBtn = document.getElementById('btn-random-seed');
+            if (randomSeedBtn) {
+                randomSeedBtn.onclick = () => {
+                    if (!seedInputEl) return;
+                    seedInputEl.value = String((1 + Math.floor(Math.random() * 0xFFFFFFFE)) >>> 0);
+                };
+            }
+
             document.getElementById('btn-start').onclick = () => {
                 audio.init();
 
                 // Semilla personalizada: si el campo del menu trae una semilla
-                // distinta, se regenera TODO el mundo antes de empezar
+                // distinta, se regenera TODO el mundo antes de empezar.
+                // Las semillas NUMERICAS se usan tal cual (escribir "1" genera
+                // la semilla 1, no un hash que siempre lleva al mismo mundo de
+                // siempre); los textos se convierten con un hash estable.
                 const seedInput = document.getElementById('seed-input');
                 const seedText = seedInput ? seedInput.value.trim() : '';
                 if (seedText) {
-                    const seed = stringSeed(seedText);
+                    const seed = /^\d+$/.test(seedText) ? (parseInt(seedText, 10) >>> 0) : stringSeed(seedText);
                     if (seed !== this.worldSeed) {
                         this.worldSeed = seed;
                         this.worldSystem.rebuild(seed);
@@ -349,6 +392,16 @@
                         this.updateSeedLabel();
                     }
                 }
+
+                // Multijugador: la SEMILLA es el codigo de sala. Quienes usen
+                // la misma semilla (o el mismo numero mostrado en el HUD)
+                // caen en el mismo backroom, hasta 6 exploradores.
+                const nameInput = document.getElementById('name-input');
+                const name = nameInput ? nameInput.value.trim() : '';
+                if (name) {
+                    try { localStorage.setItem('backrooms-name', name); } catch (e) { /* noop */ }
+                }
+                this.net.join(this.worldSeed, name);
 
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
@@ -394,16 +447,18 @@
                 }
             }, 50);
 
+            // Aturde a la entidad (local) y avisa a la sala: el flash de
+            // cualquier jugador aturde al monstruo para todos
+            const camDir = new THREE.Vector3();
+            this.camera.getWorldDirection(camDir);
             if (this.entity.active) {
                 const toEntity = this.entity.pos.clone().sub(this.camera.position);
-                const camDir = new THREE.Vector3();
-                this.camera.getWorldDirection(camDir);
                 const dot = camDir.dot(toEntity.clone().normalize());
-
                 if (dot > 0.45 && toEntity.length() < 24) {
                     this.entity.stun(4.0);
                 }
             }
+            this.net.requestStun(this.camera.position, camDir);
         }
 
         drinkAlmondWater() {
@@ -597,18 +652,28 @@
         }
 
         updateLights(dt) {
-            const sorted = this.worldSystem.lamps
-                .map(l => ({ lamp: l, dist: this.camera.position.distanceTo(l.pos) }))
-                .sort((a, b) => a.dist - b.dist);
+            // Prioridad a las lamparas VISIBLES en pantalla: primero las que
+            // caen dentro (o casi dentro) del frustum, y entre ellas las mas
+            // cercanas. Asi toda luz a la vista tiene foco aunque la piscina
+            // no alcance para todas las del nivel.
+            const v = new THREE.Vector3();
+            const sorted = this.worldSystem.lamps.map(l => {
+                v.copy(l.pos).project(this.camera);
+                const onScreen = v.z < 1 && v.x > -1.2 && v.x < 1.2 && v.y > -1.2 && v.y < 1.2;
+                return { lamp: l, dist: this.camera.position.distanceTo(l.pos), onScreen };
+            }).sort((a, b) => {
+                if (a.onScreen !== b.onScreen) return a.onScreen ? -1 : 1;
+                return a.dist - b.dist;
+            });
 
             this.lightPool.forEach((light, i) => {
-                if (sorted[i] && sorted[i].dist < 12) {
+                if (sorted[i] && sorted[i].dist < 21) {
                     const l = sorted[i].lamp;
                     light.position.copy(l.pos);
 
                     if (l.state === 1) {
-                        // Paneles muy tenues: quedan grandes charcos de oscuridad entre lámpara y lámpara
-                        light.intensity = 0.34;
+                        // Paneles encendidos: luz continua, visible de lejos
+                        light.intensity = 0.68;
                     } else if (l.state === 2) {
                         l.flickerTimer -= dt;
                         if (l.flickerTimer <= 0) {
@@ -616,7 +681,7 @@
                             l.flickerTimer = Math.random() * 0.25 + 0.05;
                             if (!l.isLitNow && Math.random() < 0.15) audio.flickerHum();
                         }
-                        light.intensity = l.isLitNow ? (0.34 + Math.random() * 0.1) : 0.03;
+                        light.intensity = l.isLitNow ? (0.72 + Math.random() * 0.2) : 0.06;
                     }
                 } else {
                     light.intensity = 0;
@@ -841,6 +906,9 @@
             this.player.sanity -= 0.12 * dt;
             if (this.entity.active && this.entity.state === 'CHASING') {
                 this.player.sanity -= 4.0 * dt;
+            } else if (this.net.entityNear(this.player.pos, 14)) {
+                // En multijugador el espectro sincronizado tambien drena cordura
+                this.player.sanity -= 3.0 * dt;
             }
             this.updateSanityHUD();
 
@@ -855,6 +923,18 @@
             document.getElementById('hud').style.display = 'none';
             document.getElementById('game-over-reason').textContent = reason;
             document.getElementById('game-over-screen').style.display = 'flex';
+            this.net.leave();
+        }
+
+        updateNetHUD() {
+            const el = document.getElementById('net-status');
+            if (!el) return;
+            const txt = this.net.hudText();
+            if (txt !== this._netHud) {
+                this._netHud = txt;
+                el.textContent = '🛰 ' + txt;
+                el.style.color = this.net.roomFull ? '#d15b4a' : (this.net.joined ? '#8fa336' : '#756a47');
+            }
         }
 
         onResize() {
@@ -879,6 +959,8 @@
                 this.updateFlashlightBattery(dt);
                 this.updateChalkDrawing();
                 this.checkInteractionsPrompt();
+                this.net.update(dt, this.player.pos, this.yaw, this.pitch, this.flashlightOn, this.worldSystem.wallBoxes, this.entity);
+                this.updateNetHUD();
                 this.entity.update(
                     dt,
                     this.player.pos,

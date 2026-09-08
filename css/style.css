@@ -414,7 +414,7 @@
             border-color: #bda052;
         }
 
-        #seed-input {
+        #seed-input, #name-input {
             width: 260px;
             max-width: 90%;
             padding: 9px 12px;
@@ -428,11 +428,11 @@
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
-        #seed-input:focus {
+        #seed-input:focus, #name-input:focus {
             border-color: #bda052;
             box-shadow: 0 0 10px rgba(189, 160, 82, 0.25);
         }
-        #seed-input::placeholder {
+        #seed-input::placeholder, #name-input::placeholder {
             color: #4f4833;
             letter-spacing: 1px;
             font-size: 11px;
