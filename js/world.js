@@ -1196,13 +1196,19 @@
                     else wallKind.set(k, 'interior');
                 }
             }
-            // Grosor por tramo recto: celdas contiguas de la misma orientacion comparten T
+            // Grosor por tramo recto: celdas contiguas de la misma orientacion
+            // comparten T. Variedad por CATEGORIAS: finas (0,3-0,45), normales
+            // (0,55-0,85) y gruesas (0,95-1,3) en vez de un grosor uniforme
+            // que hace todas las paredes parecidas.
             for (let x = 1; x < N - 1; x++) {
                 for (let z = 1; z < N - 1; z++) {
                     const k = key(x, z);
                     const kind = wallKind.get(k);
                     if (!kind || kind === 'border' || kind === 'post' || wallTMap.has(k)) continue;
-                    const T = T_MIN + ch.rng() * (T_MAX - T_MIN);
+                    const rv = ch.rng();
+                    const T = rv < 0.25 ? 0.3 + ch.rng() * 0.15      // fina
+                        : rv < 0.7 ? 0.55 + ch.rng() * 0.3           // normal
+                        : 0.95 + ch.rng() * 0.35;                    // muy gruesa
                     const q = [[x, z]];
                     wallTMap.set(k, T);
                     while (q.length) {
@@ -1558,6 +1564,7 @@
         // queda pegado a la superficie visible y no flotando.
         placeChunkGraffiti(ch, wallKind, key, curvedCells) {
             const N = CHUNK_SIZE;
+            const C = CELL_SIZE;
             const rng = mulberry32(hash2(ch.cx * 7919 + 101, ch.cz * 104729 + 503));
             const g = ch.grid;
             const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
@@ -1571,7 +1578,17 @@
                     for (const [dx, dz, d] of dirs) {
                         const nx = x + dx, nz = z + dz;
                         if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
-                        if (g[nx][nz] === 0 || g[nx][nz] === 2) candidates.push([x, z, d]);
+                        if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        // Las caras que dan al chunk vecino quedan solapadas por
+                        // la junta del vecino: el grafiti se enterraria en el
+                        // muro y no se veria completo (o no se veria nada)
+                        if (kind === 'border') {
+                            if (d === 'W' && x === 0) continue;
+                            if (d === 'E' && x === N - 1) continue;
+                            if (d === 'S' && z === 0) continue;
+                            if (d === 'N' && z === N - 1) continue;
+                        }
+                        candidates.push([x, z, d]);
                     }
                 }
             }
@@ -1588,11 +1605,15 @@
                 if (!box) continue;
                 const color = GRAFFITI_COLORS[Math.floor(rng() * GRAFFITI_COLORS.length)];
                 const variant = Math.floor(rng() * GRAFFITI_POOL.length);
-                // La cara real de la pared: el grafiti NUNCA puede sobresalir de
-                // ella. Antes media hasta 1,7 m y se colocaba tambien sobre
-                // postes y juntas diminutas de esquina, asi que quedaba parte
-                // del plano volando fuera de la pared.
-                const faceLen = (c[2] === 'W' || c[2] === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
+                // La cara REAL de la pared, limitada a la CELDA: el alargue de
+                // la caja hacia los postes vecinos queda enterrado en el poste,
+                // asi que un grafiti centrado en la caja entera se veia cortado
+                // a trozos. Solo se usa la parte visible (una celda) y el plano
+                // se centra en el centro de la celda, nunca en la caja.
+                const faceLen = Math.min(
+                    (c[2] === 'W' || c[2] === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX),
+                    CELL_SIZE - 0.1
+                );
                 if (faceLen < 1.0) continue;            // caras demasiado cortas: nada de grafiti volador
                 // Sin luces (como la tiza): el grafiti se ve tambien en las
                 // zonas de apagon, no solo bajo lamparas encendidas
@@ -1608,8 +1629,9 @@
                 // (antes el borde superior podia asomar por encima del techo)
                 const y = Math.max(0.3 + h / 2, Math.min(1.05 + rng() * 1.15, WALL_HEIGHT - 0.07 - h / 2));
                 m.position.y = y;
-                const mx = (box.minX + box.maxX) / 2;
-                const mz = (box.minZ + box.maxZ) / 2;
+                // Centro de la celda (visible), no de la caja (enterrada)
+                const mx = ch.cx * N * C + (c[0] + 0.5) * C;
+                const mz = ch.cz * N * C + (c[1] + 0.5) * C;
                 if (c[2] === 'W') { m.position.set(box.minX - 0.022, m.position.y, mz); m.rotation.y = -Math.PI / 2; }
                 else if (c[2] === 'E') { m.position.set(box.maxX + 0.022, m.position.y, mz); m.rotation.y = Math.PI / 2; }
                 else if (c[2] === 'S') { m.position.set(mx, m.position.y, box.minZ - 0.022); m.rotation.y = Math.PI; }
@@ -2070,22 +2092,46 @@
                 for (let p = 0; p < pieces; p++) {
                     const choice = Math.random();
                     if (choice < 0.35) {
-                        const variant = Math.random() < 0.5 ? 2 : 1;
+                        // Poses de mesa: 0 de pie, 1 caida de lado (pata rota),
+                        // 2 patas arriba, 3 volcada hacia delante
+                        const vr = Math.random();
+                        const variant = vr < 0.4 ? 0 : (vr < 0.6 ? 1 : (vr < 0.8 ? 2 : 3));
                         const deskX = rx + (Math.random() - 0.5) * 1.5;
                         const deskZ = rz + (Math.random() - 0.5) * 1.5;
                         if (this.canPlaceFurniture(deskX, deskZ, 0.95)) {
                             const desk = ModelBuilder.createOfficeDesk(variant);
                             desk.position.set(deskX, 0, deskZ);
                             snapToFloor(desk, 0);
+                            // Cajon: de vez en cuando esconde un objeto. El
+                            // tipo se decide AQUI con el rng del chunk: todos
+                            // los clientes abren el mismo cajon con el mismo
+                            // contenido (y el objeto se reclama por red).
+                            const dr = desk.userData.drawer;
+                            if (dr && variant === 0 && Math.random() < 0.35) {
+                                const ir = Math.random();
+                                dr.itemType = ir < 0.4 ? 'almond' : (ir < 0.75 ? 'battery' : (ir < 0.9 ? 'chalk' : 'note'));
+                                if (dr.itemType === 'chalk') {
+                                    const ci = Math.floor(Math.random() * 3);
+                                    const chalkColors = ['#ffffff', '#ff3333', '#111111'];
+                                    const chalkNames = ['BLANCO', 'ROJO', 'NEGRO'];
+                                    dr.chalk = { color: chalkColors[ci], colorName: chalkNames[ci] };
+                                }
+                                if (dr.itemType === 'note') {
+                                    dr.noteIndex = Math.floor(Math.random() * NOTE_POOL.length);
+                                }
+                            }
                             this.scene.add(desk);
                             this.furnitureMeshes.push(desk);
                             this.dynamicFurniture.push({ mesh: desk, x: deskX, z: deskZ });
                             this.occupiedFurnitureBoxes.push({ x: deskX, z: deskZ, radius: 0.95 });
                         }
                     } else if (choice < 0.6) {
+                        // Poses de silla: 0 de pie, 1 caida de lado,
+                        // 2 patas arriba (pata rota)
+                        const vr = Math.random();
+                        const variant = vr < 0.55 ? 0 : (vr < 0.8 ? 1 : 2);
                         const chairX = rx + (Math.random() - 0.5) * 1.8;
                         const chairZ = rz + (Math.random() - 0.5) * 1.8;
-                        const variant = Math.random() < 0.6 ? 1 : 2;
                         if (this.canPlaceFurniture(chairX, chairZ, 0.55)) {
                             const chair = ModelBuilder.createOfficeChair(variant);
                             chair.position.set(chairX, 0, chairZ);
@@ -2453,6 +2499,7 @@
         // largo de la pared, altura, variante de fijacion, orientacion y giro.
         pickWallNoteSpot(ch) {
             const N = CHUNK_SIZE;
+            const C = CELL_SIZE;
             const r = ch.rng;
             const g = ch.grid;
             const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
@@ -2467,19 +2514,33 @@
                         const nx = x + dx, nz = z + dz;
                         if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
                         if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        // Caras que dan al chunk vecino: la junta las solapa
+                        if (d === 'W' && x === 0) continue;
+                        if (d === 'E' && x === N - 1) continue;
+                        if (d === 'S' && z === 0) continue;
+                        if (d === 'N' && z === N - 1) continue;
                         const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
                         if (faceLen < 0.9) continue;
-                        cands.push({ box, d, faceLen });
+                        cands.push({ box, d, x, z });
                     }
                 }
             }
             if (!cands.length) return null;
             const c = cands[Math.floor(r() * cands.length)];
             const rots = [-0.4, -0.24, -0.1, 0.08, 0.22, 0.38];
+            // Posicion ABSOLUTA dentro de la celda (la caja se alarga hacia
+            // los postes y esa parte queda enterrada: la nota siempre cae en
+            // la parte visible de la pared)
+            const cx0 = ch.cx * N * C + (c.x + 0.5) * C;
+            const cz0 = ch.cz * N * C + (c.z + 0.5) * C;
+            const t = 0.12 + r() * 0.76;
+            let px, pz;
+            if (c.d === 'W' || c.d === 'E') { px = cx0; pz = cz0 - C / 2 + t * (C - 0.12); }
+            else { pz = cz0; px = cx0 - C / 2 + t * (C - 0.12); }
             return {
                 box: { minX: c.box.minX, maxX: c.box.maxX, minZ: c.box.minZ, maxZ: c.box.maxZ },
                 dir: c.d,
-                t: 0.12 + r() * 0.76,          // donde, a lo largo de la pared
+                x: px, z: pz,
                 y: 1.1 + r() * 0.8,            // altura sobre el suelo
                 variant: Math.floor(r() * 5),  // 0 chincheta, 1 cinta H, 2 cintas diag., 3 rasgada, 4 sola
                 aspect: r() < 0.6 ? 'portrait' : 'landscape',
@@ -2515,13 +2576,11 @@
                     // del muro (wallFaceMap) en la posicion/altura elegidas
                     mesh = ModelBuilder.createWallNote(p.wall);
                     const b = p.wall.box;
-                    const bx = b.minX + (b.maxX - b.minX) * p.wall.t;
-                    const bz = b.minZ + (b.maxZ - b.minZ) * p.wall.t;
                     let ry = 0;
-                    if (p.wall.dir === 'W') { mesh.position.set(b.minX - 0.016, p.wall.y, bz); ry = -Math.PI / 2; }
-                    else if (p.wall.dir === 'E') { mesh.position.set(b.maxX + 0.016, p.wall.y, bz); ry = Math.PI / 2; }
-                    else if (p.wall.dir === 'S') { mesh.position.set(bx, p.wall.y, b.minZ - 0.016); ry = Math.PI; }
-                    else { mesh.position.set(bx, p.wall.y, b.maxZ + 0.016); ry = 0; }
+                    if (p.wall.dir === 'W') { mesh.position.set(b.minX - 0.016, p.wall.y, p.wall.z); ry = -Math.PI / 2; }
+                    else if (p.wall.dir === 'E') { mesh.position.set(b.maxX + 0.016, p.wall.y, p.wall.z); ry = Math.PI / 2; }
+                    else if (p.wall.dir === 'S') { mesh.position.set(p.wall.x, p.wall.y, b.minZ - 0.016); ry = Math.PI; }
+                    else { mesh.position.set(p.wall.x, p.wall.y, b.maxZ + 0.016); ry = 0; }
                     mesh.rotation.y = ry;
                 } else {
                     mesh = ModelBuilder.createFloorNote();
@@ -2557,7 +2616,7 @@
                 // aumentada: antes aparecian muy pocos objetos por chunk)
                 if (r() < 0.10) want.push({ type: 'camera' });
                 if (r() < 0.20) want.push({ type: 'chalk' });
-                if (r() < 0.26) want.push({ type: 'almond' });
+                if (r() < 0.33) want.push({ type: 'almond' });
                 if (r() < 0.34) want.push({ type: 'battery' });
                 if (r() < 0.32) want.push({ type: 'note' });
 
@@ -2621,6 +2680,40 @@
                 if (p.collected || p.mesh) continue;
                 p.mesh = this.buildPickupMesh(p);
             }
+        }
+
+        // Objeto que sale de un CAJON abierto: se materializa como pickup
+        // normal y se guarda en el chunk de la mesa (persiste al descargar).
+        // El id deriva de la posicion determinista de la mesa, asi si otro
+        // jugador abre el MISMO cajon y ya se reclamo, nace recogido.
+        spawnDrawerPickup(deskGroup, d) {
+            if (!d || !d.itemType) return null;
+            const id = 'dr:' + Math.round(deskGroup.position.x * 10) + ':' + Math.round(deskGroup.position.z * 10);
+            if (this.claimedPickupIds.has(id)) return null;
+            // Posicion: delante del cajon abierto (local +Z del escritorio)
+            deskGroup.updateMatrixWorld(true);
+            const local = new THREE.Vector3(0.46, 0.02, 0.62);
+            const wp = local.applyMatrix4(deskGroup.matrixWorld);
+            const data = {
+                id,
+                type: d.itemType,
+                x: wp.x,
+                z: wp.z,
+                collected: false,
+                mesh: null,
+                pos: new THREE.Vector3(wp.x, 0, wp.z)
+            };
+            if (d.itemType === 'chalk') { data.color = d.chalk.color; data.colorName = d.chalk.colorName; }
+            if (d.itemType === 'note') { data.noteIndex = d.noteIndex; data.text = NOTE_POOL[d.noteIndex]; }
+            this.pickupById.set(data.id, data);
+            this.pickupData.push(data);
+            const ccx = Math.floor(wp.x / (CHUNK_SIZE * CELL_SIZE));
+            const ccz = Math.floor(wp.z / (CHUNK_SIZE * CELL_SIZE));
+            const ch = this.chunks.get(ccx + ',' + ccz);
+            if (ch) ch.pickupList.push(data);
+            data.mesh = this.buildPickupMesh(data);
+            this.rebuildUnions();
+            return data;
         }
 
         // Un objeto reclamado por red (otro jugador lo recogio): desaparece

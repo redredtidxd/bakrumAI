@@ -561,13 +561,20 @@
             background: linear-gradient(180deg, rgba(84, 72, 38, 0.95), rgba(46, 40, 22, 0.95));
             border-color: #e0bc62;
         }
-        #btn-touch-run     { left: 20px;  bottom: 178px; width: 66px; height: 46px; border-radius: 12px; font-size: 14px; }
-        #btn-touch-draw    { right: 100px; bottom: 102px; }
-        #btn-touch-flash   { right: 26px;  bottom: 170px; }
-        #btn-touch-note    { right: 100px; bottom: 170px; }
-        #btn-touch-interact{ right: 26px;  bottom: 102px; font-size: 16px; }
+        #btn-touch-run     { left: 16px;  bottom: 178px; width: 64px; height: 44px; border-radius: 12px; font-size: 14px; }
+        #btn-touch-draw    { right: 88px; bottom: 96px; }
+        #btn-touch-flash   { right: 22px;  bottom: 160px; }
+        #btn-touch-note    { right: 88px; bottom: 160px; }
+        #btn-touch-interact{ right: 22px;  bottom: 96px; font-size: 16px; }
+        .touch-btn.off {
+            opacity: 0.4;
+            border-color: #3d3521;
+        }
 
-        /* HUD compacto para pantallas táctiles */
+        /* HUD compacto para pantallas táctiles: la GUI NO debe tapar la
+           camara. Se oculta todo lo prescindible (REC, coords, panel de la
+           linterna, pista de controles) y lo que queda es pequeño y
+           semitransparente. */
         body.touch-mode,
         body.touch-mode html {
             touch-action: none;
@@ -576,17 +583,31 @@
             -webkit-touch-callout: none;
         }
         body.touch-mode #hud {
-            padding: 10px;
+            padding: 8px;
         }
         body.touch-mode .rec-tag {
-            font-size: 12px;
+            display: none;
+        }
+        body.touch-mode #sector-label {
+            font-size: 9px;
+            margin-top: 2px !important;
+            opacity: 0.75;
         }
         body.touch-mode .sanity-container {
-            width: 150px;
-            padding: 5px 6px;
+            width: 112px;
+            padding: 3px 6px;
+            background: linear-gradient(180deg, rgba(22, 20, 13, 0.6), rgba(11, 10, 7, 0.6));
         }
         body.touch-mode .sanity-label {
             font-size: 9px;
+            margin-bottom: 2px;
+            justify-content: flex-end;
+        }
+        body.touch-mode .sanity-label span:first-child {
+            display: none;
+        }
+        body.touch-mode .sanity-bar {
+            height: 6px;
         }
         body.touch-mode .coords-label {
             display: none;
@@ -594,7 +615,7 @@
         body.touch-mode .hud-footer {
             position: absolute;
             left: 50%;
-            bottom: 10px;
+            bottom: 8px;
             transform: translateX(-50%);
             width: auto;
         }
@@ -602,23 +623,24 @@
             display: none;
         }
         body.touch-mode .flashlight-indicator {
-            font-size: 9px;
-            padding: 4px 8px;
-            margin-bottom: 4px;
+            display: none;
         }
         body.touch-mode .toolbelt {
-            gap: 5px;
-            padding: 6px 8px;
-            max-width: 96vw;
+            gap: 4px;
+            padding: 4px 6px;
+            max-width: 82vw;
             overflow-x: auto;
+            background: linear-gradient(180deg, rgba(20, 18, 12, 0.6), rgba(10, 9, 6, 0.6));
         }
         body.touch-mode .tool-slot {
-            min-width: 54px;
-            padding: 6px 5px 4px;
+            min-width: 48px;
+            padding: 4px 5px 3px;
             font-size: 9px;
+            background: linear-gradient(180deg, rgba(30, 27, 18, 0.55), rgba(17, 15, 10, 0.6));
         }
         body.touch-mode .tool-slot .tool-emoji {
-            font-size: 19px;
+            font-size: 18px;
+            margin-bottom: 1px;
         }
         body.touch-mode .tool-slot .tool-key,
         body.touch-mode .chalk-meter,
@@ -630,8 +652,31 @@
             display: none;
         }
         body.touch-mode #interact-prompt {
-            top: 40%;
+            top: 34%;
             font-size: 11px;
+            padding: 5px 12px;
+        }
+        body.touch-mode #toast-box {
+            top: 64px;
+        }
+        body.touch-mode .toast {
+            font-size: 10px;
+            padding: 4px 10px;
+        }
+        #joy-base {
+            border-color: rgba(216, 200, 157, 0.35);
+            background: rgba(20, 18, 12, 0.18);
+        }
+        body.touch-mode .touch-btn {
+            background: linear-gradient(180deg, rgba(24, 20, 12, 0.75), rgba(12, 10, 7, 0.78));
+            font-size: 17px;
+            width: 54px;
+            height: 54px;
+        }
+        body.touch-mode #btn-touch-run {
+            width: 60px;
+            height: 42px;
+            font-size: 13px;
         }
         body.touch-mode .menu-box {
             max-height: 94vh;
@@ -674,7 +719,7 @@
         <div class="hud-header">
             <div>
                 <div class="rec-tag"><div class="rec-dot"></div> REC [TAPE-00]</div>
-                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS <span id="hud-version" style="color: #4f4833;">v1.1.1</span></div>
+                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS <span id="hud-version" style="color: #4f4833;">v1.2.0</span></div>
             </div>
             <div class="sanity-container">
                 <div id="coords-label" class="coords-label">POS X:+0000.0 Y:+0001.6 Z:+0000.0</div>
@@ -757,7 +802,7 @@
                 🛰 <b style="color:#a39879;">MULTIJUGADOR · HASTA 6 EXPLORADORES:</b> quienes escriban la <b style="color:#a39879;">MISMA SEMILLA</b> caen en la misma sala. El número del HUD (SEMILLA) es el código para compartir. Si la sala está llena jugarás en solitario.
             </p>
             <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
-            <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.1.1</div>
+            <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.2.0</div>
             <div style="margin-top: 18px; font-size: 12px;">
                 <label for="vol-slider">VOLUMEN:</label>
                 <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="0.7" style="vertical-align:middle; accent-color:#bda052;">
@@ -878,6 +923,43 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             ctx.fillStyle = '#4c493c';
             for (let i = 0; i < 400; i++) {
                 ctx.fillRect(texRng() * 504 + 4, texRng() * 504 + 4, 2, 2);
+            }
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        },
+
+        createWoodTexture() {
+            // Veta de madera clara/oscura para mesas y muebles de oficina.
+            // RNG fijo: todos los clientes ven la misma veta.
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#4a3521';
+            ctx.fillRect(0, 0, 256, 256);
+            ctx.strokeStyle = 'rgba(26, 17, 9, 0.55)';
+            for (let i = 0; i < 46; i++) {
+                ctx.lineWidth = 1 + texRng() * 2.6;
+                ctx.beginPath();
+                const y = texRng() * 256;
+                let x = -10;
+                ctx.moveTo(x, y);
+                while (x < 266) {
+                    x += 22 + texRng() * 42;
+                    ctx.lineTo(x, y + (texRng() - 0.5) * 26);
+                }
+                ctx.stroke();
+            }
+            for (let i = 0; i < 4; i++) {
+                ctx.fillStyle = 'rgba(18, 11, 5, 0.4)';
+                const kx = texRng() * 256, ky = texRng() * 256;
+                ctx.beginPath();
+                ctx.ellipse(kx, ky, 3 + texRng() * 5, 2 + texRng() * 3.5, texRng() * 3, 0, Math.PI * 2);
+                ctx.fill();
             }
 
             const tex = new THREE.CanvasTexture(canvas);
@@ -1190,7 +1272,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
     const ModelBuilder = {
         createOfficeDesk(variant = 0) {
             const group = new THREE.Group();
-            const woodMat = new THREE.MeshStandardMaterial({ color: 0x332519, roughness: 0.8 });
+            const woodMat = new THREE.MeshStandardMaterial({ map: TextureGenerator.createWoodTexture(), roughness: 0.85 });
             const legMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.8, roughness: 0.3 });
             const handleMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9, roughness: 0.2 });
 
@@ -1206,6 +1288,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 [0.72, 0.35, 0.36]
             ];
 
+            // Pata rota (variant 1): 3 patas, asi la mesa NO puede sostenerse
+            // en pie y SIEMPRE nace caida (nunca flotando inclinada)
             const legsToSpawn = (variant === 1) ? legPositions.slice(0, 3) : legPositions;
             legsToSpawn.forEach(pos => {
                 const leg = new THREE.Mesh(legGeo, legMat);
@@ -1213,21 +1297,31 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 group.add(leg);
             });
 
+            // Cajon frontal: la manilla va pegada al cajon para que se abra
+            // con el (world.js decide si contiene un objeto; game.js lo abre
+            // con [E] y lo desliza).
             const drawer = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.45, 0.74), woodMat);
             drawer.position.set(0.46, 0.45, 0);
             const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), handleMat);
-            handle.position.set(0.46, 0.52, 0.38);
-            group.add(drawer, handle);
+            handle.position.set(0, 0.07, 0.38);
+            drawer.add(handle);
+            group.add(drawer);
+            group.userData.drawer = { mesh: drawer, open: false };
 
             if (variant === 2) {
-                // Volcada del revés con patas hacia arriba
+                // Boca abajo: patas arriba, apoyada plana en la mesa
                 group.rotation.x = Math.PI;
-                group.rotation.z = (Math.random() - 0.5) * 0.4;
+                group.rotation.z = (Math.random() - 0.5) * 0.12;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else if (variant === 1) {
-                // Inclinada en el suelo por pata rota
-                group.rotation.z = -0.35;
-                group.rotation.y = (Math.random() - 0.5) * 0.6;
+                // Pata rota: CAIDA DE LADO, plana sobre la moqueta
+                group.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.18;
+                group.rotation.y = Math.random() * Math.PI * 2;
+            } else if (variant === 3) {
+                // Volcada hacia delante: el tablero queda vertical y las
+                // patas delanteras tumbadas en el suelo
+                group.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.18;
+                group.rotation.y = Math.random() * Math.PI * 2;
             } else {
                 group.rotation.y = Math.random() * Math.PI * 2;
             }
@@ -1263,6 +1357,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 [0.18, 0.22, 0.18]
             ];
 
+            // Pata rota (variant 2): 3 patas -> la silla no se sostiene en pie
+            // y nace caida; las poses caidas son SIEMPRE planas (nunca flotan
+            // inclinadas a media altura)
             const count = (variant === 2) ? 3 : 4;
             for (let i = 0; i < count; i++) {
                 const leg = new THREE.Mesh(legGeo, metalMat);
@@ -1271,12 +1368,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             }
 
             if (variant === 1) {
-                // Caída de lado sobre la moqueta
-                group.rotation.z = Math.PI / 2;
+                // Caida de lado: respaldo plano en el suelo, asiento vertical
+                group.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.15;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else if (variant === 2) {
-                // Inclinada en el suelo
-                group.rotation.x = 0.38;
+                // Patas arriba: apoyada plana sobre asiento y respaldo
+                group.rotation.x = Math.PI + (Math.random() - 0.5) * 0.12;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else {
                 group.rotation.y = Math.random() * Math.PI * 2;
@@ -2976,13 +3073,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     else wallKind.set(k, 'interior');
                 }
             }
-            // Grosor por tramo recto: celdas contiguas de la misma orientacion comparten T
+            // Grosor por tramo recto: celdas contiguas de la misma orientacion
+            // comparten T. Variedad por CATEGORIAS: finas (0,3-0,45), normales
+            // (0,55-0,85) y gruesas (0,95-1,3) en vez de un grosor uniforme
+            // que hace todas las paredes parecidas.
             for (let x = 1; x < N - 1; x++) {
                 for (let z = 1; z < N - 1; z++) {
                     const k = key(x, z);
                     const kind = wallKind.get(k);
                     if (!kind || kind === 'border' || kind === 'post' || wallTMap.has(k)) continue;
-                    const T = T_MIN + ch.rng() * (T_MAX - T_MIN);
+                    const rv = ch.rng();
+                    const T = rv < 0.25 ? 0.3 + ch.rng() * 0.15      // fina
+                        : rv < 0.7 ? 0.55 + ch.rng() * 0.3           // normal
+                        : 0.95 + ch.rng() * 0.35;                    // muy gruesa
                     const q = [[x, z]];
                     wallTMap.set(k, T);
                     while (q.length) {
@@ -3338,6 +3441,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         // queda pegado a la superficie visible y no flotando.
         placeChunkGraffiti(ch, wallKind, key, curvedCells) {
             const N = CHUNK_SIZE;
+            const C = CELL_SIZE;
             const rng = mulberry32(hash2(ch.cx * 7919 + 101, ch.cz * 104729 + 503));
             const g = ch.grid;
             const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
@@ -3351,7 +3455,17 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     for (const [dx, dz, d] of dirs) {
                         const nx = x + dx, nz = z + dz;
                         if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
-                        if (g[nx][nz] === 0 || g[nx][nz] === 2) candidates.push([x, z, d]);
+                        if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        // Las caras que dan al chunk vecino quedan solapadas por
+                        // la junta del vecino: el grafiti se enterraria en el
+                        // muro y no se veria completo (o no se veria nada)
+                        if (kind === 'border') {
+                            if (d === 'W' && x === 0) continue;
+                            if (d === 'E' && x === N - 1) continue;
+                            if (d === 'S' && z === 0) continue;
+                            if (d === 'N' && z === N - 1) continue;
+                        }
+                        candidates.push([x, z, d]);
                     }
                 }
             }
@@ -3368,11 +3482,15 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (!box) continue;
                 const color = GRAFFITI_COLORS[Math.floor(rng() * GRAFFITI_COLORS.length)];
                 const variant = Math.floor(rng() * GRAFFITI_POOL.length);
-                // La cara real de la pared: el grafiti NUNCA puede sobresalir de
-                // ella. Antes media hasta 1,7 m y se colocaba tambien sobre
-                // postes y juntas diminutas de esquina, asi que quedaba parte
-                // del plano volando fuera de la pared.
-                const faceLen = (c[2] === 'W' || c[2] === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
+                // La cara REAL de la pared, limitada a la CELDA: el alargue de
+                // la caja hacia los postes vecinos queda enterrado en el poste,
+                // asi que un grafiti centrado en la caja entera se veia cortado
+                // a trozos. Solo se usa la parte visible (una celda) y el plano
+                // se centra en el centro de la celda, nunca en la caja.
+                const faceLen = Math.min(
+                    (c[2] === 'W' || c[2] === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX),
+                    CELL_SIZE - 0.1
+                );
                 if (faceLen < 1.0) continue;            // caras demasiado cortas: nada de grafiti volador
                 // Sin luces (como la tiza): el grafiti se ve tambien en las
                 // zonas de apagon, no solo bajo lamparas encendidas
@@ -3388,8 +3506,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 // (antes el borde superior podia asomar por encima del techo)
                 const y = Math.max(0.3 + h / 2, Math.min(1.05 + rng() * 1.15, WALL_HEIGHT - 0.07 - h / 2));
                 m.position.y = y;
-                const mx = (box.minX + box.maxX) / 2;
-                const mz = (box.minZ + box.maxZ) / 2;
+                // Centro de la celda (visible), no de la caja (enterrada)
+                const mx = ch.cx * N * C + (c[0] + 0.5) * C;
+                const mz = ch.cz * N * C + (c[1] + 0.5) * C;
                 if (c[2] === 'W') { m.position.set(box.minX - 0.022, m.position.y, mz); m.rotation.y = -Math.PI / 2; }
                 else if (c[2] === 'E') { m.position.set(box.maxX + 0.022, m.position.y, mz); m.rotation.y = Math.PI / 2; }
                 else if (c[2] === 'S') { m.position.set(mx, m.position.y, box.minZ - 0.022); m.rotation.y = Math.PI; }
@@ -3850,22 +3969,46 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 for (let p = 0; p < pieces; p++) {
                     const choice = Math.random();
                     if (choice < 0.35) {
-                        const variant = Math.random() < 0.5 ? 2 : 1;
+                        // Poses de mesa: 0 de pie, 1 caida de lado (pata rota),
+                        // 2 patas arriba, 3 volcada hacia delante
+                        const vr = Math.random();
+                        const variant = vr < 0.4 ? 0 : (vr < 0.6 ? 1 : (vr < 0.8 ? 2 : 3));
                         const deskX = rx + (Math.random() - 0.5) * 1.5;
                         const deskZ = rz + (Math.random() - 0.5) * 1.5;
                         if (this.canPlaceFurniture(deskX, deskZ, 0.95)) {
                             const desk = ModelBuilder.createOfficeDesk(variant);
                             desk.position.set(deskX, 0, deskZ);
                             snapToFloor(desk, 0);
+                            // Cajon: de vez en cuando esconde un objeto. El
+                            // tipo se decide AQUI con el rng del chunk: todos
+                            // los clientes abren el mismo cajon con el mismo
+                            // contenido (y el objeto se reclama por red).
+                            const dr = desk.userData.drawer;
+                            if (dr && variant === 0 && Math.random() < 0.35) {
+                                const ir = Math.random();
+                                dr.itemType = ir < 0.4 ? 'almond' : (ir < 0.75 ? 'battery' : (ir < 0.9 ? 'chalk' : 'note'));
+                                if (dr.itemType === 'chalk') {
+                                    const ci = Math.floor(Math.random() * 3);
+                                    const chalkColors = ['#ffffff', '#ff3333', '#111111'];
+                                    const chalkNames = ['BLANCO', 'ROJO', 'NEGRO'];
+                                    dr.chalk = { color: chalkColors[ci], colorName: chalkNames[ci] };
+                                }
+                                if (dr.itemType === 'note') {
+                                    dr.noteIndex = Math.floor(Math.random() * NOTE_POOL.length);
+                                }
+                            }
                             this.scene.add(desk);
                             this.furnitureMeshes.push(desk);
                             this.dynamicFurniture.push({ mesh: desk, x: deskX, z: deskZ });
                             this.occupiedFurnitureBoxes.push({ x: deskX, z: deskZ, radius: 0.95 });
                         }
                     } else if (choice < 0.6) {
+                        // Poses de silla: 0 de pie, 1 caida de lado,
+                        // 2 patas arriba (pata rota)
+                        const vr = Math.random();
+                        const variant = vr < 0.55 ? 0 : (vr < 0.8 ? 1 : 2);
                         const chairX = rx + (Math.random() - 0.5) * 1.8;
                         const chairZ = rz + (Math.random() - 0.5) * 1.8;
-                        const variant = Math.random() < 0.6 ? 1 : 2;
                         if (this.canPlaceFurniture(chairX, chairZ, 0.55)) {
                             const chair = ModelBuilder.createOfficeChair(variant);
                             chair.position.set(chairX, 0, chairZ);
@@ -4233,6 +4376,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         // largo de la pared, altura, variante de fijacion, orientacion y giro.
         pickWallNoteSpot(ch) {
             const N = CHUNK_SIZE;
+            const C = CELL_SIZE;
             const r = ch.rng;
             const g = ch.grid;
             const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
@@ -4247,19 +4391,33 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         const nx = x + dx, nz = z + dz;
                         if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
                         if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        // Caras que dan al chunk vecino: la junta las solapa
+                        if (d === 'W' && x === 0) continue;
+                        if (d === 'E' && x === N - 1) continue;
+                        if (d === 'S' && z === 0) continue;
+                        if (d === 'N' && z === N - 1) continue;
                         const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
                         if (faceLen < 0.9) continue;
-                        cands.push({ box, d, faceLen });
+                        cands.push({ box, d, x, z });
                     }
                 }
             }
             if (!cands.length) return null;
             const c = cands[Math.floor(r() * cands.length)];
             const rots = [-0.4, -0.24, -0.1, 0.08, 0.22, 0.38];
+            // Posicion ABSOLUTA dentro de la celda (la caja se alarga hacia
+            // los postes y esa parte queda enterrada: la nota siempre cae en
+            // la parte visible de la pared)
+            const cx0 = ch.cx * N * C + (c.x + 0.5) * C;
+            const cz0 = ch.cz * N * C + (c.z + 0.5) * C;
+            const t = 0.12 + r() * 0.76;
+            let px, pz;
+            if (c.d === 'W' || c.d === 'E') { px = cx0; pz = cz0 - C / 2 + t * (C - 0.12); }
+            else { pz = cz0; px = cx0 - C / 2 + t * (C - 0.12); }
             return {
                 box: { minX: c.box.minX, maxX: c.box.maxX, minZ: c.box.minZ, maxZ: c.box.maxZ },
                 dir: c.d,
-                t: 0.12 + r() * 0.76,          // donde, a lo largo de la pared
+                x: px, z: pz,
                 y: 1.1 + r() * 0.8,            // altura sobre el suelo
                 variant: Math.floor(r() * 5),  // 0 chincheta, 1 cinta H, 2 cintas diag., 3 rasgada, 4 sola
                 aspect: r() < 0.6 ? 'portrait' : 'landscape',
@@ -4295,13 +4453,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     // del muro (wallFaceMap) en la posicion/altura elegidas
                     mesh = ModelBuilder.createWallNote(p.wall);
                     const b = p.wall.box;
-                    const bx = b.minX + (b.maxX - b.minX) * p.wall.t;
-                    const bz = b.minZ + (b.maxZ - b.minZ) * p.wall.t;
                     let ry = 0;
-                    if (p.wall.dir === 'W') { mesh.position.set(b.minX - 0.016, p.wall.y, bz); ry = -Math.PI / 2; }
-                    else if (p.wall.dir === 'E') { mesh.position.set(b.maxX + 0.016, p.wall.y, bz); ry = Math.PI / 2; }
-                    else if (p.wall.dir === 'S') { mesh.position.set(bx, p.wall.y, b.minZ - 0.016); ry = Math.PI; }
-                    else { mesh.position.set(bx, p.wall.y, b.maxZ + 0.016); ry = 0; }
+                    if (p.wall.dir === 'W') { mesh.position.set(b.minX - 0.016, p.wall.y, p.wall.z); ry = -Math.PI / 2; }
+                    else if (p.wall.dir === 'E') { mesh.position.set(b.maxX + 0.016, p.wall.y, p.wall.z); ry = Math.PI / 2; }
+                    else if (p.wall.dir === 'S') { mesh.position.set(p.wall.x, p.wall.y, b.minZ - 0.016); ry = Math.PI; }
+                    else { mesh.position.set(p.wall.x, p.wall.y, b.maxZ + 0.016); ry = 0; }
                     mesh.rotation.y = ry;
                 } else {
                     mesh = ModelBuilder.createFloorNote();
@@ -4337,7 +4493,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 // aumentada: antes aparecian muy pocos objetos por chunk)
                 if (r() < 0.10) want.push({ type: 'camera' });
                 if (r() < 0.20) want.push({ type: 'chalk' });
-                if (r() < 0.26) want.push({ type: 'almond' });
+                if (r() < 0.33) want.push({ type: 'almond' });
                 if (r() < 0.34) want.push({ type: 'battery' });
                 if (r() < 0.32) want.push({ type: 'note' });
 
@@ -4401,6 +4557,40 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (p.collected || p.mesh) continue;
                 p.mesh = this.buildPickupMesh(p);
             }
+        }
+
+        // Objeto que sale de un CAJON abierto: se materializa como pickup
+        // normal y se guarda en el chunk de la mesa (persiste al descargar).
+        // El id deriva de la posicion determinista de la mesa, asi si otro
+        // jugador abre el MISMO cajon y ya se reclamo, nace recogido.
+        spawnDrawerPickup(deskGroup, d) {
+            if (!d || !d.itemType) return null;
+            const id = 'dr:' + Math.round(deskGroup.position.x * 10) + ':' + Math.round(deskGroup.position.z * 10);
+            if (this.claimedPickupIds.has(id)) return null;
+            // Posicion: delante del cajon abierto (local +Z del escritorio)
+            deskGroup.updateMatrixWorld(true);
+            const local = new THREE.Vector3(0.46, 0.02, 0.62);
+            const wp = local.applyMatrix4(deskGroup.matrixWorld);
+            const data = {
+                id,
+                type: d.itemType,
+                x: wp.x,
+                z: wp.z,
+                collected: false,
+                mesh: null,
+                pos: new THREE.Vector3(wp.x, 0, wp.z)
+            };
+            if (d.itemType === 'chalk') { data.color = d.chalk.color; data.colorName = d.chalk.colorName; }
+            if (d.itemType === 'note') { data.noteIndex = d.noteIndex; data.text = NOTE_POOL[d.noteIndex]; }
+            this.pickupById.set(data.id, data);
+            this.pickupData.push(data);
+            const ccx = Math.floor(wp.x / (CHUNK_SIZE * CELL_SIZE));
+            const ccz = Math.floor(wp.z / (CHUNK_SIZE * CELL_SIZE));
+            const ch = this.chunks.get(ccx + ',' + ccz);
+            if (ch) ch.pickupList.push(data);
+            data.mesh = this.buildPickupMesh(data);
+            this.rebuildUnions();
+            return data;
         }
 
         // Un objeto reclamado por red (otro jugador lo recogio): desaparece
@@ -5499,15 +5689,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 /* ==========================================================================
        7. CONTROLADOR PRINCIPAL, ILUMINACIÓN Y NIEBLA AMARILLENTA CONTINUA
        ========================================================================== */
-    // Dispositivos táctiles reales (móvil/tableta): pantalla sin puntero fino.
-    // Un portátil táctil con ratón sigue usando los controles de escritorio.
-    const IS_TOUCH = !window.matchMedia('(pointer: fine)').matches &&
-        ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    // Dispositivos táctiles: pantalla pequeña o sin puntero fino. La pantalla
+    // pequeña tambien cuenta (un móvil en modo escritorio puede reportar
+    // pointer:fine y antes se quedaba sin controles táctiles).
+    const IS_TOUCH = (('ontouchstart' in window) || navigator.maxTouchPoints > 0) &&
+        (window.innerWidth < 1100 || !window.matchMedia('(pointer: fine)').matches);
 
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.1.1';
+    const GAME_VERSION = '1.2.0';
 
     class BackroomsGame {
         constructor() {
@@ -5728,6 +5919,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
         updateFlashlightHUD() {
             const pct = Math.max(0, Math.round(this.inventory.flashBattery));
+            // Boton de linterna en movil: atenuado cuando esta apagada
+            const fbtn = document.getElementById('btn-touch-flash');
+            if (fbtn) fbtn.classList.toggle('off', !this.flashlightOn);
             const statusLabel = document.getElementById('flashlight-status');
             if (statusLabel) {
                 statusLabel.textContent = `🔦 LINTERNA: [${this.flashlightOn ? 'ENCENDIDA' : 'APAGADA'}] · PILA ${pct}% (TECLA F)`;
@@ -6054,7 +6248,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
                 this.gameActive = true;
-                if (!IS_TOUCH) document.body.requestPointerLock();
+                if (IS_TOUCH) {
+                    this.notify('🕹 IZQ.: mover · DERECHA: mirar · Toque rápido: interactuar');
+                } else {
+                    document.body.requestPointerLock();
+                }
             };
 
             // En movil las ranuras del cinturón se tocan directamente
@@ -6143,6 +6341,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
             for (let hit of hits) {
                 if (hit.distance < 2.6) {
+                    let done = false;
                     for (let p of this.worldSystem.pickups) {
                         if (!p.collected && (p.mesh === hit.object || p.mesh.children.includes(hit.object))) {
                             p.collected = true;
@@ -6185,6 +6384,25 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                                 this.updateFlashlightHUD();
                             } else if (p.type === 'note') {
                                 this.addLoreNote(p.text, p.noteIndex);
+                            }
+                            done = true;
+                            break;
+                        }
+                    }
+                    if (done) return;
+                    // Cajones de las mesas: [E] los abre; a veces esconden un
+                    // objeto que se materializa como pickup reclamable por red
+                    for (const b of this.furnitureBodies) {
+                        const ud = b.mesh.userData;
+                        if (!ud || !ud.drawer || ud.drawer.open) continue;
+                        if (b.mesh === hit.object || b.mesh.children.includes(hit.object)) {
+                            ud.drawer.open = true;
+                            audio.playSwitchClick();
+                            if (ud.drawer.itemType) {
+                                this.worldSystem.spawnDrawerPickup(b.mesh, ud.drawer);
+                                this.notify('📦 ¡EL CAJÓN ESCONDÍA ALGO!');
+                            } else {
+                                this.notify('📦 Cajón vacío');
                             }
                             return;
                         }
@@ -6399,6 +6617,13 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 // Solo se simula mobiliario cercano: el infinito no debe frenar el juego
                 if (Math.hypot(b.mesh.position.x - this.player.pos.x, b.mesh.position.z - this.player.pos.z) > 32) continue;
 
+                // Cajones de las mesas: se deslizan suavemente al abrir/cerrar
+                if (b.mesh.userData && b.mesh.userData.drawer) {
+                    const dr = b.mesh.userData.drawer;
+                    const target = dr.open ? 0.34 : 0;
+                    dr.mesh.position.z += (target - dr.mesh.position.z) * Math.min(1, dt * 7);
+                }
+
                 // Fricción: el mueble se detiene solo
                 b.vel.x *= Math.max(0, 1 - 3.4 * dt);
                 b.vel.z *= Math.max(0, 1 - 3.4 * dt);
@@ -6476,6 +6701,17 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             let found = false;
             for (let hit of hits) {
                 if (hit.distance < 2.5) {
+                    // Cajones cerrados de las mesas
+                    for (const b of this.furnitureBodies) {
+                        const ud = b.mesh.userData;
+                        if (!ud || !ud.drawer || ud.drawer.open) continue;
+                        if (b.mesh === hit.object || b.mesh.children.includes(hit.object)) {
+                            found = true;
+                            prompt.textContent = '[E] ABRIR CAJÓN';
+                            break;
+                        }
+                    }
+                    if (found) break;
                     for (let p of this.worldSystem.pickups) {
                         if (!p.collected && (p.mesh === hit.object || p.mesh.children.includes(hit.object))) {
                             found = true;

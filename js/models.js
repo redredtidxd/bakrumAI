@@ -18,7 +18,7 @@
     const ModelBuilder = {
         createOfficeDesk(variant = 0) {
             const group = new THREE.Group();
-            const woodMat = new THREE.MeshStandardMaterial({ color: 0x332519, roughness: 0.8 });
+            const woodMat = new THREE.MeshStandardMaterial({ map: TextureGenerator.createWoodTexture(), roughness: 0.85 });
             const legMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.8, roughness: 0.3 });
             const handleMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9, roughness: 0.2 });
 
@@ -34,6 +34,8 @@
                 [0.72, 0.35, 0.36]
             ];
 
+            // Pata rota (variant 1): 3 patas, asi la mesa NO puede sostenerse
+            // en pie y SIEMPRE nace caida (nunca flotando inclinada)
             const legsToSpawn = (variant === 1) ? legPositions.slice(0, 3) : legPositions;
             legsToSpawn.forEach(pos => {
                 const leg = new THREE.Mesh(legGeo, legMat);
@@ -41,21 +43,31 @@
                 group.add(leg);
             });
 
+            // Cajon frontal: la manilla va pegada al cajon para que se abra
+            // con el (world.js decide si contiene un objeto; game.js lo abre
+            // con [E] y lo desliza).
             const drawer = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.45, 0.74), woodMat);
             drawer.position.set(0.46, 0.45, 0);
             const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), handleMat);
-            handle.position.set(0.46, 0.52, 0.38);
-            group.add(drawer, handle);
+            handle.position.set(0, 0.07, 0.38);
+            drawer.add(handle);
+            group.add(drawer);
+            group.userData.drawer = { mesh: drawer, open: false };
 
             if (variant === 2) {
-                // Volcada del revés con patas hacia arriba
+                // Boca abajo: patas arriba, apoyada plana en la mesa
                 group.rotation.x = Math.PI;
-                group.rotation.z = (Math.random() - 0.5) * 0.4;
+                group.rotation.z = (Math.random() - 0.5) * 0.12;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else if (variant === 1) {
-                // Inclinada en el suelo por pata rota
-                group.rotation.z = -0.35;
-                group.rotation.y = (Math.random() - 0.5) * 0.6;
+                // Pata rota: CAIDA DE LADO, plana sobre la moqueta
+                group.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.18;
+                group.rotation.y = Math.random() * Math.PI * 2;
+            } else if (variant === 3) {
+                // Volcada hacia delante: el tablero queda vertical y las
+                // patas delanteras tumbadas en el suelo
+                group.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.18;
+                group.rotation.y = Math.random() * Math.PI * 2;
             } else {
                 group.rotation.y = Math.random() * Math.PI * 2;
             }
@@ -91,6 +103,9 @@
                 [0.18, 0.22, 0.18]
             ];
 
+            // Pata rota (variant 2): 3 patas -> la silla no se sostiene en pie
+            // y nace caida; las poses caidas son SIEMPRE planas (nunca flotan
+            // inclinadas a media altura)
             const count = (variant === 2) ? 3 : 4;
             for (let i = 0; i < count; i++) {
                 const leg = new THREE.Mesh(legGeo, metalMat);
@@ -99,12 +114,12 @@
             }
 
             if (variant === 1) {
-                // Caída de lado sobre la moqueta
-                group.rotation.z = Math.PI / 2;
+                // Caida de lado: respaldo plano en el suelo, asiento vertical
+                group.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.15;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else if (variant === 2) {
-                // Inclinada en el suelo
-                group.rotation.x = 0.38;
+                // Patas arriba: apoyada plana sobre asiento y respaldo
+                group.rotation.x = Math.PI + (Math.random() - 0.5) * 0.12;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else {
                 group.rotation.y = Math.random() * Math.PI * 2;

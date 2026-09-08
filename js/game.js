@@ -1,15 +1,16 @@
 /* ==========================================================================
        7. CONTROLADOR PRINCIPAL, ILUMINACIÓN Y NIEBLA AMARILLENTA CONTINUA
        ========================================================================== */
-    // Dispositivos táctiles reales (móvil/tableta): pantalla sin puntero fino.
-    // Un portátil táctil con ratón sigue usando los controles de escritorio.
-    const IS_TOUCH = !window.matchMedia('(pointer: fine)').matches &&
-        ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    // Dispositivos táctiles: pantalla pequeña o sin puntero fino. La pantalla
+    // pequeña tambien cuenta (un móvil en modo escritorio puede reportar
+    // pointer:fine y antes se quedaba sin controles táctiles).
+    const IS_TOUCH = (('ontouchstart' in window) || navigator.maxTouchPoints > 0) &&
+        (window.innerWidth < 1100 || !window.matchMedia('(pointer: fine)').matches);
 
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.1.1';
+    const GAME_VERSION = '1.2.0';
 
     class BackroomsGame {
         constructor() {
@@ -230,6 +231,9 @@
 
         updateFlashlightHUD() {
             const pct = Math.max(0, Math.round(this.inventory.flashBattery));
+            // Boton de linterna en movil: atenuado cuando esta apagada
+            const fbtn = document.getElementById('btn-touch-flash');
+            if (fbtn) fbtn.classList.toggle('off', !this.flashlightOn);
             const statusLabel = document.getElementById('flashlight-status');
             if (statusLabel) {
                 statusLabel.textContent = `🔦 LINTERNA: [${this.flashlightOn ? 'ENCENDIDA' : 'APAGADA'}] · PILA ${pct}% (TECLA F)`;
@@ -556,7 +560,11 @@
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
                 this.gameActive = true;
-                if (!IS_TOUCH) document.body.requestPointerLock();
+                if (IS_TOUCH) {
+                    this.notify('🕹 IZQ.: mover · DERECHA: mirar · Toque rápido: interactuar');
+                } else {
+                    document.body.requestPointerLock();
+                }
             };
 
             // En movil las ranuras del cinturón se tocan directamente
@@ -645,6 +653,7 @@
 
             for (let hit of hits) {
                 if (hit.distance < 2.6) {
+                    let done = false;
                     for (let p of this.worldSystem.pickups) {
                         if (!p.collected && (p.mesh === hit.object || p.mesh.children.includes(hit.object))) {
                             p.collected = true;
@@ -687,6 +696,25 @@
                                 this.updateFlashlightHUD();
                             } else if (p.type === 'note') {
                                 this.addLoreNote(p.text, p.noteIndex);
+                            }
+                            done = true;
+                            break;
+                        }
+                    }
+                    if (done) return;
+                    // Cajones de las mesas: [E] los abre; a veces esconden un
+                    // objeto que se materializa como pickup reclamable por red
+                    for (const b of this.furnitureBodies) {
+                        const ud = b.mesh.userData;
+                        if (!ud || !ud.drawer || ud.drawer.open) continue;
+                        if (b.mesh === hit.object || b.mesh.children.includes(hit.object)) {
+                            ud.drawer.open = true;
+                            audio.playSwitchClick();
+                            if (ud.drawer.itemType) {
+                                this.worldSystem.spawnDrawerPickup(b.mesh, ud.drawer);
+                                this.notify('📦 ¡EL CAJÓN ESCONDÍA ALGO!');
+                            } else {
+                                this.notify('📦 Cajón vacío');
                             }
                             return;
                         }
@@ -901,6 +929,13 @@
                 // Solo se simula mobiliario cercano: el infinito no debe frenar el juego
                 if (Math.hypot(b.mesh.position.x - this.player.pos.x, b.mesh.position.z - this.player.pos.z) > 32) continue;
 
+                // Cajones de las mesas: se deslizan suavemente al abrir/cerrar
+                if (b.mesh.userData && b.mesh.userData.drawer) {
+                    const dr = b.mesh.userData.drawer;
+                    const target = dr.open ? 0.34 : 0;
+                    dr.mesh.position.z += (target - dr.mesh.position.z) * Math.min(1, dt * 7);
+                }
+
                 // Fricción: el mueble se detiene solo
                 b.vel.x *= Math.max(0, 1 - 3.4 * dt);
                 b.vel.z *= Math.max(0, 1 - 3.4 * dt);
@@ -978,6 +1013,17 @@
             let found = false;
             for (let hit of hits) {
                 if (hit.distance < 2.5) {
+                    // Cajones cerrados de las mesas
+                    for (const b of this.furnitureBodies) {
+                        const ud = b.mesh.userData;
+                        if (!ud || !ud.drawer || ud.drawer.open) continue;
+                        if (b.mesh === hit.object || b.mesh.children.includes(hit.object)) {
+                            found = true;
+                            prompt.textContent = '[E] ABRIR CAJÓN';
+                            break;
+                        }
+                    }
+                    if (found) break;
                     for (let p of this.worldSystem.pickups) {
                         if (!p.collected && (p.mesh === hit.object || p.mesh.children.includes(hit.object))) {
                             found = true;

@@ -84,6 +84,43 @@
             return tex;
         },
 
+        createWoodTexture() {
+            // Veta de madera clara/oscura para mesas y muebles de oficina.
+            // RNG fijo: todos los clientes ven la misma veta.
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#4a3521';
+            ctx.fillRect(0, 0, 256, 256);
+            ctx.strokeStyle = 'rgba(26, 17, 9, 0.55)';
+            for (let i = 0; i < 46; i++) {
+                ctx.lineWidth = 1 + texRng() * 2.6;
+                ctx.beginPath();
+                const y = texRng() * 256;
+                let x = -10;
+                ctx.moveTo(x, y);
+                while (x < 266) {
+                    x += 22 + texRng() * 42;
+                    ctx.lineTo(x, y + (texRng() - 0.5) * 26);
+                }
+                ctx.stroke();
+            }
+            for (let i = 0; i < 4; i++) {
+                ctx.fillStyle = 'rgba(18, 11, 5, 0.4)';
+                const kx = texRng() * 256, ky = texRng() * 256;
+                ctx.beginPath();
+                ctx.ellipse(kx, ky, 3 + texRng() * 5, 2 + texRng() * 3.5, texRng() * 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        },
+
         createChalkBoxTexture() {
             const canvas = document.createElement('canvas');
             canvas.width = 256; canvas.height = 256;

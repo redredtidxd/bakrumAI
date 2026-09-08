@@ -551,13 +551,20 @@
             background: linear-gradient(180deg, rgba(84, 72, 38, 0.95), rgba(46, 40, 22, 0.95));
             border-color: #e0bc62;
         }
-        #btn-touch-run     { left: 20px;  bottom: 178px; width: 66px; height: 46px; border-radius: 12px; font-size: 14px; }
-        #btn-touch-draw    { right: 100px; bottom: 102px; }
-        #btn-touch-flash   { right: 26px;  bottom: 170px; }
-        #btn-touch-note    { right: 100px; bottom: 170px; }
-        #btn-touch-interact{ right: 26px;  bottom: 102px; font-size: 16px; }
+        #btn-touch-run     { left: 16px;  bottom: 178px; width: 64px; height: 44px; border-radius: 12px; font-size: 14px; }
+        #btn-touch-draw    { right: 88px; bottom: 96px; }
+        #btn-touch-flash   { right: 22px;  bottom: 160px; }
+        #btn-touch-note    { right: 88px; bottom: 160px; }
+        #btn-touch-interact{ right: 22px;  bottom: 96px; font-size: 16px; }
+        .touch-btn.off {
+            opacity: 0.4;
+            border-color: #3d3521;
+        }
 
-        /* HUD compacto para pantallas táctiles */
+        /* HUD compacto para pantallas táctiles: la GUI NO debe tapar la
+           camara. Se oculta todo lo prescindible (REC, coords, panel de la
+           linterna, pista de controles) y lo que queda es pequeño y
+           semitransparente. */
         body.touch-mode,
         body.touch-mode html {
             touch-action: none;
@@ -566,17 +573,31 @@
             -webkit-touch-callout: none;
         }
         body.touch-mode #hud {
-            padding: 10px;
+            padding: 8px;
         }
         body.touch-mode .rec-tag {
-            font-size: 12px;
+            display: none;
+        }
+        body.touch-mode #sector-label {
+            font-size: 9px;
+            margin-top: 2px !important;
+            opacity: 0.75;
         }
         body.touch-mode .sanity-container {
-            width: 150px;
-            padding: 5px 6px;
+            width: 112px;
+            padding: 3px 6px;
+            background: linear-gradient(180deg, rgba(22, 20, 13, 0.6), rgba(11, 10, 7, 0.6));
         }
         body.touch-mode .sanity-label {
             font-size: 9px;
+            margin-bottom: 2px;
+            justify-content: flex-end;
+        }
+        body.touch-mode .sanity-label span:first-child {
+            display: none;
+        }
+        body.touch-mode .sanity-bar {
+            height: 6px;
         }
         body.touch-mode .coords-label {
             display: none;
@@ -584,7 +605,7 @@
         body.touch-mode .hud-footer {
             position: absolute;
             left: 50%;
-            bottom: 10px;
+            bottom: 8px;
             transform: translateX(-50%);
             width: auto;
         }
@@ -592,23 +613,24 @@
             display: none;
         }
         body.touch-mode .flashlight-indicator {
-            font-size: 9px;
-            padding: 4px 8px;
-            margin-bottom: 4px;
+            display: none;
         }
         body.touch-mode .toolbelt {
-            gap: 5px;
-            padding: 6px 8px;
-            max-width: 96vw;
+            gap: 4px;
+            padding: 4px 6px;
+            max-width: 82vw;
             overflow-x: auto;
+            background: linear-gradient(180deg, rgba(20, 18, 12, 0.6), rgba(10, 9, 6, 0.6));
         }
         body.touch-mode .tool-slot {
-            min-width: 54px;
-            padding: 6px 5px 4px;
+            min-width: 48px;
+            padding: 4px 5px 3px;
             font-size: 9px;
+            background: linear-gradient(180deg, rgba(30, 27, 18, 0.55), rgba(17, 15, 10, 0.6));
         }
         body.touch-mode .tool-slot .tool-emoji {
-            font-size: 19px;
+            font-size: 18px;
+            margin-bottom: 1px;
         }
         body.touch-mode .tool-slot .tool-key,
         body.touch-mode .chalk-meter,
@@ -620,8 +642,31 @@
             display: none;
         }
         body.touch-mode #interact-prompt {
-            top: 40%;
+            top: 34%;
             font-size: 11px;
+            padding: 5px 12px;
+        }
+        body.touch-mode #toast-box {
+            top: 64px;
+        }
+        body.touch-mode .toast {
+            font-size: 10px;
+            padding: 4px 10px;
+        }
+        #joy-base {
+            border-color: rgba(216, 200, 157, 0.35);
+            background: rgba(20, 18, 12, 0.18);
+        }
+        body.touch-mode .touch-btn {
+            background: linear-gradient(180deg, rgba(24, 20, 12, 0.75), rgba(12, 10, 7, 0.78));
+            font-size: 17px;
+            width: 54px;
+            height: 54px;
+        }
+        body.touch-mode #btn-touch-run {
+            width: 60px;
+            height: 42px;
+            font-size: 13px;
         }
         body.touch-mode .menu-box {
             max-height: 94vh;
