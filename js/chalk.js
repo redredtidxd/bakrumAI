@@ -19,6 +19,15 @@
             this.lastDrawPoint = null;
             this.scene.add(this.instMesh);
 
+            // Colores por instancia PRE-CREADOS desde el inicio. Si el atributo
+            // nace despues del primer render (al pintar el primer punto), el
+            // shader ya se compilo sin soporte de color y TODA la tiza salia
+            // blanca, da igual el color de la tiza equipada.
+            this.instMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.maxDots * 3), 3);
+            const white = new THREE.Color(0xffffff);
+            for (let i = 0; i < this.maxDots; i++) white.toArray(this.instMesh.instanceColor.array, i * 3);
+            this.instMesh.instanceColor.needsUpdate = true;
+
             const dummy = new THREE.Object3D();
             dummy.position.set(0, -999, 0);
             dummy.updateMatrix();

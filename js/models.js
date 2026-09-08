@@ -43,33 +43,50 @@
                 group.add(leg);
             });
 
-            // Pedestal del cajon: el cuerpo de la mesa donde el cajon se
-            // desliza (antes el cajon flotaba suelto entre las patas).
-            const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.3, 0.56), woodMat);
-            skirt.position.set(0.46, 0.52, 0);
-            group.add(skirt);
-
-            // Cajon HUECO (bandeja abierta por arriba): fondo + frontal alto +
-            // trasera y laterales bajos. El objeto del cajon se coloca DENTRO
-            // del hueco y se desliza con el (world.js lo materializa como hijo
-            // del cajon; game.js lo abre con [E]).
-            const drawer = new THREE.Group();
-            const dp = (w, h, d, x, y, z) => {
+            // Pedestal del cajon: un CUERPO HUECO de verdad, hecho de paneles
+            // con la boca delantera REALMENTE abierta. Antes era un bloque
+            // macizo: al abrir el cajon parecia que la bandeja se atravesaba
+            // (no habia ningun hueco por donde saliera). Ahora se ve el hueco
+            // interior y el cajon sale de el.
+            const PX = 0.46, PY = 0.52, PD = 0.56, PH = 0.24, PT = 0.02;
+            const panel = (w, h, d, x, y, z) => {
                 const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
-                m.position.set(x, y, z);
-                drawer.add(m);
+                m.position.set(PX + x, PY + y, z);
+                group.add(m);
             };
-            dp(0.36, 0.02, 0.5, 0, -0.07, 0);        // fondo (el objeto reposa aqui)
-            dp(0.36, 0.12, 0.02, 0, 0.01, 0.25);     // frontal (alto, cara del cajon)
-            dp(0.36, 0.06, 0.02, 0, -0.03, -0.25);   // trasera (baja)
-            dp(0.02, 0.09, 0.5, -0.17, -0.025, 0);   // lateral izquierdo
-            dp(0.02, 0.09, 0.5, 0.17, -0.025, 0);    // lateral derecho
-            const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), handleMat);
-            handle.position.set(0, 0.045, 0.265);
-            drawer.add(handle);
-            drawer.position.set(0.46, 0.5, 0);
-            group.add(drawer);
-            group.userData.drawer = { mesh: drawer, open: false };
+            panel(PD, PT, PH, 0, PH / 2 + PT / 2, 0);            // techo del hueco
+            panel(PD, PT, PH, 0, -PH / 2 - PT / 2, 0);           // suelo del hueco
+            panel(PT, PH + PT * 2, PD, -PD / 2 + PT / 2, 0, 0);  // lateral izquierdo
+            panel(PT, PH + PT * 2, PD, PD / 2 - PT / 2, 0, 0);   // lateral derecho
+            panel(PD, PH + PT * 2, PT, 0, 0, -PD / 2 + PT / 2);  // fondo
+            // Guias sobre las que se desliza el cajon (dentro del hueco)
+            panel(0.04, 0.02, 0.42, -0.20, -PH / 2 + PT + 0.005, 0);
+            panel(0.04, 0.02, 0.42, 0.20, -PH / 2 + PT + 0.005, 0);
+
+            // Cajon HUECO (bandeja abierta por arriba): SOLO en las mesas de
+            // pie (variant 0). Las mesas caidas o tumbadas no tienen cajon
+            // que se abra: antes la bandeja se deslizaba en TODAS las
+            // variantes y en las mesas tumbadas se hundia en el suelo o salia
+            // flotando al aire (las mesas "flotantes" que se veian).
+            if (variant === 0) {
+                const drawer = new THREE.Group();
+                const dp = (w, h, d, x, y, z) => {
+                    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
+                    m.position.set(x, y, z);
+                    drawer.add(m);
+                };
+                dp(0.36, 0.02, 0.5, 0, -0.07, 0);        // fondo (el objeto reposa aqui)
+                dp(0.36, 0.12, 0.02, 0, 0.01, 0.25);     // frontal (alto, cara del cajon)
+                dp(0.36, 0.06, 0.02, 0, -0.03, -0.25);   // trasera (baja)
+                dp(0.02, 0.09, 0.5, -0.17, -0.025, 0);   // lateral izquierdo
+                dp(0.02, 0.09, 0.5, 0.17, -0.025, 0);    // lateral derecho
+                const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), handleMat);
+                handle.position.set(0, 0.045, 0.265);
+                drawer.add(handle);
+                drawer.position.set(PX, PY - 0.02, 0);
+                group.add(drawer);
+                group.userData.drawer = { mesh: drawer, open: false };
+            }
 
             if (variant === 2) {
                 // Boca abajo: patas arriba, apoyada plana en la mesa
@@ -657,54 +674,69 @@
         const insetMat = new THREE.MeshStandardMaterial({ color: paint.clone().multiplyScalar(0.68), roughness: 0.6 });
         const darkMat = new THREE.MeshStandardMaterial({ color: 0x14181f, metalness: 0.7, roughness: 0.35 });
 
-        // Marco (jambas + dintel), atrasado para dejar el hueco del batiente
-        const bar = (w, h, d, x, y, z, mat) => {
-            const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-            m.position.set(x, y, z);
+        // Marco con cuerpo: jambas a los lados, dintel arriba y un umbral
+        // oscuro abajo, todos con 0,1 m de fondo (antes era una lamina plana
+        // que desde un lateral se veia "mal").
+        const jambW = 0.09, frameD = 0.1;
+        const jamb = (x) => {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(jambW, H, frameD), frameMat);
+            m.position.set(x, H / 2, 0);
             group.add(m);
         };
-        bar(T, H + 0.1, 0.1, -W / 2 - T / 2, (H + 0.1) / 2, -0.01);
-        bar(T, H + 0.1, 0.1, W / 2 + T / 2, (H + 0.1) / 2, -0.01);
-        bar(W + T * 2, 0.1, 0.1, 0, H + 0.05, -0.01);
+        jamb(-W / 2 - jambW / 2);
+        jamb(W / 2 + jambW / 2);
+        const header = new THREE.Mesh(new THREE.BoxGeometry(W + jambW * 2, 0.09, frameD), frameMat);
+        header.position.set(0, H + 0.045, 0);
+        group.add(header);
+        const sill = new THREE.Mesh(new THREE.BoxGeometry(W + jambW * 2, 0.05, frameD), darkMat);
+        sill.position.set(0, 0.025, 0);
+        group.add(sill);
 
-        // Un batiente (o media puerta si es doble)
-        const leaf = (pw, x, ajar) => {
-            const leaf = new THREE.Group();
+        // Hoja con bisagra REAL en su canto: gira alrededor del borde de la
+        // bisagra, no de su centro (antes la hoja se clavaba en el marco al
+        // entornarse). La hoja se construye desplazada +X respecto al pivote.
+        const leaf = (pw, pivotX, ajar) => {
+            const pivot = new THREE.Group();
+            pivot.position.x = pivotX;
             const face = new THREE.Mesh(new THREE.BoxGeometry(pw, H, T), doorMat);
-            face.position.y = H / 2;
-            leaf.add(face);
-            // Recuadros de panel (2 por hoja)
+            face.position.set(pw / 2, H / 2, 0);
+            pivot.add(face);
+            // Recuadros de panel (2 por hoja), enrasados con la cara frontal
             const iw = pw * 0.78, ih = H * 0.3;
             for (const iy of [H * 0.28, H * 0.62]) {
-                const inset = new THREE.Mesh(new THREE.BoxGeometry(iw, ih, 0.02), insetMat);
-                inset.position.set(0, iy, T / 2 + 0.012);
-                leaf.add(inset);
+                const inset = new THREE.Mesh(new THREE.BoxGeometry(iw, ih, 0.022), insetMat);
+                inset.position.set(pw / 2, iy, T / 2 + 0.012);
+                pivot.add(inset);
             }
-            // Tirador
+            // Tirador junto al canto LIBRE de la hoja
             const handle = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.24, 0.028), darkMat);
-            handle.position.set(pw / 2 - 0.1, H * 0.48, T / 2 + 0.02);
-            leaf.add(handle);
+            handle.position.set(pw - 0.1, H * 0.48, T / 2 + 0.022);
+            pivot.add(handle);
             // Grafiti pintado encima de la hoja (opcional)
             if (o.graffitiTex) {
                 const g = new THREE.Mesh(
                     new THREE.PlaneGeometry(pw - 0.08, H - 0.25),
                     new THREE.MeshBasicMaterial({ map: o.graffitiTex, transparent: true, depthWrite: false })
                 );
-                g.position.set(0, H / 2 + 0.05, T / 2 + 0.02);
-                leaf.add(g);
+                g.position.set(pw / 2, H / 2 + 0.05, T / 2 + 0.022);
+                pivot.add(g);
             }
-            leaf.position.x = x;
-            leaf.rotation.y = ajar;
-            group.add(leaf);
-            return leaf;
+            pivot.rotation.y = ajar;
+            group.add(pivot);
+            return pivot;
         };
 
         if (o.double) {
+            // Doble puerta REAL: dos hojas con bisagra en las jambas
+            // EXTERIORES que cierran hacia el centro, con su hueco central
+            // (antes eran dos puertas sencillas pegadas, cada una girando
+            // sobre su propio centro)
+            const pw = W / 2 - 0.03;
             const a = o.ajar || 0.0;
-            leaf(W / 2 - 0.025, -W / 4, a);
-            leaf(W / 2 - 0.025, W / 4, -a);
+            leaf(pw, -W / 2 + 0.005, -a);   // hoja izquierda
+            leaf(pw, W / 2 - 0.005, a);     // hoja derecha
         } else {
-            leaf(W, 0, o.ajar || 0.0);
+            leaf(W - 0.01, -W / 2 + 0.005, o.ajar || 0.0);   // hoja unica
         }
         return group;
     }

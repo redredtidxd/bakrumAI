@@ -10,7 +10,7 @@
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.5.0';
+    const GAME_VERSION = '1.6.0';
 
     class BackroomsGame {
         constructor() {
@@ -148,6 +148,7 @@
             this._noSignalTex = null;
             this._panelTimer = 0;
             this._iRechargeAcc = 0;
+            this._entSpawnNotified = false;
 
             window.addEventListener('beforeunload', () => this.net.leave());
             window.addEventListener('pagehide', () => this.net.leave());
@@ -189,11 +190,13 @@
             this.updateFlashlightHUD();
 
             setTimeout(() => {
-                // Solo el ANFITRIÓN de la sala (o el jugador solitario) genera
-                // la entidad; el resto la ve como espectro sincronizado
+                // Solo el ANFITRIÓN de la sala (o el jugador solitario) simula
+                // la entidad; el resto la ve como espectro sincronizado. El
+                // spawn en si lo hace la entidad a los 50 s (y reaparece sola
+                // si el jugador se aleja demasiado); al aparecer de verdad se
+                // avisa a la sala con onEntitySpawned.
                 if (this.gameActive && this.net.isEntityHost()) {
-                    this.entity.spawnDistant(this.worldSystem.walkableCells, this.player.pos);
-                    this.net.onEntitySpawned();
+                    this.entity.canRespawn = true;
                 }
             }, 50000);
 
@@ -986,7 +989,12 @@
                 ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke();
             }
 
-            // Celdas exploradas (niebla de guerra: solo lo visto por la sala)
+            // Celdas exploradas (niebla de guerra: solo lo visto por la sala).
+            // El suelo se pinta por celdas pero los MUROS se dibujan con sus
+            // cajas REALES (paredes finas, pilares, tabiques inclinados y
+            // curvas): antes se pintaba la celda entera de negro y el mapa
+            // mostraba bloques macizos por los que en realidad se podia
+            // caminar ("voy por las partes negras y no es real").
             const cell = C * zoom;
             for (const [key, bits] of this.exploredChunks) {
                 const [gx, gz] = key.split(',').map(Number);
@@ -996,15 +1004,75 @@
                 let ch = this.worldSystem.chunks.get(key);
                 if (!ch || !ch.grid) ch = this.worldSystem.getLayout(gx, gz);
                 const g = ch.grid;
+                const isExplored = (x, z) => {
+                    if (x < 0 || x >= N || z < 0 || z >= N) return false;
+                    const idx = x * N + z;
+                    return !!(bits[idx >> 3] & (1 << (idx & 7)));
+                };
+                // Suelo explorado (incluida la celda de los pilares: el mapa
+                // ya no la pinta entera de negro)
+                ctx.fillStyle = '#2d3122';
                 for (let x = 0; x < N; x++) {
                     for (let z = 0; z < N; z++) {
-                        const idx = x * N + z;
-                        if (!(bits[idx >> 3] & (1 << (idx & 7)))) continue;
+                        if (!isExplored(x, z)) continue;
                         const v = g[x][z];
-                        ctx.fillStyle = (v === 0 || v === 2) ? '#2d3122' : (v === 3 ? '#191b13' : '#090b07');
-                        ctx.fillRect(Math.round(sx0 + x * cell), Math.round(sy0 + z * cell),
-                            Math.max(1, Math.ceil(cell - 0.7)), Math.max(1, Math.ceil(cell - 0.7)));
+                        if (v === 0 || v === 2 || v === 3) {
+                            ctx.fillRect(Math.round(sx0 + x * cell), Math.round(sy0 + z * cell),
+                                Math.max(1, Math.ceil(cell - 0.7)), Math.max(1, Math.ceil(cell - 0.7)));
+                        }
                     }
+                }
+                ctx.fillStyle = '#090b07';
+                if (ch.loaded && ch.wallBoxes && ch.wallBoxes.length) {
+                    // Chunk cargado: paredes REALES (finas, curvas, tabiques
+                    // inclinados y pilares) desde las cajas de colision
+                    for (const b of ch.wallBoxes) {
+                        const lcx = Math.floor(((b.minX + b.maxX) / 2 - gx * CS) / C);
+                        const lcz = Math.floor(((b.minZ + b.maxZ) / 2 - gz * CS) / C);
+                        if (!isExplored(lcx, lcz)) continue;
+                        const bx = Math.round(W / 2 + ((b.minX + b.maxX) / 2 - this.mapView.x) * zoom);
+                        const bz = Math.round(H / 2 + ((b.minZ + b.maxZ) / 2 - this.mapView.z) * zoom);
+                        const bw = Math.max(1, Math.round((b.maxX - b.minX) * zoom));
+                        const bh = Math.max(1, Math.round((b.maxZ - b.minZ) * zoom));
+                        ctx.fillRect(bx - Math.floor(bw / 2), bz - Math.floor(bh / 2), bw, bh);
+                    }
+                } else {
+                    // Chunk lejano (descargado): paredes finas aproximadas
+                    // desde la rejilla, orientadas como las laminas reales
+                    const T = 0.6;
+                    for (let x = 0; x < N; x++) {
+                        for (let z = 0; z < N; z++) {
+                            if (g[x][z] !== 1 || !isExplored(x, z)) continue;
+                            const openW = x > 0 && (g[x - 1][z] === 0 || g[x - 1][z] === 2);
+                            const openE = x < N - 1 && (g[x + 1][z] === 0 || g[x + 1][z] === 2);
+                            const openN = z > 0 && (g[x][z - 1] === 0 || g[x][z - 1] === 2);
+                            const openS = z < N - 1 && (g[x][z + 1] === 0 || g[x][z + 1] === 2);
+                            let x0r, z0r, x1r, z1r;
+                            if ((openW || openE) && !(openN || openS)) {
+                                x0r = (x + 0.5 - T / C / 2) * cell; x1r = (x + 0.5 + T / C / 2) * cell;
+                                z0r = z * cell; z1r = (z + 1) * cell;
+                            } else if ((openN || openS) && !(openW || openE)) {
+                                x0r = x * cell; x1r = (x + 1) * cell;
+                                z0r = (z + 0.5 - T / C / 2) * cell; z1r = (z + 0.5 + T / C / 2) * cell;
+                            } else {
+                                x0r = (x + 0.5 - T / C / 2) * cell; x1r = (x + 0.5 + T / C / 2) * cell;
+                                z0r = (z + 0.5 - T / C / 2) * cell; z1r = (z + 0.5 + T / C / 2) * cell;
+                            }
+                            ctx.fillRect(Math.round(sx0 + x0r), Math.round(sy0 + z0r),
+                                Math.max(1, Math.ceil(x1r - x0r)), Math.max(1, Math.ceil(z1r - z0r)));
+                        }
+                    }
+                    // Pilares de chunks lejanos: cuadrados finos
+                    ctx.fillStyle = '#191b13';
+                    for (let x = 0; x < N; x++) {
+                        for (let z = 0; z < N; z++) {
+                            if (g[x][z] !== 3 || !isExplored(x, z)) continue;
+                            const s = 0.45 * cell;
+                            ctx.fillRect(Math.round(sx0 + (x + 0.5) * cell - s / 2),
+                                Math.round(sy0 + (z + 0.5) * cell - s / 2), Math.max(1, s), Math.max(1, s));
+                        }
+                    }
+                    ctx.fillStyle = '#090b07';
                 }
             }
 
@@ -1741,6 +1809,12 @@
                     (reason) => this.triggerGameOver(reason),
                     this.furnitureBodies
                 );
+                // Cuando la entidad aparece de verdad (o reaparece), la sala
+                // se entera: los espectros se colocan en su posicion real
+                if (this.entity.active && !this._entSpawnNotified) {
+                    this._entSpawnNotified = true;
+                    this.net.onEntitySpawned();
+                }
             }
 
             if (Math.random() < 0.3) this.renderNoise();

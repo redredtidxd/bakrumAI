@@ -179,9 +179,10 @@
     // Colores de pintura de las puertas falsas (señuelos)
     const DOOR_PAINTS = [0x6d7a8a, 0x8a7a5c, 0x5c6d8a, 0x7a5c5c, 0x5c7a6d, 0x8a8a6a];
 
-    // Textura de las flechas del suelo: chevrones brillantes (material basico
-    // -> se ven desde lejos, incluso en las zonas de apagon). Una sola textura
-    // compartida por todas las flechas.
+    // Textura de las flechas del suelo: UNA flecha clara con astil y punta
+    // (material basico -> se ve desde lejos, incluso en las zonas de apagon).
+    // Antes eran tres chevrones apilados que desde lejos parecian una "w"
+    // verde flotante en vez de una flecha. Una sola textura compartida.
     let arrowTexCache = null;
     function arrowTexture() {
         if (arrowTexCache) return arrowTexCache;
@@ -190,37 +191,69 @@
         canvas.height = 64;
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, 128, 64);
+        const draw = (w, style) => {
+            ctx.lineWidth = w;
+            ctx.strokeStyle = style;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(12, 32);
+            ctx.lineTo(92, 32);
+            ctx.moveTo(68, 6);
+            ctx.lineTo(104, 32);
+            ctx.lineTo(68, 58);
+            ctx.stroke();
+        };
+        draw(14, 'rgba(12, 14, 8, 0.9)');   // contorno oscuro (se lee sobre moqueta clara)
         ctx.save();
         ctx.shadowColor = 'rgba(215, 255, 90, 0.85)';
         ctx.shadowBlur = 9;
-        ctx.lineWidth = 9;
-        ctx.strokeStyle = '#d7ff5a';
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        for (let i = 0; i < 3; i++) {
-            const y = 10 + i * 18;
-            ctx.beginPath();
-            ctx.moveTo(14, y + 10);
-            ctx.lineTo(46, y);
-            ctx.lineTo(14, y - 10);
-            ctx.stroke();
-        }
+        draw(9, '#d7ff5a');                 // flecha brillante encima
         ctx.restore();
-        // Contorno oscuro para que la flecha se lea sobre moqueta clara
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = 'rgba(12, 14, 8, 0.9)';
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        for (let i = 0; i < 3; i++) {
-            const y = 10 + i * 18;
-            ctx.beginPath();
-            ctx.moveTo(14, y + 10);
-            ctx.lineTo(46, y);
-            ctx.lineTo(14, y - 10);
-            ctx.stroke();
-        }
         arrowTexCache = new THREE.CanvasTexture(canvas);
         return arrowTexCache;
+    }
+
+    // Textos de los grafitis-guia hacia las puertas falsas
+    const GUIDE_TEXTS = ['SALIDA', 'POR AQUI', 'EXIT', 'ALLI', 'AQUI'];
+    const guideTexCache = new Map();
+    function guideArrowTexture(text, colorHex) {
+        const ck = text + '|' + colorHex;
+        let tex = guideTexCache.get(ck);
+        if (tex) return tex;
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 256, 128);
+        // Texto a la izquierda, flecha grande apuntando a la derecha
+        ctx.font = '900 46px "Segoe Print", "Comic Sans MS", "Marker Felt", cursive';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = colorHex;
+        ctx.globalAlpha = 0.4;
+        ctx.fillText(text, 16, 62);
+        ctx.globalAlpha = 0.95;
+        ctx.fillText(text, 12, 60);
+        ctx.globalAlpha = 1;
+        const drawArrow = (w, style) => {
+            ctx.lineWidth = w;
+            ctx.strokeStyle = style;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(150, 64);
+            ctx.lineTo(230, 64);
+            ctx.moveTo(196, 34);
+            ctx.lineTo(234, 64);
+            ctx.lineTo(196, 94);
+            ctx.stroke();
+        };
+        drawArrow(15, 'rgba(10, 10, 8, 0.55)');
+        drawArrow(10, colorHex);
+        tex = new THREE.CanvasTexture(canvas);
+        guideTexCache.set(ck, tex);
+        return tex;
     }
 
     const graffitiTexCache = new Map();
@@ -889,19 +922,28 @@
             }
         }
 
-        // Pasillo en L entre dos celdas locales, con ancho por tramo
+        // Pasillo en L entre dos celdas locales. El ancho puede CAMBIAR a
+        // mitad de camino: no todos los pasillos tienen el mismo tamano en
+        // todo su recorrido (un tramo estrecho puede ensancharse y viceversa).
         carvePath(ch, x0, z0, x1, z1, width) {
             x1 = Math.max(1, Math.min(CHUNK_SIZE - 2, x1));
             z1 = Math.max(1, Math.min(CHUNK_SIZE - 2, z1));
+            let w2 = width;
+            if (ch.rng() < 0.55) {
+                const v = ch.rng();
+                if (width === 1) w2 = v < 0.65 ? 1 : 2;
+                else if (width === 3) w2 = v < 0.7 ? 3 : 2;
+                else w2 = v < 0.35 ? 1 : (v < 0.8 ? 2 : 3);
+            }
             let cx = x0, cz = z0;
             this.openCell(ch, cx, cz, width);
             const horizFirst = ch.rng() < 0.5;
             if (horizFirst) {
                 while (cx !== x1) { cx += Math.sign(x1 - cx); this.openCell(ch, cx, cz, width); }
-                while (cz !== z1) { cz += Math.sign(z1 - cz); this.openCell(ch, cx, cz, width); }
+                while (cz !== z1) { cz += Math.sign(z1 - cz); this.openCell(ch, cx, cz, w2); }
             } else {
                 while (cz !== z1) { cz += Math.sign(z1 - cz); this.openCell(ch, cx, cz, width); }
-                while (cx !== x1) { cx += Math.sign(x1 - cx); this.openCell(ch, cx, cz, width); }
+                while (cx !== x1) { cx += Math.sign(x1 - cx); this.openCell(ch, cx, cz, w2); }
             }
         }
 
@@ -1846,6 +1888,9 @@
             // ---- PUERTAS FALSAS (señuelos a escala: sencillas, dobles y con
             // grafiti) pegadas a caras de pared, para engañar desde lejos ----
             this.placeChunkFakeDoors(ch, wallKind, key, curvedCells);
+            // Grafitis-guia GRANDES (flechas + SALIDA/POR AQUI) en las paredes
+            // con linea de vision a la puerta: te guian hacia ella
+            this.placeChunkGuideGraffiti(ch, wallKind, key, curvedCells);
             // Flechas pintadas en el suelo que apuntan el camino a esas puertas
             this.placeChunkArrowSigns(ch);
 
@@ -2146,8 +2191,10 @@
             }
             if (!candidates.length) return;
             const placedCells = new Set();
-            let budget = rng() < 0.72 ? 1 : 0;
-            if (rng() < 0.3) budget++;
+            // RARAS: ~1 de cada 6 chunks tiene una puerta falsa (antes ~3 de
+            // cada 4: aparecian por todas partes y dejaban de sorprender)
+            if (rng() >= 0.16) return;
+            let budget = 1 + (rng() < 0.3 ? 1 : 0);
             for (let i = 0; i < budget; i++) {
                 if (!candidates.length) break;
                 const ci = Math.floor(rng() * candidates.length);
@@ -2177,6 +2224,89 @@
                 this.scene.add(mesh);
                 ch.meshes.push(mesh);
                 ch.fakeDoors.push({ x: mesh.position.x, z: mesh.position.z });
+            }
+        }
+
+        // ---- GRAFITIS-GUIA hacia las puertas falsas ---------------------
+        // Flechas GRANDES con texto (SALIDA / POR AQUI / EXIT...) pintadas en
+        // paredes con linea de vision despejada hacia la puerta, giradas para
+        // apuntar en su direccion a lo largo de la pared. Determinista: toda
+        // la sala ve las mismas guias. RNG propio, como las demas.
+        placeChunkGuideGraffiti(ch, wallKind, key, curvedCells) {
+            if (!ch.fakeDoors || !ch.fakeDoors.length) return;
+            const N = CHUNK_SIZE, C = CELL_SIZE;
+            const rng = mulberry32(hash2(ch.cx * 3187 + 61, ch.cz * 5233 + 919));
+            const g = ch.grid;
+            const ox = ch.cx * N * C, oz = ch.cz * N * C;
+            const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
+            // Tangente horizontal de la pared en el mundo por cara (el local
+            // +X del plano del grafiti tras su rotation.y)
+            const TANGENT = { W: [0, 0, 1], E: [0, 0, -1], S: [-1, 0, 0], N: [1, 0, 0] };
+            const placed = new Set();
+            for (const door of ch.fakeDoors) {
+                const cands = [];
+                for (let x = 1; x < N - 1; x++) {
+                    for (let z = 1; z < N - 1; z++) {
+                        const k = key(x, z);
+                        if (g[x][z] !== 1 || curvedCells.has(k)) continue;
+                        if (ch.graffitiCells && ch.graffitiCells.has(x + ',' + z)) continue;
+                        const kind = wallKind.get(k);
+                        if (kind !== 'x' && kind !== 'z') continue;
+                        const box = ch.wallFaceMap && ch.wallFaceMap.get(k);
+                        if (!box) continue;
+                        for (const [dx, dz, d] of dirs) {
+                            const nx = x + dx, nz = z + dz;
+                            if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
+                            if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                            if (d === 'W' && x === 0) continue;
+                            if (d === 'E' && x === N - 1) continue;
+                            if (d === 'S' && z === 0) continue;
+                            if (d === 'N' && z === N - 1) continue;
+                            const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
+                            if (faceLen < 1.7) continue;
+                            const wx = ox + (x + 0.5) * C;
+                            const wz = oz + (z + 0.5) * C;
+                            const dist = Math.hypot(wx - door.x, wz - door.z);
+                            if (dist < 6 || dist > 26) continue;
+                            if (!this.lineClear(wx, wz, door.x, door.z)) continue;
+                            cands.push({ x, z, d, wx, wz, box, faceLen });
+                        }
+                    }
+                }
+                for (let i = cands.length - 1; i > 0; i--) {
+                    const j = Math.floor(rng() * (i + 1));
+                    [cands[i], cands[j]] = [cands[j], cands[i]];
+                }
+                let placedCount = 0;
+                for (const c of cands) {
+                    if (placedCount >= 2) break;
+                    const fk = c.x + ',' + c.z + c.d;
+                    if (placed.has(fk)) continue;
+                    placed.add(fk);
+                    const color = GRAFFITI_COLORS[Math.floor(rng() * GRAFFITI_COLORS.length)];
+                    const text = GUIDE_TEXTS[Math.floor(rng() * GUIDE_TEXTS.length)];
+                    const mat = new THREE.MeshBasicMaterial({
+                        map: guideArrowTexture(text, color),
+                        transparent: true
+                    });
+                    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+                    const w = Math.min(1.45, c.faceLen - 0.2);   // INDICADOR GRANDE
+                    const h = 0.85;
+                    m.scale.set(w, h, 1);
+                    m.position.y = 1.35;
+                    // Giro para que la flecha del plano apunte hacia la puerta
+                    // a lo largo de la pared (local +X = tangente de la cara)
+                    const t = TANGENT[c.d];
+                    const along = (door.x - c.wx) * t[0] + (door.z - c.wz) * t[2];
+                    m.rotation.z = along < 0 ? Math.PI : 0;
+                    if (c.d === 'W') { m.position.set(c.box.minX - 0.022, 1.35, c.wz); m.rotation.y = -Math.PI / 2; }
+                    else if (c.d === 'E') { m.position.set(c.box.maxX + 0.022, 1.35, c.wz); m.rotation.y = Math.PI / 2; }
+                    else if (c.d === 'S') { m.position.set(c.wx, 1.35, c.box.minZ - 0.022); m.rotation.y = Math.PI; }
+                    else { m.position.set(c.wx, 1.35, c.box.maxZ + 0.022); m.rotation.y = 0; }
+                    this.scene.add(m);
+                    ch.meshes.push(m);
+                    placedCount++;
+                }
             }
         }
 
@@ -2523,9 +2653,10 @@
             // caras reales de los muros, con bolsillo sellado detras)
             this.placeChunkChamfers(ch, rng, wallKind, key, curvedCells);
 
-            // 2) CONTRAFUERTES: en chunks de pasillos, tabiques que NACEN de
-            // una pared y se clavan en el pasillo en angulo (paso garantizado)
-            if (ch.rooms.length === 0 && rng() < 0.6) {
+            // 2) CONTRAFUERTES: tabiques que NACEN de una pared y se clavan
+            // en el pasillo en angulo (paso garantizado). Antes solo en
+            // chunks de pasillos; ahora tambien en salas y salones.
+            if (rng() < 0.7) {
                 this.placeChunkBraces(ch, rng, wallKind, key, curvedCells);
             }
 
@@ -2544,12 +2675,12 @@
                 [cands[i], cands[j]] = [cands[j], cands[i]];
             }
 
-            // Cantidad: 1-3 en chunks con salas/salones, ocasional en pasillos
+            // Cantidad: 1-4 en chunks con salas/salones, ocasional en pasillos
             let n = 0;
             if (ch.rooms.length > 0) {
-                if (rng() < 0.75) n = 1 + (rng() < 0.5 ? 1 : 0) + (rng() < 0.18 ? 1 : 0);
-            } else if (rng() < 0.3) {
-                n = 1;
+                if (rng() < 0.9) n = 1 + (rng() < 0.6 ? 1 : 0) + (rng() < 0.25 ? 1 : 0) + (rng() < 0.08 ? 1 : 0);
+            } else if (rng() < 0.45) {
+                n = 1 + (rng() < 0.3 ? 1 : 0);
             }
 
             // Los tabiques sueltos compiten con los contrafuertes/esquinas ya
@@ -2560,7 +2691,7 @@
                 const wx = ox + (cx2 + 0.5) * C;
                 const wz = oz + (cz2 + 0.5) * C;
                 const shape = rng() < 0.45 ? 'trap' : 'rect';
-                const L = 1.2 + rng() * 6.8;             // 1,2-8 m: tabiques cortos y largos
+                const L = 1.2 + rng() * 8.8;             // 1,2-10 m: tabiques cortos y largos
                 const ang = (rng() - 0.5) * 2.6;         // hasta ~±75°
                 // Grosor como el de las paredes rectas (0,4-1,2 m): el tabique
                 // inclinado se ve como una pared de verdad, no como un adorno
@@ -2680,14 +2811,15 @@
 
         placeChunkChamfers(ch, rng, wallKind, key, curvedCells) {
             const C = CELL_SIZE;
-            const rooms = ch.rooms.filter(r => r.w >= 4 && r.h >= 4);
+            // Salas medianas y grandes (antes solo 4+): mas esquinas recortadas
+            const rooms = ch.rooms.filter(r => r.w >= 3 && r.h >= 3);
             if (!rooms.length) return;
             for (let i = rooms.length - 1; i > 0; i--) {
                 const j = Math.floor(rng() * (i + 1));
                 [rooms[i], rooms[j]] = [rooms[j], rooms[i]];
             }
             const placedAABBs = [];
-            let budget = 1 + (rng() < 0.45 ? 1 : 0) + (rng() < 0.15 ? 1 : 0);
+            let budget = 1 + (rng() < 0.6 ? 1 : 0) + (rng() < 0.3 ? 1 : 0) + (rng() < 0.1 ? 1 : 0);
             for (const room of rooms) {
                 if (budget <= 0) break;
                 const corners = [
@@ -2813,7 +2945,7 @@
                 [cands[i], cands[j]] = [cands[j], cands[i]];
             }
             const placedAABBs = [];
-            let budget = 1 + (rng() < 0.3 ? 1 : 0);
+            let budget = 1 + (rng() < 0.45 ? 1 : 0) + (rng() < 0.15 ? 1 : 0);
             for (const [wx, wz, side] of cands) {
                 if (budget <= 0) break;
                 const r = this.tryBrace(ch, rng, wx, wz, side, wallKind, key, curvedCells, placedAABBs);
@@ -2855,14 +2987,13 @@
                 });
             }
 
-            // Malla
-            let geo;
-            if (shape === 'rect') {
-                geo = new THREE.BoxGeometry(1, 1, 1);
-                geo.scale(T0, H, L);
-            } else {
-                geo = this.trapezoidGeometry(L, H, T0, T1);
-            }
+            // Malla: las DOS formas usan la geometria de prisma con UVs de
+            // papel pintado repetidos cada celda (antes los rectangulares se
+            // hacian escalando un BoxGeometry y la textura salia estirada una
+            // sola vez en toda la cara: las paredes en diagonal se veian mal)
+            const geo = shape === 'rect'
+                ? this.trapezoidGeometry(L, H, T0, T0)
+                : this.trapezoidGeometry(L, H, T0, T1);
             const mat = Materials.wall.clone();
             // Cara simple: las geometrias tienen el cierre correcto (BoxGeometry
             // y trapezoidGeometry con normales hacia fuera). DoubleSide pintaba

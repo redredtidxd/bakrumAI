@@ -8,7 +8,7 @@ const idxHtml = fs.readFileSync('index.html', 'utf8');
 // sustituyendo la hoja de estilos externa por el CSS embebido
 const headRaw = idxHtml.slice(idxHtml.indexOf('<head>'), idxHtml.indexOf('</head>') + '</head>'.length);
 const head = '<!DOCTYPE html>\n<html lang="es">\n' +
-    headRaw.replace('<link rel="stylesheet" href="css/style.css">', '<style>\n' + css + '\n    </style>');
+    headRaw.replace(/<link rel="stylesheet" href="css\/style\.css[^"]*">/, '<style>\n' + css + '\n    </style>');
 
 // Cuerpo sin las etiquetas <script src="js/..."> (el codigo va embebido abajo)
 const body = idxHtml.slice(idxHtml.indexOf('<body>'), idxHtml.indexOf('</body>') + '</body>'.length)

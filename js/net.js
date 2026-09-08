@@ -76,6 +76,61 @@
             // Puertas de metal de las salas de seguridad: el estado abierto/
             // cerrado se comparte con la sala (la pila es de cada jugador)
             this.onDoorData = null;   // ({id, o}) => void
+
+            // Ultimo estado publicado (para mantener la presencia en segundo
+            // plano si la pestana se minimiza) y reconexion automatica
+            this._lastState = null;
+            this._bgTimer = null;
+            this._reconnecting = false;
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) this.startBackgroundKeepAlive();
+                else this.stopBackgroundKeepAlive();
+            });
+        }
+
+        // Si la pestana se minimiza, el bucle de frames (rAF) se pausa y se
+        // dejaba de publicar presencia/estado: a los ~25 s los demas te daban
+        // por salido de la sala aunque siguieras dentro (y tu modelo
+        // desaparecia para ellos). Un interval de reserva sigue publicando
+        // mientras la pestana este oculta.
+        startBackgroundKeepAlive() {
+            if (this._bgTimer) return;
+            this._bgTimer = setInterval(() => {
+                if (!this.connected || !this.joined) return;
+                try { this.publishPresence(); } catch (e) { /* noop */ }
+                const s = this._lastState;
+                if (!s) return;
+                try {
+                    this.client.send(this.stateTopic(this.pid), JSON.stringify({
+                        x: s.x, y: s.y - 1.55, z: s.z,
+                        yaw: s.yaw, pitch: s.pitch,
+                        f: s.flashlightOn ? 1 : 0, t: Date.now()
+                    }), 0, false);
+                } catch (e) { /* noop */ }
+            }, 2500);
+        }
+
+        stopBackgroundKeepAlive() {
+            if (this._bgTimer) {
+                clearInterval(this._bgTimer);
+                this._bgTimer = null;
+            }
+        }
+
+        // Reconexion automatica si el broker suelta el socket (pestana en
+        // segundo plano mucho tiempo, micro-corte, etc.)
+        scheduleReconnect() {
+            if (this._reconnecting) return;
+            this._reconnecting = true;
+            setTimeout(() => {
+                this._reconnecting = false;
+                if (!this.connected && this.roomKey) {
+                    this.brokerIdx = 0;
+                    try { if (this.client) this.client.disconnect(); } catch (e) { /* noop */ }
+                    this.client = null;
+                    this.connectNextBroker();
+                }
+            }, 2500);
         }
 
         // ----------------------------------------------------------------
@@ -111,7 +166,8 @@
                     if (r.errorCode !== 0 && this.joined) {
                         this.connected = false;
                         this.joined = false;
-                        this.onToast('⚠ CONEXIÓN DE SALA PERDIDA · sigues en solitario');
+                        this.onToast('⚠ CONEXIÓN DE SALA PERDIDA · reconectando…');
+                        this.scheduleReconnect();
                     }
                 };
                 this.client.connect({
@@ -169,6 +225,7 @@
             this.snapshotDone = false;
             this.joined = false;
             this.connected = false;
+            this.stopBackgroundKeepAlive();
             if (this.client) {
                 try {
                     this.client.send(this.presenceTopic(this.pid), '', 0, true);
@@ -487,7 +544,7 @@
 
             group.visible = false;
             this.scene.add(group);
-            this.remotePlayers.set(pid, { group, spot, tgt });
+            this.remotePlayers.set(pid, { group, spot, tgt, sprite });
         }
 
         makeNameSprite(name) {
@@ -504,7 +561,7 @@
             ctx.fillText(name, 128, 34);
             const tex = new THREE.CanvasTexture(canvas);
             tex.anisotropy = Math.min(4, this.scene.__r128maxAniso || 4);
-            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: true }));
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: true, transparent: true }));
             sprite.scale.set(1.3, 0.33, 1);
             return sprite;
         }
@@ -608,6 +665,7 @@
         // ----------------------------------------------------------------
         update(dt, playerPos, yaw, pitch, flashlightOn, wallBoxes, entity) {
             this.entity = entity;
+            this._lastState = { x: playerPos.x, y: playerPos.y, z: playerPos.z, yaw, pitch, flashlightOn };
 
             if (this.connected && this.joined && !this.roomFull) {
                 // Estado propio ~12 Hz
@@ -653,10 +711,11 @@
                 if (this.cleanTimer > 3) {
                     this.cleanTimer = 0;
                     const now = Date.now();
-                    // Timeout generoso (25 s) para que un micro-corte del broker
-                    // publico no haga desaparecer a los companeros
+                    // Timeout generoso (45 s) para que un micro-corte del broker
+                    // publico o una pestana en segundo plano no hagan
+                    // desaparecer a los companeros
                     for (const [pid, p] of [...this.peers]) {
-                        if (now - p.lastSeen > 25000) this.removePeer(pid);
+                        if (now - p.lastSeen > 45000) this.removePeer(pid);
                     }
                     if (this.entityActive && now - this.entityLastMsg > 3000) {
                         this.entityActive = false;
@@ -688,13 +747,25 @@
                 if (p.y < 0 || p.y > 0.1) p.y = Math.max(0, Math.min(0.1, p.y));
                 // p.y es la altura de los pies: el modelo se ancla al suelo
                 r.group.position.set(p.x, p.y, p.z);
-                r.group.rotation.y = p.yaw;
+                // El modelo mira hacia +Z local (la linterna y la cara estan
+                // en +Z) y el forward del jugador es (-sin, -cos): sin el
+                // giro de 180° los demas veian tu ESPALDA (y la linterna
+                // apuntaba hacia atras)
+                r.group.rotation.y = p.yaw + Math.PI;
                 const dist = this.camera.position.distanceTo(r.group.position);
                 r.group.visible = dist < 110;
                 if (r.group.visible) {
                     const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw);
                     r.tgt.position.set(p.x + fx * 3, p.y + 1.2, p.z + fz * 3);
                     r.spot.visible = p.f;
+                    // La etiqueta de nombre se atenua con la distancia (antes
+                    // flotaba visible a cientos de metros, como un texto
+                    // flotante pegado a la vista)
+                    if (r.sprite) {
+                        const o = Math.max(0, Math.min(1, 1.15 - dist / 55));
+                        r.sprite.material.opacity = o;
+                        r.sprite.visible = o > 0.02;
+                    }
                 }
             }
 

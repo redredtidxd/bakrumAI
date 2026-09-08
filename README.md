@@ -31,7 +31,7 @@ Juego de terror procedural estilo Backrooms en el navegador (Three.js).
 
 ## Versión
 
-La versión actual (`v1.5.0`) se muestra en el menú principal y en el HUD. Al hacer cambios:
+La versión actual (`v1.6.0`) se muestra en el menú principal y en el HUD. Al hacer cambios:
 
 1. Sube `GAME_VERSION` en `js/game.js` (p. ej. `1.5.0`).
 2. Actualiza el `?v=...` de los `<script>`/`<link>` de `index.html` al mismo número (así el navegador descarta la caché vieja y los jugadores ven la versión nueva sin Ctrl+F5).
@@ -61,3 +61,15 @@ Abre el juego desde el móvil y se activan los controles táctiles automáticame
 - **Cámaras de seguridad**: raras, montadas en las paredes; giran la cabeza y encienden su LED rojo cuando te vigilan, y su imagen se ve en el monitor de las salas de seguridad.
 - **Pilas almacenables**: mantén **[I]** para recargar la linterna con las pilas de repuesto guardadas; úsalas también para dar energía a las puertas de metal.
 - **Callejones sin salida variados**: rectos, en L, anchos, con alcoba lateral o con habitación muerta al fondo (a veces con un pilar que obliga a rodearlo).
+
+## Novedades de v1.6.0
+
+- **La Entidad ya no atraviesa paredes**: navega por la rejilla de celdas transitables (BFS) con deslizamiento por ejes contra muros, tabiques y muebles; nunca se cruza un muro ni te persigue a través de ellos. Además es menos invasiva: vaga más lenta, aparece más lejos, se pierde si pierde tu rastro y desaparece si te alejas demasiado (vuelve a aparecer más tarde).
+- **Mapa fiel a la realidad**: el mapa compartido dibuja las PAREDES REALES (finas, inclinadas y curvas) en vez de celdas negras macizas: ya no se camina por "partes negras" que en el juego son suelo libre.
+- **Grafitis-guía**: cuando aparece una puerta falsa, se pintan flechas grandes con SALIDA / POR AQUÍ en las paredes con línea de visión hacia ella, apuntando en su dirección.
+- **Puertas falsas raras** (~1 de cada 6 chunks) y con mejor modelo: hojas con bisagra real en su canto y dobles puertas de verdad (dos hojas que cierran al centro).
+- **Paredes en diagonal con textura correcta**: los tabiques rectangulares usan la textura del papel pintado repetida por celda (antes salía estirada). Más esquinas recortadas, contrafuertes y tabiques sueltos: el mundo ya no parece hecho solo de cuadrados.
+- **Pasillos de ancho variable**: un mismo pasillo puede estrecharse o ensancharse a mitad de recorrido.
+- **Cajón con hueco real**: el pedestal de la mesa es hueco de verdad y la bandeja sale por una boca abierta (antes parecía atravesar un bloque macizo). Las mesas caídas/tumbadas ya no tienen cajón que se abra (antes la bandeja se hundía en el suelo o flotaba).
+- **Tiza de colores**: el rojo y el negro se dibujan de su color (antes todo salía blanco).
+- **Multijugador más robusto**: si minimizas la pestaña ya no te echan de la sala (latido de presencia en segundo plano + reconexión automática), y los demás jugadores te ven de frente (antes veían tu espalda y la linterna apuntaba hacia atrás).
