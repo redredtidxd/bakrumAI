@@ -584,7 +584,7 @@
             opacity: 0.75;
         }
         body.touch-mode .sanity-container {
-            width: 112px;
+            width: 176px;
             padding: 3px 6px;
             background: linear-gradient(180deg, rgba(22, 20, 13, 0.6), rgba(11, 10, 7, 0.6));
         }
@@ -599,8 +599,19 @@
         body.touch-mode .sanity-bar {
             height: 6px;
         }
+        /* Coordenadas y semilla SIEMPRE visibles (tambien en movil): pequenas
+           pero legibles, no tapan la camara */
         body.touch-mode .coords-label {
-            display: none;
+            display: block;
+            font-size: 8px;
+            letter-spacing: 0;
+            white-space: nowrap;
+        }
+        body.touch-mode #seed-label {
+            margin-top: 2px !important;
+        }
+        body.touch-mode #net-status {
+            margin-top: 2px !important;
         }
         body.touch-mode .hud-footer {
             position: absolute;
@@ -637,8 +648,7 @@
         body.touch-mode .tool-slot #chalk-status-label,
         body.touch-mode .tool-slot #chalk-color-label,
         body.touch-mode .tool-slot #camera-status-label,
-        body.touch-mode .tool-slot #almond-count-label,
-        body.touch-mode .tool-slot #notes-count-label {
+        body.touch-mode .tool-slot #almond-count-label {
             display: none;
         }
         body.touch-mode #interact-prompt {
@@ -676,7 +686,122 @@
         body.touch-mode .menu-title {
             font-size: 24px;
         }
+
+        /* ================= MAPA COMPARTIDO ================= */
+        #map-modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 760px;
+            max-width: 96%;
+            height: 82vh;
+            background: rgba(12, 15, 10, 0.97);
+            border: 1px solid #3a3c2c;
+            box-shadow: 0 10px 60px rgba(0, 0, 0, 0.8);
+            border-radius: 8px;
+            display: none;
+            flex-direction: column;
+            z-index: 60;
+            color: #cfc294;
+            overflow: hidden;
+        }
+        .map-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 14px;
+            border-bottom: 1px solid #2c2f22;
+            background: rgba(26, 30, 20, 0.9);
+        }
+        .map-sub {
+            display: block;
+            font-size: 9px;
+            letter-spacing: 1px;
+            color: #7d7355;
+            margin-top: 3px;
+        }
+        #map-canvas {
+            flex: 1 1 auto;
+            width: 100%;
+            min-height: 0;
+            touch-action: none;
+            cursor: grab;
+            background: #0c0f0a;
+            display: block;
+        }
+        #map-canvas:active {
+            cursor: grabbing;
+        }
+        .map-footer {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            border-top: 1px solid #2c2f22;
+            background: rgba(26, 30, 20, 0.9);
+        }
+        .map-btn {
+            margin: 0;
+            padding: 6px 14px;
+            font-size: 14px;
+        }
+        .map-legend {
+            margin-left: auto;
+            font-size: 10px;
+            color: #8c8266;
+        }
+        body.touch-mode #map-modal {
+            height: 88vh;
+        }
+        body.touch-mode .map-btn {
+            padding: 10px 16px;
+            font-size: 15px;
+        }
+        body.touch-mode .map-legend {
+            font-size: 9px;
+        }
+        /* El cuaderno hace scroll en movil (el body tiene touch-action:none
+           para los controles, asi que el contenido lo permite explicitamente) */
         body.touch-mode #notebook-modal {
-            height: 78vh;
+            height: 84vh;
+        }
+        body.touch-mode .notebook-content {
+            touch-action: pan-y;
+            -webkit-overflow-scrolling: touch;
+        }
+        /* Botones de cerrar grandes y faciles de tocar en movil */
+        body.touch-mode #btn-close-notebook,
+        body.touch-mode #btn-close-notebook-x,
+        body.touch-mode #btn-close-map {
+            padding: 10px 22px !important;
+            font-size: 14px !important;
+        }
+
+        /* Pildora de pila compacta (movil): la bateria SIEMPRE visible */
+        #battery-pill-mobile {
+            display: none;
+        }
+        body.touch-mode #battery-pill-mobile {
+            display: flex;
+            position: absolute;
+            top: 62px;
+            right: 8px;
+            align-items: center;
+            gap: 5px;
+            background: linear-gradient(180deg, rgba(22, 20, 13, 0.65), rgba(11, 10, 7, 0.65));
+            padding: 4px 8px;
+            border-radius: 7px;
+            z-index: 21;
+        }
+        body.touch-mode #battery-pill-mobile .battery-meter {
+            width: 54px;
+            height: 7px;
+        }
+
+        /* Boton de mapa (columna derecha, encima de la linterna) */
+        #btn-touch-map {
+            right: 22px;
+            bottom: 224px;
         }
     

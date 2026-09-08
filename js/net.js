@@ -63,6 +63,19 @@
             this.chalkTimer = 0;
             this.onChalkDot = null;   // el juego lo engancha para dibujar puntos remotos
             this.worldSync = null;    // WorldGridSystem (para retirar objetos reclamados)
+
+            // Mapa compartido: cada jugador publica los chunks que ha
+            // explorado (bitsets de celdas); los demas los fusionan y todos
+            // ven el mismo mapa desbloqueado. mapChunksRef lo engancha el
+            // juego (Map "gx,gz" -> Uint8Array(32) con 256 bits de celdas).
+            this.mapChunksRef = null;
+            this.onMapData = null;    // (listaDeChunks) => void, enganchado por el juego
+            this.lastMapPub = 0;
+            this.mapTimer = 0;
+
+            // Puertas de metal de las salas de seguridad: el estado abierto/
+            // cerrado se comparte con la sala (la pila es de cada jugador)
+            this.onDoorData = null;   // ({id, o}) => void
         }
 
         // ----------------------------------------------------------------
@@ -122,6 +135,8 @@
             sub(this.entTopic());
             sub(this.claimTopic('+'));
             sub(this.chalkTopic());
+            sub(this.mapTopic());
+            sub(this.doorTopic());
             this.publishPresence();
             this.onToast('🛰 CONECTADO · sala ' + this.roomKey);
             // Pequena espera para recibir las presencias retenidas de los que
@@ -190,6 +205,8 @@
         entTopic() { return 'br0/' + this.roomKey + '/ent'; }
         claimTopic(pid) { return 'br0/' + this.roomKey + '/claims/' + pid; }
         chalkTopic() { return 'br0/' + this.roomKey + '/chalk'; }
+        mapTopic() { return 'br0/' + this.roomKey + '/map'; }
+        doorTopic() { return 'br0/' + this.roomKey + '/doors'; }
 
         publishPresence() {
             if (!this.client || !this.connected) return;
@@ -222,6 +239,14 @@
             } catch (e) { /* noop */ }
         }
 
+        // Estado de una puerta de metal (sala de seguridad): abierta o cerrada
+        publishDoor(id, open) {
+            if (!this.client || !this.connected || !this.joined) return;
+            try {
+                this.client.send(this.doorTopic(), JSON.stringify({ id, o: open ? 1 : 0 }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
         // Encola un punto de tiza para compartirlo con la sala (lotes)
         queueChalkDot(point, normal, colorHex) {
             if (!this.client || !this.connected || !this.joined) return;
@@ -247,6 +272,41 @@
                 this.onChalkDot(v, n, dot[6]);
             }
         }
+        // Chunks explorados por OTRO jugador: { p, c: [[gx, gz, bitsHex], ...] }
+        handleMapMessage(m) {
+            let d = {};
+            try { d = JSON.parse(m.payloadString); } catch (e) { return; }
+            if (!d || d.p === this.pid || !Array.isArray(d.c) || !this.onMapData) return;
+            this.onMapData(d.c);
+        }
+
+        // Publica el mapa explorado (throttled: max 1 mensaje cada 2,5 s y
+        // snapshots periodicos para quien entre tarde). Cada chunk se envia
+        // como 64 digitos hex (256 celdas = 32 bytes), con un tope de ~24 KB
+        // por mensaje: el mapa crece despacio, asi que cabe entero.
+        publishMap() {
+            if (!this.client || !this.connected || !this.joined || !this.mapChunksRef) return;
+            const now = Date.now();
+            if (now - this.lastMapPub < 2500) return;
+            this.lastMapPub = now;
+            const out = [];
+            let size = 0;
+            for (const [key, bits] of this.mapChunksRef) {
+                const [gx, gz] = key.split(',');
+                let hex = '';
+                for (let i = 0; i < 32; i += 2) {
+                    hex += ((bits[i] << 8) | bits[i + 1]).toString(16).padStart(4, '0');
+                }
+                out.push([+gx, +gz, hex]);
+                size += hex.length + 12;
+                if (size > 24000) break;
+            }
+            if (!out.length) return;
+            try {
+                this.client.send(this.mapTopic(), JSON.stringify({ p: this.pid, c: out }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
         handleMessage(m) {
             const parts = m.destinationName.split('/');
             const kind = parts[2];
@@ -260,6 +320,21 @@
             // Dibujos de tiza compartidos (br0/sala/chalk): sin pid, 3 segmentos
             if (kind === 'chalk') {
                 this.handleChalkMessage(m);
+                return;
+            }
+
+            // Mapa compartido (br0/sala/map): chunks explorados por cada uno
+            if (kind === 'map') {
+                this.handleMapMessage(m);
+                return;
+            }
+
+            // Puertas de las salas de seguridad (br0/sala/doors): quien abre o
+            // cierra una puerta lo ve toda la sala
+            if (kind === 'doors') {
+                let d = {};
+                try { d = JSON.parse(m.payloadString); } catch (e) { return; }
+                if (d && d.id && this.onDoorData) this.onDoorData(d);
                 return;
             }
 
@@ -556,6 +631,13 @@
                 if (this.presenceTimer > 6) {
                     this.presenceTimer = 0;
                     this.publishPresence();
+                }
+                // Mapa compartido: snapshot periodico (~8 s) para que quien
+                // entre tarde reciba todo lo explorado por la sala
+                this.mapTimer += dt;
+                if (this.mapTimer > 8) {
+                    this.mapTimer = 0;
+                    this.publishMap();
                 }
                 // Dibujos de tiza compartidos: lotes pequenos (~10 msgs/s)
                 this.chalkTimer += dt;

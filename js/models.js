@@ -43,14 +43,31 @@
                 group.add(leg);
             });
 
-            // Cajon frontal: la manilla va pegada al cajon para que se abra
-            // con el (world.js decide si contiene un objeto; game.js lo abre
-            // con [E] y lo desliza).
-            const drawer = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.45, 0.74), woodMat);
-            drawer.position.set(0.46, 0.45, 0);
+            // Pedestal del cajon: el cuerpo de la mesa donde el cajon se
+            // desliza (antes el cajon flotaba suelto entre las patas).
+            const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.3, 0.56), woodMat);
+            skirt.position.set(0.46, 0.52, 0);
+            group.add(skirt);
+
+            // Cajon HUECO (bandeja abierta por arriba): fondo + frontal alto +
+            // trasera y laterales bajos. El objeto del cajon se coloca DENTRO
+            // del hueco y se desliza con el (world.js lo materializa como hijo
+            // del cajon; game.js lo abre con [E]).
+            const drawer = new THREE.Group();
+            const dp = (w, h, d, x, y, z) => {
+                const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
+                m.position.set(x, y, z);
+                drawer.add(m);
+            };
+            dp(0.36, 0.02, 0.5, 0, -0.07, 0);        // fondo (el objeto reposa aqui)
+            dp(0.36, 0.12, 0.02, 0, 0.01, 0.25);     // frontal (alto, cara del cajon)
+            dp(0.36, 0.06, 0.02, 0, -0.03, -0.25);   // trasera (baja)
+            dp(0.02, 0.09, 0.5, -0.17, -0.025, 0);   // lateral izquierdo
+            dp(0.02, 0.09, 0.5, 0.17, -0.025, 0);    // lateral derecho
             const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), handleMat);
-            handle.position.set(0, 0.07, 0.38);
+            handle.position.set(0, 0.045, 0.265);
             drawer.add(handle);
+            drawer.position.set(0.46, 0.5, 0);
             group.add(drawer);
             group.userData.drawer = { mesh: drawer, open: false };
 
@@ -618,4 +635,177 @@
         tex = new THREE.CanvasTexture(canvas);
         wallNoteTexCache.set(ck, tex);
         return tex;
+    }
+
+    // ------------------------------------------------------------------
+    // PUERTA FALSA (señuelo): marco + batiente(s) a escala real, pegada a
+    // una cara de pared para que desde lejos parezca una salida. Variantes:
+    // sencilla o doble, entornada, y con grafiti pintado encima (la textura
+    // la genera world.js con graffitiTexture -> determinista por semilla).
+    // El origen del grupo esta en el suelo, mirando a +Z; world.js la apoya
+    // contra la cara REAL de la pared (wallFaceMap).
+    // ------------------------------------------------------------------
+    function createFakeDoorModel(o) {
+        o = o || {};
+        const group = new THREE.Group();
+        const H = 2.05;
+        const W = o.double ? 1.62 : 0.92;
+        const T = 0.06;
+        const paint = new THREE.Color(o.paint || 0x6d7a8a);
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x232830, metalness: 0.55, roughness: 0.5 });
+        const doorMat = new THREE.MeshStandardMaterial({ color: paint, roughness: 0.55, metalness: 0.15 });
+        const insetMat = new THREE.MeshStandardMaterial({ color: paint.clone().multiplyScalar(0.68), roughness: 0.6 });
+        const darkMat = new THREE.MeshStandardMaterial({ color: 0x14181f, metalness: 0.7, roughness: 0.35 });
+
+        // Marco (jambas + dintel), atrasado para dejar el hueco del batiente
+        const bar = (w, h, d, x, y, z, mat) => {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+            m.position.set(x, y, z);
+            group.add(m);
+        };
+        bar(T, H + 0.1, 0.1, -W / 2 - T / 2, (H + 0.1) / 2, -0.01);
+        bar(T, H + 0.1, 0.1, W / 2 + T / 2, (H + 0.1) / 2, -0.01);
+        bar(W + T * 2, 0.1, 0.1, 0, H + 0.05, -0.01);
+
+        // Un batiente (o media puerta si es doble)
+        const leaf = (pw, x, ajar) => {
+            const leaf = new THREE.Group();
+            const face = new THREE.Mesh(new THREE.BoxGeometry(pw, H, T), doorMat);
+            face.position.y = H / 2;
+            leaf.add(face);
+            // Recuadros de panel (2 por hoja)
+            const iw = pw * 0.78, ih = H * 0.3;
+            for (const iy of [H * 0.28, H * 0.62]) {
+                const inset = new THREE.Mesh(new THREE.BoxGeometry(iw, ih, 0.02), insetMat);
+                inset.position.set(0, iy, T / 2 + 0.012);
+                leaf.add(inset);
+            }
+            // Tirador
+            const handle = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.24, 0.028), darkMat);
+            handle.position.set(pw / 2 - 0.1, H * 0.48, T / 2 + 0.02);
+            leaf.add(handle);
+            // Grafiti pintado encima de la hoja (opcional)
+            if (o.graffitiTex) {
+                const g = new THREE.Mesh(
+                    new THREE.PlaneGeometry(pw - 0.08, H - 0.25),
+                    new THREE.MeshBasicMaterial({ map: o.graffitiTex, transparent: true, depthWrite: false })
+                );
+                g.position.set(0, H / 2 + 0.05, T / 2 + 0.02);
+                leaf.add(g);
+            }
+            leaf.position.x = x;
+            leaf.rotation.y = ajar;
+            group.add(leaf);
+            return leaf;
+        };
+
+        if (o.double) {
+            const a = o.ajar || 0.0;
+            leaf(W / 2 - 0.025, -W / 4, a);
+            leaf(W / 2 - 0.025, W / 4, -a);
+        } else {
+            leaf(W, 0, o.ajar || 0.0);
+        }
+        return group;
+    }
+
+    // ------------------------------------------------------------------
+    // CAMARA DE SEGURIDAD de pared: soporte fijo + cabeza orientable con
+    // objetivo, lente y LED rojo. world.js la monta en la cara real de un
+    // muro y game.js gira la cabeza hacia el jugador cuando lo vigila.
+    // ------------------------------------------------------------------
+    function createSecurityCameraModel() {
+        const group = new THREE.Group();
+        const bracketMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, metalness: 0.7, roughness: 0.4 });
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd8d8dc, metalness: 0.4, roughness: 0.55 });
+        const lensMat = new THREE.MeshStandardMaterial({ color: 0x0a0c10, metalness: 0.8, roughness: 0.2 });
+        const ledMat = new THREE.MeshStandardMaterial({ color: 0xff2a1a, emissive: 0xff2a1a, emissiveIntensity: 0 });
+
+        const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.2), bracketMat);
+        group.add(bracket);
+
+        const head = new THREE.Group();
+        head.position.set(0, 0.05, 0.05);
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.05), bracketMat);
+        arm.position.y = 0.03;
+        head.add(arm);
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.13, 0.24), bodyMat);
+        body.position.set(0, 0.11, 0);
+        head.add(body);
+        const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.08, 10), lensMat);
+        lens.rotation.x = Math.PI / 2;
+        lens.position.set(0, 0.11, 0.14);
+        head.add(lens);
+        const led = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 8), ledMat);
+        led.position.set(0.06, 0.13, 0.09);
+        head.add(led);
+        group.add(head);
+
+        group.userData = { head, ledMat };
+        return group;
+    }
+
+    // ------------------------------------------------------------------
+    // PUERTA DE METAL de sala de seguridad (estilo FNAF): marco + puerta de
+    // paneles horizontales que SUBE al techo al abrirse. El panel de control
+    // (con pantalla de pila) lo coloca world.js en la pared interior.
+    // userData.door es el grupo de paneles que game.js desliza en Y.
+    // ------------------------------------------------------------------
+    function createMetalDoorModel() {
+        const group = new THREE.Group();
+        const metalMat = new THREE.MeshStandardMaterial({ color: 0x5a616b, metalness: 0.75, roughness: 0.45 });
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x33363c, metalness: 0.6, roughness: 0.5 });
+
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.4, 2.88), frameMat);
+        frame.position.y = 1.2;
+        group.add(frame);
+
+        const door = new THREE.Group();
+        for (let i = 0; i < 7; i++) {
+            const p = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.32, 2.82), metalMat);
+            p.position.y = i * 0.32 + 0.16;
+            door.add(p);
+        }
+        group.add(door);
+
+        group.userData = { door };
+        return group;
+    }
+
+    // ------------------------------------------------------------------
+    // MONITOR de pared (sala de seguridad): marco oscuro + pantalla cuyo
+    // material se sustituye por el feed de camaras (render target) y una
+    // capa de scanlines encima. world.js lo cuelga en la pared interior.
+    // ------------------------------------------------------------------
+    let scanlineTexCache = null;
+    function scanlineTexture() {
+        if (scanlineTexCache) return scanlineTexCache;
+        const c = document.createElement('canvas');
+        c.width = 8;
+        c.height = 8;
+        const x = c.getContext('2d');
+        x.clearRect(0, 0, 8, 8);
+        x.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        x.fillRect(0, 0, 8, 2);
+        scanlineTexCache = new THREE.CanvasTexture(c);
+        scanlineTexCache.wrapS = scanlineTexCache.wrapT = THREE.RepeatWrapping;
+        scanlineTexCache.repeat.set(30, 22);
+        return scanlineTexCache;
+    }
+    function createMonitorScreenModel() {
+        const group = new THREE.Group();
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x22252b, metalness: 0.6, roughness: 0.5 });
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.05, 0.14), frameMat);
+        frame.position.y = 0.55;
+        group.add(frame);
+        const screenMat = new THREE.MeshBasicMaterial({ color: 0x0a0d12 });
+        const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.66, 0.9), screenMat);
+        screen.position.set(0, 0.55, 0.071);
+        group.add(screen);
+        const scan = new THREE.Mesh(new THREE.PlaneGeometry(1.66, 0.9),
+            new THREE.MeshBasicMaterial({ map: scanlineTexture(), transparent: true, opacity: 0.4, depthWrite: false }));
+        scan.position.set(0, 0.55, 0.075);
+        group.add(scan);
+        group.userData = { screenMat };
+        return group;
     }

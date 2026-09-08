@@ -176,6 +176,53 @@
         { s: 'ghost' }, { s: 'crown' }, { s: 'ladder' }
     ];
 
+    // Colores de pintura de las puertas falsas (señuelos)
+    const DOOR_PAINTS = [0x6d7a8a, 0x8a7a5c, 0x5c6d8a, 0x7a5c5c, 0x5c7a6d, 0x8a8a6a];
+
+    // Textura de las flechas del suelo: chevrones brillantes (material basico
+    // -> se ven desde lejos, incluso en las zonas de apagon). Una sola textura
+    // compartida por todas las flechas.
+    let arrowTexCache = null;
+    function arrowTexture() {
+        if (arrowTexCache) return arrowTexCache;
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 128, 64);
+        ctx.save();
+        ctx.shadowColor = 'rgba(215, 255, 90, 0.85)';
+        ctx.shadowBlur = 9;
+        ctx.lineWidth = 9;
+        ctx.strokeStyle = '#d7ff5a';
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (let i = 0; i < 3; i++) {
+            const y = 10 + i * 18;
+            ctx.beginPath();
+            ctx.moveTo(14, y + 10);
+            ctx.lineTo(46, y);
+            ctx.lineTo(14, y - 10);
+            ctx.stroke();
+        }
+        ctx.restore();
+        // Contorno oscuro para que la flecha se lea sobre moqueta clara
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(12, 14, 8, 0.9)';
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (let i = 0; i < 3; i++) {
+            const y = 10 + i * 18;
+            ctx.beginPath();
+            ctx.moveTo(14, y + 10);
+            ctx.lineTo(46, y);
+            ctx.lineTo(14, y - 10);
+            ctx.stroke();
+        }
+        arrowTexCache = new THREE.CanvasTexture(canvas);
+        return arrowTexCache;
+    }
+
     const graffitiTexCache = new Map();
     function graffitiTexture(variant, colorHex) {
         const ck = variant + '|' + colorHex;
@@ -463,6 +510,25 @@
             }
         }
 
+        // Mapa compartido: devuelve la disposicion determinista (grid, salas,
+        // puertas) de un chunk SIN construir mallas ni cargarlo en la escena.
+        // La generacion solo usa el rng del chunk y campos de ruido puros, asi
+        // que misma semilla -> mismo layout para todos los jugadores.
+        getLayout(cx, cz) {
+            const ch = {
+                key: cx + ',' + cz,
+                cx, cz,
+                loaded: false,
+                grid: null,
+                rooms: [],
+                openCells: [],
+                doorCells: [],
+                rng: mulberry32(hash2(cx, cz))
+            };
+            this.generateLayout(ch);
+            return ch;
+        }
+
         loadChunk(cx, cz) {
             const key = cx + ',' + cz;
             let ch = this.chunks.get(key);
@@ -526,10 +592,17 @@
             for (const m of ch.meshes) this.scene.remove(m);
             ch.meshes = [];
             ch.wallBoxes = [];
+            // Al recargar el chunk la generacion determinista los vuelve a
+            // calcular: si no se limpiaran aqui, se duplicarian cada recarga
+            ch.slantedAABBs = [];
             ch.lamps = [];
             // Los objetos guardan su estado: al recargar el chunk reaparecen
             for (const p of ch.pickupList) {
-                if (p.mesh) { this.scene.remove(p.mesh); p.mesh = null; }
+                if (p.mesh) {
+                    // Los objetos de cajon son hijos del cajon, no de la escena
+                    (p.mesh.parent || this.scene).remove(p.mesh);
+                    p.mesh = null;
+                }
             }
             this.rebuildUnions();
         }
@@ -563,8 +636,18 @@
             this.pickups = pickups;
             // Tabiques inclinados de los chunks cargados (para la IA de la entidad)
             this.slantedAABBs = [];
+            this.cameras = [];
+            this.securityRooms = [];
             for (const ch of this.chunks.values()) {
-                if (ch.loaded && ch.slantedAABBs) this.slantedAABBs.push(...ch.slantedAABBs);
+                if (!ch.loaded) continue;
+                if (ch.slantedAABBs) this.slantedAABBs.push(...ch.slantedAABBs);
+                if (ch.cameras) this.cameras.push(...ch.cameras);
+                if (ch.securityRooms) this.securityRooms.push(...ch.securityRooms);
+                // Puerta de metal CERRADA = caja de colision: bloquea al
+                // jugador, a los muebles y a la entidad (linea de vision 2D)
+                for (const r of ch.securityRooms || []) {
+                    if (!r.state.doorOpen && r.doorBox) wallBoxes.push(r.doorBox);
+                }
             }
         }
 
@@ -706,6 +789,12 @@
                 }
             }
 
+            // ---- 3d) SALA DE SEGURIDAD (rara): bolsillo sellado con UNA sola
+            // boca, donde va la puerta de metal. Se busca DESPUES de todo el
+            // tallado (la conectividad ya esta garantizada: el bolsillo se
+            // une por su unica entrada) ----
+            this.carveSecurityRoom(ch);
+
             // ---- 4) Celdas transitables (coordenadas de mundo) ----
             for (let x = 1; x < N - 1; x++) {
                 for (let z = 1; z < N - 1; z++) {
@@ -713,6 +802,63 @@
                         ch.openCells.push({ x: ch.cx * N + x, z: ch.cz * N + z });
                     }
                 }
+            }
+        }
+
+        // SALA DE SEGURIDAD (estilo FNAF): busca un bolsillo de pared con
+        // EXACTAMENTE una celda abierta en el anillo (la futura boca de la
+        // puerta de metal) y lo convierte en habitacion sellada. Rara:
+        // ~1 de cada 24 chunks. La puerta en si la monta buildSecurityRoom.
+        carveSecurityRoom(ch) {
+            const N = CHUNK_SIZE;
+            const g = ch.grid;
+            const r = ch.rng;
+            if (r() >= 0.042) return;
+            const sizes = [[3, 3], [3, 4], [4, 4]];
+            const order = [0, 1, 2];
+            for (let i = order.length - 1; i > 0; i--) {
+                const j = Math.floor(r() * (i + 1));
+                [order[i], order[j]] = [order[j], order[i]];
+            }
+            for (const oi of order) {
+                const [w, h] = sizes[oi];
+                const spots = [];
+                for (let rx = 2; rx <= N - 2 - w; rx++) {
+                    for (let rz = 2; rz <= N - 2 - h; rz++) {
+                        let interiorWall = true;
+                        for (let dx = 0; dx < w && interiorWall; dx++) {
+                            for (let dz = 0; dz < h && interiorWall; dz++) {
+                                const v = g[rx + dx][rz + dz];
+                                if (v !== 1 && v !== 3) interiorWall = false;
+                            }
+                        }
+                        if (!interiorWall) continue;
+                        const ringOpen = [];
+                        for (let dx = -1; dx <= w; dx++) {
+                            for (let dz = -1; dz <= h; dz++) {
+                                if (dx >= 0 && dx < w && dz >= 0 && dz < h) continue;
+                                const px = rx + dx, pz = rz + dz;
+                                if (px < 1 || px > N - 2 || pz < 1 || pz > N - 2) continue;
+                                const v = g[px][pz];
+                                if (v === 0 || v === 2) ringOpen.push([px, pz]);
+                            }
+                        }
+                        if (ringOpen.length === 1) spots.push([rx, rz, w, h, ringOpen[0]]);
+                    }
+                }
+                if (!spots.length) continue;
+                const s = spots[Math.floor(r() * spots.length)];
+                const [rx, rz, rw2, rh2, doorCell] = s;
+                for (let dx = 0; dx < rw2; dx++) {
+                    for (let dz = 0; dz < rh2; dz++) g[rx + dx][rz + dz] = 2;
+                }
+                g[doorCell[0]][doorCell[1]] = 0;   // la boca de la puerta
+                ch.securityRoom = {
+                    rx, rz, w: rw2, h: rh2,
+                    doorX: doorCell[0], doorZ: doorCell[1],
+                    state: { battery: 100, doorOpen: true }
+                };
+                return;
             }
         }
 
@@ -787,62 +933,149 @@
                 [starts[i], starts[j]] = [starts[j], starts[i]];
             }
 
+            const wall = (x, z) => x >= 2 && x <= N - 3 && z >= 2 && z <= N - 3 && (g[x][z] === 1 || g[x][z] === 3);
+
             for (const s of starts) {
                 const d = s.d;
-                const len = 1 + Math.floor(r() * 2);   // 1-2 celdas (callejon corto)
                 const perp = d[0] === 0 ? [1, 0] : [0, 1];
+                const variant = r();
 
-                // Comprobar el tramo completo antes de tallar nada
-                let ok = true;
+                // ---- VARIANTE RECTA (callejon corto de 1-2 celdas) ----
+                if (variant < 0.2) {
+                    const len = 1 + Math.floor(r() * 2);
+                    const cells = [];
+                    let ok = true;
+                    for (let t = 1; t <= len && ok; t++) {
+                        const nx = s.x + d[0] * t, nz = s.z + d[1] * t;
+                        if (!wall(nx, nz)) { ok = false; break; }
+                        cells.push([nx, nz]);
+                    }
+                    if (!ok) continue;
+                    const tx = cells[cells.length - 1][0], tz = cells[cells.length - 1][1];
+                    if (!wall(tx + d[0], tz + d[1])) continue;               // fondo sellado
+                    if (!wall(tx + perp[0], tz + perp[1]) || !wall(tx - perp[0], tz - perp[1])) continue;
+                    for (const [cx2, cz2] of cells) this.openCell(ch, cx2, cz2, 1);
+                    return;
+                }
+
+                // ---- VARIANTE EN L: el callejon gira 90 grados antes de morir ----
+                if (variant < 0.4) {
+                    const len1 = 1 + Math.floor(r() * 2);
+                    const len2 = 1 + Math.floor(r() * 2);
+                    const sgn = r() < 0.5 ? 1 : -1;
+                    const t2 = [perp[0] * sgn, perp[1] * sgn];
+                    const leg1 = [], leg2 = [];
+                    let ok = true;
+                    for (let t = 1; t <= len1 && ok; t++) {
+                        const nx = s.x + d[0] * t, nz = s.z + d[1] * t;
+                        if (!wall(nx, nz)) { ok = false; break; }
+                        leg1.push([nx, nz]);
+                    }
+                    if (!ok) continue;
+                    const bx = leg1[leg1.length - 1][0], bz = leg1[leg1.length - 1][1];
+                    for (let t = 1; t <= len2 && ok; t++) {
+                        const nx = bx + t2[0] * t, nz = bz + t2[1] * t;
+                        if (!wall(nx, nz)) { ok = false; break; }
+                        leg2.push([nx, nz]);
+                    }
+                    if (!ok) continue;
+                    const tx = leg2[leg2.length - 1][0], tz = leg2[leg2.length - 1][1];
+                    // Fondo de la L sellado: delante, a los lados y en la
+                    // diagonal exterior del giro
+                    if (!wall(tx + t2[0], tz + t2[1])) continue;
+                    if (!wall(tx + perp[0], tz + perp[1]) || !wall(tx - perp[0], tz - perp[1])) continue;
+                    if (!wall(bx + t2[0] + perp[0] * -sgn, bz + t2[1] + perp[1] * -sgn)) continue;
+                    for (const [cx2, cz2] of leg1) this.openCell(ch, cx2, cz2, 1);
+                    for (const [cx2, cz2] of leg2) this.openCell(ch, cx2, cz2, 1);
+                    return;
+                }
+
+                // ---- VARIANTE ANCHA: pasillo de 2 celdas ----
+                if (variant < 0.52) {
+                    const len = 1 + Math.floor(r() * 2);
+                    const lane = [];
+                    let ok = true;
+                    for (let t = 1; t <= len && ok; t++) {
+                        const a = [s.x + d[0] * t, s.z + d[1] * t];
+                        const b = [a[0] + perp[0], a[1] + perp[1]];
+                        if (!wall(a[0], a[1]) || !wall(b[0], b[1])) { ok = false; break; }
+                        lane.push([a, b]);
+                    }
+                    if (!ok) continue;
+                    const ta = lane[lane.length - 1][0], tb = lane[lane.length - 1][1];
+                    if (!wall(ta[0] + d[0], ta[1] + d[1]) || !wall(tb[0] + d[0], tb[1] + d[1])) continue;
+                    if (!wall(ta[0] - perp[0], ta[1] - perp[1]) || !wall(tb[0] + perp[0], tb[1] + perp[1])) continue;
+                    for (const [a, b] of lane) {
+                        this.openCell(ch, a[0], a[1], 1);
+                        this.openCell(ch, b[0], b[1], 1);
+                    }
+                    return;
+                }
+
+                // ---- VARIANTE ALCOBA: bolsillo lateral de 2 celdas al fondo ----
+                if (variant < 0.68) {
+                    const len = 1 + Math.floor(r() * 2);
+                    const sgn = r() < 0.5 ? 1 : -1;
+                    const cells = [];
+                    let ok = true;
+                    for (let t = 1; t <= len && ok; t++) {
+                        const nx = s.x + d[0] * t, nz = s.z + d[1] * t;
+                        if (!wall(nx, nz)) { ok = false; break; }
+                        cells.push([nx, nz]);
+                    }
+                    if (!ok) continue;
+                    const tx = cells[cells.length - 1][0], tz = cells[cells.length - 1][1];
+                    // La alcoba: dos celdas a un lado del fondo
+                    const a1 = [tx + perp[0] * sgn, tz + perp[1] * sgn];
+                    const a2 = [a1[0] + d[0], a1[1] + d[1]];
+                    if (!wall(a1[0], a1[1]) || !wall(a2[0], a2[1])) continue;
+                    if (!wall(tx + d[0], tz + d[1])) continue;                    // fondo
+                    if (!wall(a2[0] + d[0], a2[1] + d[1])) continue;            // fondo de la alcoba
+                    if (!wall(a2[0] + perp[0] * sgn, a2[1] + perp[1] * sgn)) continue;  // lado exterior
+                    for (const [cx2, cz2] of cells) this.openCell(ch, cx2, cz2, 1);
+                    this.openCell(ch, a1[0], a1[1], 1);
+                    this.openCell(ch, a2[0], a2[1], 1);
+                    return;
+                }
+
+                // ---- VARIANTE HABITACION MUERTA (3x3/4x4, a veces con pilar
+                // dentro: obliga a dar la vuelta rodeandolo) ----
+                const len = 1 + Math.floor(r() * 2);
                 const cells = [];
+                let ok = true;
                 for (let t = 1; t <= len && ok; t++) {
-                    const nx = s.x + d[0] * t;
-                    const nz = s.z + d[1] * t;
-                    if (nx < 2 || nx > N - 3 || nz < 2 || nz > N - 3) { ok = false; break; }
-                    if (g[nx][nz] !== 1 && g[nx][nz] !== 3) { ok = false; break; }
+                    const nx = s.x + d[0] * t, nz = s.z + d[1] * t;
+                    if (!wall(nx, nz)) { ok = false; break; }
                     cells.push([nx, nz]);
                 }
                 if (!ok) continue;
-
-                // El fondo debe quedar sellado: pared delante y a ambos lados de la punta
-                const tx = cells[cells.length - 1][0];
-                const tz = cells[cells.length - 1][1];
-                const capX = tx + d[0], capZ = tz + d[1];
-                if (capX < 2 || capX > N - 3 || capZ < 2 || capZ > N - 3) continue;
-                if (g[capX][capZ] !== 1 && g[capX][capZ] !== 3) continue;
-                for (const sgn of [-1, 1]) {
-                    const lx = tx + perp[0] * sgn;
-                    const lz = tz + perp[1] * sgn;
-                    if (g[lx][lz] !== 1 && g[lx][lz] !== 3) { ok = false; break; }
-                }
-                if (!ok) continue;
-
-                // Tallar el callejon (ancho 1)
+                const tx = cells[cells.length - 1][0], tz = cells[cells.length - 1][1];
+                if (!wall(tx + d[0], tz + d[1])) continue;
+                if (!wall(tx + perp[0], tz + perp[1]) || !wall(tx - perp[0], tz - perp[1])) continue;
                 for (const [cx2, cz2] of cells) this.openCell(ch, cx2, cz2, 1);
-
-                // Fondo del callejon: casi siempre una HABITACION muerta
-                // (3x3 o 4x4) rodeada de pared, en vez de un pasillo largo
-                if (r() < 0.75) {
-                    const rw = r() < 0.5 ? 3 : 4;
-                    const rh = r() < 0.5 ? 3 : 4;
-                    const hx = tx + d[0];
-                    const hz = tz + d[1];
-                    let roomOk = true;
-                    for (let dx = -1; dx <= rw && roomOk; dx++) {
-                        for (let dz = -1; dz <= rh && roomOk; dz++) {
-                            if (dx >= 0 && dx < rw && dz >= 0 && dz < rh) continue; // interior
-                            const rx = hx + dx, rz = hz + dz;
-                            if (rx < 1 || rx >= N - 1 || rz < 1 || rz >= N - 1) { roomOk = false; break; }
-                            if (rx === tx && rz === tz) continue; // la boca del callejon
-                            const t = g[rx][rz];
-                            if (t !== 1 && t !== 3) roomOk = false;
-                        }
+                const rw = r() < 0.5 ? 3 : 4;
+                const rh = r() < 0.5 ? 3 : 4;
+                const hx = tx + d[0];
+                const hz = tz + d[1];
+                let roomOk = true;
+                for (let dx = -1; dx <= rw && roomOk; dx++) {
+                    for (let dz = -1; dz <= rh && roomOk; dz++) {
+                        if (dx >= 0 && dx < rw && dz >= 0 && dz < rh) continue;
+                        const rx = hx + dx, rz = hz + dz;
+                        if (rx < 1 || rx >= N - 1 || rz < 1 || rz >= N - 1) { roomOk = false; break; }
+                        if (rx === tx && rz === tz) continue;
+                        if (!wall(rx, rz)) roomOk = false;
                     }
-                    if (roomOk) {
-                        for (let dx = 0; dx < rw; dx++) {
-                            for (let dz = 0; dz < rh; dz++) g[hx + dx][hz + dz] = 2;
-                        }
-                        ch.rooms.push({ x: hx, z: hz, w: rw, h: rh });
+                }
+                if (roomOk) {
+                    for (let dx = 0; dx < rw; dx++) {
+                        for (let dz = 0; dz < rh; dz++) g[hx + dx][hz + dz] = 2;
+                    }
+                    ch.rooms.push({ x: hx, z: hz, w: rw, h: rh });
+                    // A veces un pilar dentro: la habitacion te obliga a
+                    // rodearlo para volver por donde entraste
+                    if (r() < 0.4 && rw >= 4 && rh >= 4) {
+                        g[hx + 1 + Math.floor(r() * (rw - 2))][hz + 1 + Math.floor(r() * (rh - 2))] = 3;
                     }
                 }
                 return;
@@ -1354,8 +1587,67 @@
                             }
                         } else if (kind === 'interior') {
                             // Nucleo macizo del interior: bloque solido invisible
-                            // (nunca se ve ni se alcanza)
-                            box = { minX: posX - C / 2, maxX: posX + C / 2, minZ: posZ - C / 2, maxZ: posZ + C / 2 };
+                            // (nunca se ve ni se alcanza). PERO si la celda asoma
+                            // a una esquina de espacio abierto (sala o pasillo),
+                            // el bloque entero sobresaldria ~1,5-2 m dentro de la
+                            // sala como un pilar cuadrado: se RECORTA en dos
+                            // laminas enrasadas con las paredes contiguas (sus
+                            // caras visibles caen en el MISMO plano que las
+                            // paredes, asi la esquina queda limpia; el resto de
+                            // la celda queda como hueco sellado e invisible).
+                            let cut = null;
+                            for (const [ddx, ddz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+                                if (open(x + ddx, z + ddz)) { cut = [ddx, ddz]; break; }
+                            }
+                            if (cut) {
+                                const sx = cut[0], sz = cut[1];
+                                // Pared A: la celda (x, z+sz) a lo largo de Z;
+                                // pared B: la celda (x+sx, z) a lo largo de X.
+                                // Solo se recorta si ambas son tramos rectos
+                                // reales con grosor conocido.
+                                const TA = wallTMap.get(key(x, z + sz));
+                                const TB = wallTMap.get(key(x + sx, z));
+                                const taO = !!TA && typeof TA === 'object';
+                                const tbO = !!TB && typeof TB === 'object';
+                                if ((typeof TA === 'number' || taO) && (typeof TB === 'number' || tbO)) {
+                                    // Cara de la pared A hacia la sala: misma
+                                    // formula que las cajas del bucle principal
+                                    // (si la celda es un poste de puerta, su
+                                    // cara es posX +/- su medio grosor)
+                                    let faceA = null;
+                                    if (taO) faceA = posX + (sx === 1 ? TA.rx : -TA.rx);
+                                    else if (open(x - 1, z + sz) && open(x + 1, z + sz)) faceA = posX + (sx === 1 ? TA / 2 : -TA / 2);
+                                    else if (sx === 1 && open(x + 1, z + sz)) faceA = faceX(x - 1, z + sz, 'east') + TA;
+                                    else if (sx === -1 && open(x - 1, z + sz)) faceA = faceX(x + 1, z + sz, 'west') - TA;
+                                    // Cara de la pared B hacia la sala
+                                    let faceB = null;
+                                    if (tbO) faceB = posZ + (sz === 1 ? TB.rz : -TB.rz);
+                                    else if (open(x + sx, z - 1) && open(x + sx, z + 1)) faceB = posZ + (sz === 1 ? TB / 2 : -TB / 2);
+                                    else if (sz === 1 && open(x + sx, z + 1)) faceB = faceZ(x + sx, z - 1, 'south') + TB;
+                                    else if (sz === -1 && open(x + sx, z - 1)) faceB = faceZ(x + sx, z + 1, 'north') - TB;
+                                    // Las caras deben caer DENTRO de la celda:
+                                    // los tramos pegados a la junta de chunk se
+                                    // anclan en la junta y su cara se sale de la
+                                    // celda (ahí no se puede recortar)
+                                    if (faceA !== null && faceB !== null &&
+                                        faceA > posX - C / 2 + 0.05 && faceA < posX + C / 2 - 0.05 &&
+                                        faceB > posZ - C / 2 + 0.05 && faceB < posZ + C / 2 - 0.05) {
+                                        // Lamina A: toda la celda en Z, de la
+                                        // cara A hacia el lado cerrado
+                                        box = sx === 1
+                                            ? { minX: posX - C / 2, maxX: faceA, minZ: posZ - C / 2, maxZ: posZ + C / 2 }
+                                            : { minX: faceA, maxX: posX + C / 2, minZ: posZ - C / 2, maxZ: posZ + C / 2 };
+                                        // Lamina B: toda la celda en X, de la
+                                        // cara B hacia el lado cerrado
+                                        extraBoxes.push(sz === 1
+                                            ? { minX: sx === 1 ? faceA : posX - C / 2, maxX: sx === 1 ? posX + C / 2 : faceA, minZ: posZ - C / 2, maxZ: faceB }
+                                            : { minX: sx === 1 ? faceA : posX - C / 2, maxX: sx === 1 ? posX + C / 2 : faceA, minZ: faceB, maxZ: posZ + C / 2 });
+                                    }
+                                }
+                            }
+                            if (!box) {
+                                box = { minX: posX - C / 2, maxX: posX + C / 2, minZ: posZ - C / 2, maxZ: posZ + C / 2 };
+                            }
                         } else if (kind === 'post') {
                             // Esquina/final de pared = COLUMNA del mismo grosor
                             // que la pared que la toca (wallTMap guarda su medio
@@ -1551,10 +1843,173 @@
             // misma semilla, toda la sala ve exactamente los mismos grafitis.
             this.placeChunkGraffiti(ch, wallKind, key, curvedCells);
 
+            // ---- PUERTAS FALSAS (señuelos a escala: sencillas, dobles y con
+            // grafiti) pegadas a caras de pared, para engañar desde lejos ----
+            this.placeChunkFakeDoors(ch, wallKind, key, curvedCells);
+            // Flechas pintadas en el suelo que apuntan el camino a esas puertas
+            this.placeChunkArrowSigns(ch);
+
+            // ---- SALA DE SEGURIDAD (si este chunk la tiene): puerta de
+            // metal con pila, panel de control y monitor de camaras ----
+            this.buildSecurityRoom(ch);
+
+            // ---- CAMARAS DE SEGURIDAD en las paredes (raras): vigilan al
+            // jugador y su imagen se ve en el monitor de la sala de seguridad ----
+            this.placeChunkCameras(ch, wallKind, key, curvedCells);
+
             // ---- PAREDES INCLINADAS (rectas, en angulo) al final: ya estan
             // todas las cajas de colision de muros y pilares para validar que
-            // cada tabique deja paso libre por ambos lados ----
-            this.placeChunkSlantedWalls(ch);
+            // cada tabique deja paso libre por ambos lados. Tres variantes
+            // integradas en la generacion: esquinas recortadas de salas,
+            // contrafuertes en pasillos y tabiques sueltos en campo abierto ----
+            this.placeChunkSlantedWalls(ch, wallKind, key, curvedCells);
+        }
+
+        // ---- SALA DE SEGURIDAD: construye la puerta de metal (que sube al
+        // techo al abrirse), el panel de control con pantalla de pila y el
+        // monitor de camaras en la pared opuesta. El estado (pila/puerta)
+        // vive en ch.securityRoom.state; game.js lo anima y lo sincroniza.
+        buildSecurityRoom(ch) {
+            const sr = ch.securityRoom;
+            if (!sr) return;
+            const N = CHUNK_SIZE;
+            const C = CELL_SIZE;
+            const ox = ch.cx * N * C;
+            const oz = ch.cz * N * C;
+            const dc = sr.doorX, dz = sr.doorZ;
+            const dcx0 = ox + dc * C, dcz0 = oz + dz * C;
+            // Plano de la puerta: entre la celda de la boca y el interior
+            let plane = 'x', doorX = 0, doorZ = 0;
+            if (dc === sr.rx - 1) { plane = 'x'; doorX = ox + sr.rx * C; doorZ = dcz0 + C / 2; }
+            else if (dc === sr.rx + sr.w) { plane = 'x'; doorX = ox + (sr.rx + sr.w) * C; doorZ = dcz0 + C / 2; }
+            else if (dc === sr.rz - 1) { plane = 'z'; doorX = dcx0 + C / 2; doorZ = oz + sr.rz * C; }
+            else { plane = 'z'; doorX = dcx0 + C / 2; doorZ = oz + (sr.rz + sr.h) * C; }
+
+            const doorModel = createMetalDoorModel();
+            doorModel.position.set(doorX, 0, doorZ);
+            if (plane === 'z') doorModel.rotation.y = Math.PI / 2;
+            this.scene.add(doorModel);
+            ch.meshes.push(doorModel);
+
+            // Panel de control (pantalla de pila) en la pared interior, junto
+            // a la puerta, mirando hacia dentro de la sala
+            const panelCanvas = document.createElement('canvas');
+            panelCanvas.width = 96;
+            panelCanvas.height = 48;
+            const px = panelCanvas.getContext('2d');
+            px.fillStyle = '#0a1408';
+            px.fillRect(0, 0, 96, 48);
+            px.fillStyle = '#9be34a';
+            px.font = 'bold 14px Courier New';
+            px.textAlign = 'center';
+            px.fillText('PILA 100%', 48, 29);
+            const panelTex = new THREE.CanvasTexture(panelCanvas);
+            panelTex.minFilter = THREE.LinearFilter;
+            const panelGroup = new THREE.Group();
+            const panelBox = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 0.1),
+                new THREE.MeshStandardMaterial({ color: 0x33363c, metalness: 0.6, roughness: 0.5 }));
+            const panelScreen = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.19),
+                new THREE.MeshBasicMaterial({ map: panelTex }));
+            panelScreen.position.z = 0.052;
+            panelScreen.position.y = 0.02;
+            panelBox.add(panelScreen);
+            panelGroup.add(panelBox);
+            const py = 1.08;
+            if (dc === sr.rx - 1) { panelGroup.position.set(ox + sr.rx * C + 0.12, py, dcz0 + C / 2); panelGroup.rotation.y = Math.PI / 2; }
+            else if (dc === sr.rx + sr.w) { panelGroup.position.set(ox + (sr.rx + sr.w) * C - 0.12, py, dcz0 + C / 2); panelGroup.rotation.y = -Math.PI / 2; }
+            else if (dc === sr.rz - 1) { panelGroup.position.set(dcx0 + C / 2, py, oz + sr.rz * C + 0.12); panelGroup.rotation.y = Math.PI; }
+            else { panelGroup.position.set(dcx0 + C / 2, py, oz + (sr.rz + sr.h) * C - 0.12); panelGroup.rotation.y = 0; }
+            this.scene.add(panelGroup);
+            ch.meshes.push(panelGroup);
+
+            // Monitor de camaras en la pared opuesta a la puerta
+            const monitor = createMonitorScreenModel();
+            const my = 0.75;
+            if (dc === sr.rx - 1) { monitor.position.set(ox + (sr.rx + sr.w) * C - 0.1, my, dcz0 + C / 2); monitor.rotation.y = -Math.PI / 2; }
+            else if (dc === sr.rx + sr.w) { monitor.position.set(ox + sr.rx * C + 0.1, my, dcz0 + C / 2); monitor.rotation.y = Math.PI / 2; }
+            else if (dc === sr.rz - 1) { monitor.position.set(dcx0 + C / 2, my, oz + (sr.rz + sr.h) * C - 0.1); monitor.rotation.y = 0; }
+            else { monitor.position.set(dcx0 + C / 2, my, oz + sr.rz * C + 0.1); monitor.rotation.y = Math.PI; }
+            this.scene.add(monitor);
+            ch.meshes.push(monitor);
+
+            // Caja de colision de la puerta cerrada (bloquea jugador y entidad)
+            const doorBox = plane === 'x'
+                ? { minX: doorX - 0.06, maxX: doorX + 0.06, minZ: dcz0 - 0.05, maxZ: dcz0 + C + 0.05 }
+                : { minX: dcx0 - 0.05, maxX: dcx0 + C + 0.05, minZ: doorZ - 0.06, maxZ: doorZ + 0.06 };
+
+            sr.id = 'sec:' + ch.cx + ':' + ch.cz + ':' + sr.rx + ':' + sr.rz;
+            sr.doorModel = doorModel;
+            sr.doorGroup = doorModel.userData.door;
+            sr.panelGroup = panelGroup;
+            sr.doorBox = doorBox;
+            sr.doorWorldX = doorX;
+            sr.doorWorldZ = doorZ;
+            sr.panelCanvas = panelCanvas;
+            sr.panelTex = panelTex;
+            sr.monitor = monitor;
+            sr.minX = ox + sr.rx * C;
+            sr.maxX = ox + (sr.rx + sr.w) * C;
+            sr.minZ = oz + sr.rz * C;
+            sr.maxZ = oz + (sr.rz + sr.h) * C;
+            // Al recargar el chunk la malla se reconstruye: la lista se
+            // resetea para no duplicar la sala (el estado vive en sr)
+            if (ch.securityRooms) ch.securityRooms.length = 0;
+            else ch.securityRooms = [];
+            ch.securityRooms.push(sr);
+        }
+
+        // ---- CAMARAS DE SEGURIDAD en las paredes (raras): soporte fijo y
+        // cabeza que game.js gira hacia el jugador cuando lo vigila (LED rojo
+        // encendido). Su imagen se retransmite al monitor de las salas de
+        // seguridad. RNG propio: no altera el resto del mundo.
+        placeChunkCameras(ch, wallKind, key, curvedCells) {
+            const N = CHUNK_SIZE;
+            const C = CELL_SIZE;
+            const rng = mulberry32(hash2(ch.cx * 9001 + 7, ch.cz * 7001 + 313));
+            // Reset al reconstruir el chunk: sin duplicados al recargar
+            ch.cameras = [];
+            if (rng() >= 0.24) return;   // ~1 de cada 4 chunks: raras
+            const g = ch.grid;
+            const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
+            const cands = [];
+            for (let x = 1; x < N - 1; x++) {
+                for (let z = 1; z < N - 1; z++) {
+                    const k = key(x, z);
+                    if (g[x][z] !== 1 || curvedCells.has(k)) continue;
+                    const kind = wallKind.get(k);
+                    if (kind !== 'x' && kind !== 'z') continue;
+                    if (ch.graffitiCells && ch.graffitiCells.has(x + ',' + z)) continue;
+                    const box = ch.wallFaceMap && ch.wallFaceMap.get(k);
+                    if (!box) continue;
+                    for (const [dx, dz, d] of dirs) {
+                        const nx = x + dx, nz = z + dz;
+                        if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
+                        if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        if ((d === 'W' && x === 0) || (d === 'E' && x === N - 1) ||
+                            (d === 'S' && z === 0) || (d === 'N' && z === N - 1)) continue;
+                        const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
+                        if (faceLen < 0.8) continue;
+                        cands.push([x, z, d]);
+                    }
+                }
+            }
+            if (!cands.length) return;
+            const c = cands[Math.floor(rng() * cands.length)];
+            const box = ch.wallFaceMap.get(key(c[0], c[1]));
+            if (!box) return;
+            const m = createSecurityCameraModel();
+            const mx = ch.cx * N * C + (c[0] + 0.5) * C;
+            const mz = ch.cz * N * C + (c[1] + 0.5) * C;
+            const off = 0.022 + 0.1;
+            let ry = 0;
+            if (c[2] === 'W') { m.position.set(box.minX - off, 2.28, mz); ry = -Math.PI / 2; }
+            else if (c[2] === 'E') { m.position.set(box.maxX + off, 2.28, mz); ry = Math.PI / 2; }
+            else if (c[2] === 'S') { m.position.set(mx, 2.28, box.minZ - off); ry = Math.PI; }
+            else { m.position.set(mx, 2.28, box.maxZ + off); ry = 0; }
+            m.rotation.y = ry;
+            this.scene.add(m);
+            ch.meshes.push(m);
+            ch.cameras.push({ group: m, x: m.position.x, z: m.position.z, dir: c[2], baseRy: ry });
         }
 
         // ---- GRAFITI (100 variantes, blanco/negro/rojo) sobre las paredes ----
@@ -1601,6 +2056,7 @@
                 const fk = c[0] + ',' + c[1] + c[2];
                 if (placed.has(fk)) continue;
                 placed.add(fk);
+                (ch.graffitiCells = ch.graffitiCells || new Set()).add(c[0] + ',' + c[1]);
                 const box = ch.wallFaceMap.get(key(c[0], c[1]));
                 if (!box) continue;
                 const color = GRAFFITI_COLORS[Math.floor(rng() * GRAFFITI_COLORS.length)];
@@ -1640,6 +2096,175 @@
                 this.scene.add(m);
                 ch.meshes.push(m);
             }
+        }
+
+        // ---- PUERTAS FALSAS (señuelos) -----------------------------------
+        // Se apoyan en la cara REAL de paredes rectas (wallFaceMap), a escala
+        // de puerta (0,9/1,6 m de ancho x 2,05 m de alto), sencillas o
+        // dobles, entornadas y a veces con grafiti encima: desde lejos parecen
+        // una salida que no existe. RNG propio: no altera el resto del mundo.
+        placeChunkFakeDoors(ch, wallKind, key, curvedCells) {
+            const N = CHUNK_SIZE;
+            const C = CELL_SIZE;
+            const rng = mulberry32(hash2(ch.cx * 6151 + 97, ch.cz * 4051 + 701));
+            const g = ch.grid;
+            const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
+            ch.fakeDoors = [];
+            const doorCells = new Set(ch.doorCells.map(d => d.x + ',' + d.z));
+            const nearDoor = (x, z) => {
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dz = -1; dz <= 1; dz++) {
+                        if (doorCells.has((x + dx) + ',' + (z + dz))) return true;
+                    }
+                }
+                return false;
+            };
+            const candidates = [];
+            for (let x = 1; x < N - 1; x++) {
+                for (let z = 1; z < N - 1; z++) {
+                    const k = key(x, z);
+                    if (g[x][z] !== 1 || curvedCells.has(k)) continue;
+                    const kind = wallKind.get(k);
+                    if (kind !== 'x' && kind !== 'z') continue;   // solo tramos rectos
+                    if (nearDoor(x, z)) continue;                 // nunca junto a una puerta real
+                    if (ch.graffitiCells && ch.graffitiCells.has(x + ',' + z)) continue;
+                    const box = ch.wallFaceMap && ch.wallFaceMap.get(k);
+                    if (!box) continue;
+                    for (const [dx, dz, d] of dirs) {
+                        const nx = x + dx, nz = z + dz;
+                        if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
+                        if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        if (d === 'W' && x === 0) continue;   // caras de borde: las solapa el vecino
+                        if (d === 'E' && x === N - 1) continue;
+                        if (d === 'S' && z === 0) continue;
+                        if (d === 'N' && z === N - 1) continue;
+                        const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
+                        if (faceLen < 1.8) continue;          // sitio para puerta doble + marco
+                        candidates.push([x, z, d]);
+                    }
+                }
+            }
+            if (!candidates.length) return;
+            const placedCells = new Set();
+            let budget = rng() < 0.72 ? 1 : 0;
+            if (rng() < 0.3) budget++;
+            for (let i = 0; i < budget; i++) {
+                if (!candidates.length) break;
+                const ci = Math.floor(rng() * candidates.length);
+                const c = candidates.splice(ci, 1)[0];
+                if (placedCells.has(c[0] + ',' + c[1])) continue;
+                placedCells.add(c[0] + ',' + c[1]);
+                const box = ch.wallFaceMap.get(key(c[0], c[1]));
+                if (!box) continue;
+                const double = rng() < 0.34;
+                const ajar = (rng() - 0.5) * 0.36;
+                const paint = DOOR_PAINTS[Math.floor(rng() * DOOR_PAINTS.length)];
+                let graffitiTex = null;
+                if (rng() < 0.45) {
+                    const color = GRAFFITI_COLORS[Math.floor(rng() * GRAFFITI_COLORS.length)];
+                    const variant = Math.floor(rng() * GRAFFITI_POOL.length);
+                    graffitiTex = graffitiTexture(variant, color);
+                }
+                const mesh = createFakeDoorModel({ double, ajar, paint, graffitiTex });
+                // Centro de la CELDA (parte visible, nunca el alargue enterrado)
+                const mx = ch.cx * N * C + (c[0] + 0.5) * C;
+                const mz = ch.cz * N * C + (c[1] + 0.5) * C;
+                const off = 0.022 + 0.05;   // junta + mitad del marco
+                if (c[2] === 'W') { mesh.position.set(box.minX - off, 0, mz); mesh.rotation.y = -Math.PI / 2; }
+                else if (c[2] === 'E') { mesh.position.set(box.maxX + off, 0, mz); mesh.rotation.y = Math.PI / 2; }
+                else if (c[2] === 'S') { mesh.position.set(mx, 0, box.minZ - off); mesh.rotation.y = Math.PI; }
+                else { mesh.position.set(mx, 0, box.maxZ + off); mesh.rotation.y = 0; }
+                this.scene.add(mesh);
+                ch.meshes.push(mesh);
+                ch.fakeDoors.push({ x: mesh.position.x, z: mesh.position.z });
+            }
+        }
+
+        // Flechas pintadas en el suelo que, desde lejos, apuntan el camino
+        // hacia las puertas falsas (niebla aparte: material basico, brillan
+        // en la oscuridad). Se colocan en celdas abiertas con linea de vision
+        // despejada hasta la puerta, a 8-34 m de ella.
+        placeChunkArrowSigns(ch) {
+            if (!ch.fakeDoors || !ch.fakeDoors.length) return;
+            const C = CELL_SIZE;
+            const N = CHUNK_SIZE;
+            const CS = N * C;
+            const rng = mulberry32(hash2(ch.cx * 3187 + 61, ch.cz * 5233 + 919));
+            for (const door of ch.fakeDoors) {
+                // Candidatas: celdas abiertas de los chunks cercanos
+                const cands = [];
+                const dgx = Math.floor(door.x / CS);
+                const dgz = Math.floor(door.z / CS);
+                for (let gx = dgx - 2; gx <= dgx + 2; gx++) {
+                    for (let gz = dgz - 2; gz <= dgz + 2; gz++) {
+                        const lc = this.chunks.get(gx + ',' + gz);
+                        if (!lc) continue;   // solo chunks cargados (los vecinos quizá no)
+                        const g = lc.grid;
+                        const ox = gx * CS, oz = gz * CS;
+                        for (let x = 0; x < N; x++) {
+                            for (let z = 0; z < N; z++) {
+                                if (g[x][z] !== 0 && g[x][z] !== 2) continue;
+                                const wx = ox + (x + 0.5) * C;
+                                const wz = oz + (z + 0.5) * C;
+                                const dist = Math.hypot(wx - door.x, wz - door.z);
+                                if (dist < 8 || dist > 34) continue;
+                                cands.push([wx, wz]);
+                            }
+                        }
+                    }
+                }
+                if (!cands.length) continue;
+                // Mezcla determinista: misma semilla -> mismas flechas para todos
+                for (let i = cands.length - 1; i > 0; i--) {
+                    const j = Math.floor(rng() * (i + 1));
+                    [cands[i], cands[j]] = [cands[j], cands[i]];
+                }
+                let placed = 0;
+                for (const [wx, wz] of cands) {
+                    if (placed >= 3) break;
+                    if (!this.lineClear(wx, wz, door.x, door.z)) continue;
+                    const dx = door.x - wx, dz = door.z - wz;
+                    const mesh = new THREE.Mesh(
+                        new THREE.PlaneGeometry(1.05, 0.58),
+                        new THREE.MeshBasicMaterial({ map: arrowTexture(), transparent: true, depthWrite: false })
+                    );
+                    mesh.position.set(wx, 0.02, wz);
+                    mesh.rotation.set(-Math.PI / 2, 0, 0);
+                    mesh.rotation.y = Math.atan2(-dx, -dz);
+                    this.scene.add(mesh);
+                    const own = this.chunks.get(Math.floor(wx / CS) + ',' + Math.floor(wz / CS));
+                    (own || ch).meshes.push(mesh);
+                    placed++;
+                }
+            }
+        }
+
+        // Linea de vision 2D entre dos puntos del mundo (misma semilla ->
+        // mismo resultado): camina la linea y descarta si cruza un muro.
+        // IMPORTANTE: se muestrea hasta 2,4 m ANTES del destino, porque la
+        // celda de muro donde se apoya la puerta es maciza y el ultimo tramo
+        // de la linea no debe entrar en ella (si no, toda linea fallaria).
+        lineClear(ax, az, bx, bz) {
+            const C = CELL_SIZE;
+            const N = CHUNK_SIZE;
+            const CS = N * C;
+            const dist = Math.hypot(bx - ax, bz - az);
+            const stop = Math.max(0, dist - 2.4);
+            const n = Math.max(1, Math.ceil(stop / 1.2));
+            for (let i = 1; i <= n; i++) {
+                const t = (i / n) * (stop / dist);
+                const sx = ax + (bx - ax) * t;
+                const sz = az + (bz - az) * t;
+                const gx = Math.floor(sx / CS);
+                const gz = Math.floor(sz / CS);
+                const lc = this.getLayout(gx, gz);
+                const cx = Math.floor((sx - gx * CS) / C);
+                const cz = Math.floor((sz - gz * CS) / C);
+                if (cx < 0 || cx >= N || cz < 0 || cz >= N) continue;
+                const v = lc.grid[cx][cz];
+                if (v === 1 || v === 3) return false;
+            }
+            return true;
         }
 
         // Elige (de vez en cuando) UN tramo recto interior para convertirlo
@@ -1784,15 +2409,19 @@
                 }
             }
             const alongU = (sweep1 - sweep0) / C;   // textura ~1 vez por celda
+            // 2 cm de aire arriba y abajo (igual que los tabiques inclinados):
+            // las tapas del suelo/techo de la pared curva quedaban coplanares
+            // con el suelo y el techo y producian z-fighting
+            const y0 = 0.02, y1 = WALL_HEIGHT - 0.02;
             for (let i = 0; i < n; i++) {
                 const A = edges[i], Bb = edges[i + 1];
                 const u0 = (i / n) * alongU, u1 = ((i + 1) / n) * alongU;
                 // Laterales (+T/2 y -T/2)
-                const a = vert(A[1][0], 0, A[1][1], u0, 0), b = vert(Bb[1][0], 0, Bb[1][1], u1, 0);
-                const c = vert(Bb[1][0], H, Bb[1][1], u1, H / C), d = vert(A[1][0], H, A[1][1], u0, H / C);
+                const a = vert(A[1][0], y0, A[1][1], u0, 0), b = vert(Bb[1][0], y0, Bb[1][1], u1, 0);
+                const c = vert(Bb[1][0], y1, Bb[1][1], u1, H / C), d = vert(A[1][0], y1, A[1][1], u0, H / C);
                 quad(a, b, c, d);
-                const e = vert(A[0][0], 0, A[0][1], u0, 0), f = vert(Bb[0][0], 0, Bb[0][1], u1, 0);
-                const gg = vert(Bb[0][0], H, Bb[0][1], u1, H / C), h = vert(A[0][0], H, A[0][1], u0, H / C);
+                const e = vert(A[0][0], y0, A[0][1], u0, 0), f = vert(Bb[0][0], y0, Bb[0][1], u1, 0);
+                const gg = vert(Bb[0][0], y1, Bb[0][1], u1, H / C), h = vert(A[0][0], y1, A[0][1], u0, H / C);
                 quad(h, gg, f, e);
                 // Techo y suelo
                 quad(d, c, gg, h);
@@ -1801,12 +2430,12 @@
             // Tapas de los extremos, enrasadas con las paredes rectas vecinas
             {
                 const A = edges[0];
-                const a = vert(A[0][0], 0, A[0][1], 0, 0), b = vert(A[1][0], 0, A[1][1], T / C, 0);
-                const c = vert(A[1][0], H, A[1][1], T / C, H / C), d = vert(A[0][0], H, A[0][1], 0, H / C);
+                const a = vert(A[0][0], y0, A[0][1], 0, 0), b = vert(A[1][0], y0, A[1][1], T / C, 0);
+                const c = vert(A[1][0], y1, A[1][1], T / C, H / C), d = vert(A[0][0], y1, A[0][1], 0, H / C);
                 quad(a, b, c, d);
                 const E = edges[n];
-                const e = vert(E[0][0], 0, E[0][1], 0, 0), f = vert(E[1][0], 0, E[1][1], T / C, 0);
-                const gg = vert(E[1][0], H, E[1][1], T / C, H / C), h = vert(E[0][0], H, E[0][1], 0, H / C);
+                const e = vert(E[0][0], y0, E[0][1], 0, 0), f = vert(E[1][0], y0, E[1][1], T / C, 0);
+                const gg = vert(E[1][0], y1, E[1][1], T / C, H / C), h = vert(E[0][0], y1, E[0][1], 0, H / C);
                 quad(f, e, h, gg);
             }
 
@@ -1881,7 +2510,7 @@
             ].map(([lx, lz]) => ({ x: cx + lx * cos + lz * sin, z: cz - lx * sin + lz * cos }));
         }
 
-        placeChunkSlantedWalls(ch) {
+        placeChunkSlantedWalls(ch, wallKind, key, curvedCells) {
             const rng = mulberry32(hash2(ch.cx * 65407 + 89, ch.cz * 65407 + 137));
             const N = CHUNK_SIZE, C = CELL_SIZE;
             const g = ch.grid;
@@ -1889,7 +2518,18 @@
             const oz = ch.cz * N * C;
             const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
 
-            // Celdas candidatas: interiores (nunca en vanos de borde), abiertas
+            // 1) ESQUINAS RECORTADAS: en salas y salones medianos/grandes, una
+            // pared inclinada a 45 grados corta la esquina (apoyada en las
+            // caras reales de los muros, con bolsillo sellado detras)
+            this.placeChunkChamfers(ch, rng, wallKind, key, curvedCells);
+
+            // 2) CONTRAFUERTES: en chunks de pasillos, tabiques que NACEN de
+            // una pared y se clavan en el pasillo en angulo (paso garantizado)
+            if (ch.rooms.length === 0 && rng() < 0.6) {
+                this.placeChunkBraces(ch, rng, wallKind, key, curvedCells);
+            }
+
+            // 3) TABIQUES SUELTOS en campo abierto: celdas interiores, abiertas
             // y con los 4 vecinos abiertos (campo libre alrededor del centro)
             const cands = [];
             for (let x = 3; x < N - 3; x++) {
@@ -1912,9 +2552,11 @@
                 n = 1;
             }
 
-            const placed = [];
+            // Los tabiques sueltos compiten con los contrafuertes/esquinas ya
+            // colocados: el presupuesto es para TODOS los inclinados del chunk
+            let placed = ch.slantedAABBs.length;
             for (const [cx2, cz2] of cands) {
-                if (placed.length >= n) break;
+                if (placed >= n) break;
                 const wx = ox + (cx2 + 0.5) * C;
                 const wz = oz + (cz2 + 0.5) * C;
                 const shape = rng() < 0.45 ? 'trap' : 'rect';
@@ -1940,7 +2582,7 @@
                         aabb.minZ - M < b.maxZ && aabb.maxZ + M > b.minZ) { ok = false; break; }
                 }
                 if (ok) {
-                    for (const s of placed) {
+                    for (const s of ch.slantedAABBs) {
                         if (aabb.minX - 0.8 < s.maxX && aabb.maxX + 0.8 > s.minX &&
                             aabb.minZ - 0.8 < s.maxZ && aabb.maxZ + 0.8 > s.minZ) { ok = false; break; }
                     }
@@ -1948,15 +2590,247 @@
                 if (!ok) continue;
 
                 const built = this.buildSlantedWall(ch, wx, wz, ang, L, T0, T1, shape);
-                placed.push(aabb);
                 ch.slantedAABBs.push(aabb);
                 ch.wallBoxes.push(...built.boxes);
                 ch.meshes.push(built.mesh);
+                placed++;
+            }
+        }
+
+        // ---- ESQUINAS RECORTADAS (chamfers) ------------------------------
+        // En vez de una esquina cuadrada de sala, una pared a 45 grados une
+        // las dos caras del muro y deja un bolsillo triangular sellado detras
+        // (como el boceto: la esquina queda cortada). Se apoya en la cara REAL
+        // del poste de la esquina (wallFaceMap) y se valida que las paredes
+        // contiguas sean macizas (sin puertas ni tramos curvos): si no, la
+        // esquina no quedaria sellada y el bolsillo seria un callejon.
+        tryChamfer(ch, rng, cxx, czz, sx, sz, roomMin, wallKind, key, curvedCells, placedAABBs) {
+            const C = CELL_SIZE;
+            const N = CHUNK_SIZE;
+            const g = ch.grid;
+            const ox = ch.cx * N * C;
+            const oz = ch.cz * N * C;
+            if (cxx < 1 || cxx > N - 2 || czz < 1 || czz > N - 2) return null;
+            const ck = wallKind.get(key(cxx, czz));
+            // Solo esquinas que forman un angulo recto REAL: un poste enrasado
+            // o una celda maciza RECORTADA (cuyas laminas caen en el mismo
+            // plano que las paredes contiguas). El chequeo de enrasado usa las
+            // cajas REALES de las celdas contiguas: si la esquina sobresale o
+            // la pared es curva/puerta, no se recorta.
+            if (g[cxx][czz] !== 1 || (ck !== 'post' && ck !== 'interior')) return null;
+            const box = ch.wallFaceMap.get(key(cxx, czz));
+            if (!box) return null;
+            // Punto interior de la esquina (la cara REAL) y distancia del
+            // corte a lo largo de cada cara
+            const boxA = ch.wallFaceMap.get(key(cxx, czz + sz));
+            const boxB = ch.wallFaceMap.get(key(cxx + sx, czz));
+            if (!boxA || !boxB) return null;
+            const faceAx = sx === 1 ? boxA.maxX : boxA.minX;
+            const faceBz = sz === 1 ? boxB.maxZ : boxB.minZ;
+            // Enrasado medido: la cara REAL de la celda de la esquina (la
+            // lamina A de las esquinas recortadas) debe caer en el MISMO plano
+            // que la pared contigua. La cara Z de las recortadas queda enrasada
+            // por construccion (misma formula que la pared B). Si la esquina
+            // sobresale (bloque sin recortar o poste), el tabique flotaria o
+            // quedaria enterrado y se descarta.
+            const P0x = sx === 1 ? box.maxX : box.minX;
+            if (Math.abs(faceAx - P0x) > 0.11) return null;
+            const P0z = faceBz;
+            const d = Math.min(2.2 + rng() * 2.4, roomMin * 0.42);
+            // Las paredes a lo largo de las dos caras (desde la esquina hasta
+            // el corte) deben ser muro macizo: sin puertas ni tramos curvos
+            const kCells = Math.max(1, Math.ceil(d / C));
+            for (let i = 1; i <= kCells; i++) {
+                const ka = key(cxx, czz + sz * i);
+                const kb = key(cxx + sx * i, czz);
+                if (g[cxx][czz + sz * i] !== 1 || curvedCells.has(ka)) return null;
+                if (g[cxx + sx * i][czz] !== 1 || curvedCells.has(kb)) return null;
+            }
+            const T = 0.4 + rng() * 0.2;
+            const L = d * Math.SQRT2;
+            const ang = Math.atan2(-sx, sz);
+            // El eje del tabique va a T/2 hacia la esquina: el lado visible
+            // queda exactamente en la linea que une los dos puntos de las caras
+            const off = T / (2 * Math.SQRT2);
+            const cx = P0x + sx * (d / 2 - off);
+            const cz = P0z + sz * (d / 2 - off);
+            const pts = this.slabCorners(cx, cz, ang, L, T, T);
+            const aabb = {
+                minX: Math.min(...pts.map(p => p.x)), maxX: Math.max(...pts.map(p => p.x)),
+                minZ: Math.min(...pts.map(p => p.z)), maxZ: Math.max(...pts.map(p => p.z))
+            };
+            // Sin pilares cerca, sin puertas ni otras esquinas recortadas
+            for (let x = Math.floor((aabb.minX - 0.6 - ox) / C); x <= Math.floor((aabb.maxX + 0.6 - ox) / C); x++) {
+                for (let z = Math.floor((aabb.minZ - 0.6 - oz) / C); z <= Math.floor((aabb.maxZ + 0.6 - oz) / C); z++) {
+                    if (x >= 0 && x < N && z >= 0 && z < N && g[x][z] === 3) return null;
+                }
+            }
+            for (const b of placedAABBs) {
+                if (aabb.minX - 0.8 < b.maxX && aabb.maxX + 0.8 > b.minX &&
+                    aabb.minZ - 0.8 < b.maxZ && aabb.maxZ + 0.8 > b.minZ) return null;
+            }
+            for (const dc of ch.doorCells) {
+                const dwx = ox + (dc.x + 0.5) * C, dwz = oz + (dc.z + 0.5) * C;
+                if (dwx > aabb.minX - 1.2 && dwx < aabb.maxX + 1.2 &&
+                    dwz > aabb.minZ - 1.2 && dwz < aabb.maxZ + 1.2) return null;
+            }
+            const built = this.buildSlantedWall(ch, cx, cz, ang, L, T, T, 'rect');
+            return { mesh: built.mesh, boxes: built.boxes, aabb };
+        }
+
+        placeChunkChamfers(ch, rng, wallKind, key, curvedCells) {
+            const C = CELL_SIZE;
+            const rooms = ch.rooms.filter(r => r.w >= 4 && r.h >= 4);
+            if (!rooms.length) return;
+            for (let i = rooms.length - 1; i > 0; i--) {
+                const j = Math.floor(rng() * (i + 1));
+                [rooms[i], rooms[j]] = [rooms[j], rooms[i]];
+            }
+            const placedAABBs = [];
+            let budget = 1 + (rng() < 0.45 ? 1 : 0) + (rng() < 0.15 ? 1 : 0);
+            for (const room of rooms) {
+                if (budget <= 0) break;
+                const corners = [
+                    { cxx: room.x - 1, czz: room.z - 1, sx: 1, sz: 1 },
+                    { cxx: room.x + room.w, czz: room.z - 1, sx: -1, sz: 1 },
+                    { cxx: room.x - 1, czz: room.z + room.h, sx: 1, sz: -1 },
+                    { cxx: room.x + room.w, czz: room.z + room.h, sx: -1, sz: -1 }
+                ];
+                for (let i = corners.length - 1; i > 0; i--) {
+                    const j = Math.floor(rng() * (i + 1));
+                    [corners[i], corners[j]] = [corners[j], corners[i]];
+                }
+                const roomMin = Math.min(room.w, room.h) * C;
+                for (const c of corners) {
+                    if (budget <= 0) break;
+                    const r = this.tryChamfer(ch, rng, c.cxx, c.czz, c.sx, c.sz, roomMin, wallKind, key, curvedCells, placedAABBs);
+                    if (!r) continue;
+                    placedAABBs.push(r.aabb);
+                    ch.slantedAABBs.push(r.aabb);
+                    ch.wallBoxes.push(...r.boxes);
+                    ch.meshes.push(r.mesh);
+                    budget--;
+                }
+            }
+        }
+
+        // ---- CONTRAFUERTES DE PASAJILLOS (braces) ------------------------
+        // Un tabique que NACE de una pared recta del pasillo (arranque
+        // enterrado en el muro: la tapa queda oculta y el nacimiento queda
+        // enrasado con la cara) y se clava en el pasillo en angulo. Deja paso
+        // garantizado de ~1 m por el lado libre (margen contra las cajas de
+        // colision de muros, pilares y otros tabiques).
+        tryBrace(ch, rng, wx, wz, side, wallKind, key, curvedCells, placedAABBs) {
+            const C = CELL_SIZE;
+            const N = CHUNK_SIZE;
+            const g = ch.grid;
+            const ox = ch.cx * N * C;
+            const oz = ch.cz * N * C;
+            const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
+            const k = key(wx, wz);
+            const kind = wallKind.get(k);
+            if (kind !== 'x' && kind !== 'z') return null;
+            if (curvedCells.has(k)) return null;
+            // La pared 'x' corre a lo largo de Z (caras en +/-X); la 'z' al
+            // reves. El pasillo debe estar al lado pedido y tener >= 2 celdas
+            if (side === 'E' || side === 'W') {
+                if (kind !== 'x') return null;
+                const dx = side === 'E' ? 1 : -1;
+                if (!open(wx + dx, wz) || !open(wx + 2 * dx, wz)) return null;
+                if (!open(wx + dx, wz - 1) && !open(wx + dx, wz + 1)) return null;
+            } else {
+                if (kind !== 'z') return null;
+                const dz = side === 'N' ? 1 : -1;
+                if (!open(wx, wz + dz) || !open(wx, wz + 2 * dz)) return null;
+                if (!open(wx - 1, wz + dz) && !open(wx + 1, wz + dz)) return null;
+            }
+            const box = ch.wallFaceMap.get(k);
+            if (!box) return null;
+            const xc = (box.minX + box.maxX) / 2;
+            const zc = (box.minZ + box.maxZ) / 2;
+            // Punto de arranque sobre la cara REAL del muro, normal hacia el
+            // pasillo y tangente a lo largo del muro
+            let S, n, t;
+            if (side === 'E') { S = { x: box.maxX, z: zc }; n = { x: 1, z: 0 }; t = { x: 0, z: 1 }; }
+            else if (side === 'W') { S = { x: box.minX, z: zc }; n = { x: -1, z: 0 }; t = { x: 0, z: 1 }; }
+            else if (side === 'N') { S = { x: xc, z: box.maxZ }; n = { x: 0, z: 1 }; t = { x: 1, z: 0 }; }
+            else { S = { x: xc, z: box.minZ }; n = { x: 0, z: -1 }; t = { x: 1, z: 0 }; }
+            // Angulo ~35-60 grados respecto a la pared: el contrafuerte se ve
+            // clavado en el pasillo sin llegar a cruzarlo
+            const th = (rng() < 0.5 ? -1 : 1) * (0.6 + rng() * 0.5);
+            const u = { x: n.x * Math.cos(th) + t.x * Math.sin(th), z: n.z * Math.cos(th) + t.z * Math.sin(th) };
+            const L = 1.5 + rng() * 1.5;
+            const T = 0.35 + rng() * 0.2;
+            const ang = Math.atan2(u.x, u.z);
+            // Eje: arranca enterrado T/2 dentro del muro y se prolonga L hacia
+            // el pasillo (el centro de la malla va a L/2 del arranque)
+            const cx = S.x - n.x * (T / 2) + u.x * (L / 2);
+            const cz = S.z - n.z * (T / 2) + u.z * (L / 2);
+            const pts = this.slabCorners(cx, cz, ang, L, T, T);
+            const aabb = {
+                minX: Math.min(...pts.map(p => p.x)), maxX: Math.max(...pts.map(p => p.x)),
+                minZ: Math.min(...pts.map(p => p.z)), maxZ: Math.max(...pts.map(p => p.z))
+            };
+            // Paso libre: ~1 m alrededor del tabique. Se excluyen del chequeo
+            // las cajas que quedan DETRAS de la cara del muro (el muro al que
+            // se pega y todo lo que hay tras el): el pasillo no pasa por ahi.
+            const M = 1.0;
+            const behind = side === 'E' ? b => b.maxX <= S.x + 0.05
+                : side === 'W' ? b => b.minX >= S.x - 0.05
+                : side === 'N' ? b => b.maxZ <= S.z + 0.05
+                : b => b.minZ >= S.z - 0.05;
+            for (const b of ch.wallBoxes) {
+                if (behind(b)) continue;
+                if (aabb.minX - M < b.maxX && aabb.maxX + M > b.minX &&
+                    aabb.minZ - M < b.maxZ && aabb.maxZ + M > b.minZ) return null;
+            }
+            for (const s of placedAABBs) {
+                if (aabb.minX - 0.8 < s.maxX && aabb.maxX + 0.8 > s.minX &&
+                    aabb.minZ - 0.8 < s.maxZ && aabb.maxZ + 0.8 > s.minZ) return null;
+            }
+            for (const dc of ch.doorCells) {
+                const dwx = ox + (dc.x + 0.5) * C, dwz = oz + (dc.z + 0.5) * C;
+                if (dwx > aabb.minX - 1.5 && dwx < aabb.maxX + 1.5 &&
+                    dwz > aabb.minZ - 1.5 && dwz < aabb.maxZ + 1.5) return null;
+            }
+            const built = this.buildSlantedWall(ch, cx, cz, ang, L, T, T, 'rect');
+            return { mesh: built.mesh, boxes: built.boxes, aabb };
+        }
+
+        placeChunkBraces(ch, rng, wallKind, key, curvedCells) {
+            const N = CHUNK_SIZE;
+            const g = ch.grid;
+            const cands = [];
+            for (let x = 2; x < N - 2; x++) {
+                for (let z = 2; z < N - 2; z++) {
+                    if (g[x][z] !== 1) continue;
+                    if (ch.doorCells.some(d => Math.abs(d.x - x) <= 1 && Math.abs(d.z - z) <= 1)) continue;
+                    for (const side of ['E', 'W', 'N', 'S']) cands.push([x, z, side]);
+                }
+            }
+            for (let i = cands.length - 1; i > 0; i--) {
+                const j = Math.floor(rng() * (i + 1));
+                [cands[i], cands[j]] = [cands[j], cands[i]];
+            }
+            const placedAABBs = [];
+            let budget = 1 + (rng() < 0.3 ? 1 : 0);
+            for (const [wx, wz, side] of cands) {
+                if (budget <= 0) break;
+                const r = this.tryBrace(ch, rng, wx, wz, side, wallKind, key, curvedCells, placedAABBs);
+                if (!r) continue;
+                placedAABBs.push(r.aabb);
+                ch.slantedAABBs.push(r.aabb);
+                ch.wallBoxes.push(...r.boxes);
+                ch.meshes.push(r.mesh);
+                budget--;
             }
         }
 
         buildSlantedWall(ch, cx, cz, ang, L, T0, T1, shape) {
-            const H = WALL_HEIGHT;
+            // 2 cm de aire arriba y abajo: las tapas del tabique no tocan el
+            // plano del suelo ni del techo (antes quedaban COPLANARES y las
+            // dos superficies peleaban -> z-fighting en las paredes nuevas)
+            const H = WALL_HEIGHT - 0.04;
             const cos = Math.cos(ang), sin = Math.sin(ang);
             const half = L / 2;
 
@@ -1990,7 +2864,10 @@
                 geo = this.trapezoidGeometry(L, H, T0, T1);
             }
             const mat = Materials.wall.clone();
-            mat.side = THREE.DoubleSide;
+            // Cara simple: las geometrias tienen el cierre correcto (BoxGeometry
+            // y trapezoidGeometry con normales hacia fuera). DoubleSide pintaba
+            // cada cara dos veces y dejaba artefactos al mirar los bordes.
+            mat.side = THREE.FrontSide;
             const mesh = new THREE.Mesh(geo, mat);
             mesh.position.set(cx, H / 2, cz);
             mesh.rotation.y = ang;
@@ -2550,6 +3427,15 @@
 
         buildPickupMesh(p) {
             let mesh;
+            if (p.drawerGroup) {
+                // Objeto de cajon: NACE dentro del hueco de la bandeja (no en
+                // el suelo) y se desliza con el cajon al abrirlo.
+                mesh = this.buildPickupShape(p);
+                p.drawerGroup.add(mesh);
+                mesh.position.set(0, -0.05, 0);
+                mesh.rotation.set(0, 0, 0);
+                return mesh;
+            }
             if (p.type === 'camera') {
                 mesh = ModelBuilder.createCameraModel();
                 mesh.rotation.z = Math.PI / 2;
@@ -2589,6 +3475,29 @@
             }
             this.scene.add(mesh);
             return mesh;
+        }
+
+        // Construye SOLO la malla del pickup (sin posicionar en la escena):
+        // el cajon la coloca dentro de su hueco (buildPickupMesh lo re-parenta
+        // si p.drawerGroup esta presente).
+        buildPickupShape(p) {
+            let mesh;
+            if (p.type === 'camera') {
+                mesh = ModelBuilder.createCameraModel();
+                mesh.rotation.z = Math.PI / 2;
+            } else if (p.type === 'chalk') {
+                mesh = ModelBuilder.createChalkBox(p.color);
+            } else if (p.type === 'almond') {
+                mesh = ModelBuilder.createAlmondWater();
+                mesh.rotation.z = Math.PI / 2;
+            } else if (p.type === 'battery') {
+                mesh = ModelBuilder.createBattery();
+                mesh.rotation.z = Math.PI / 2;
+                mesh.rotation.x = (Math.random() - 0.5) * 0.4;
+            } else if (p.type === 'note') {
+                mesh = ModelBuilder.createFloorNote();
+            }
+            return mesh || new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1));
         }
 
         spawnChunkPickups(ch) {
@@ -2682,33 +3591,31 @@
             }
         }
 
-        // Objeto que sale de un CAJON abierto: se materializa como pickup
-        // normal y se guarda en el chunk de la mesa (persiste al descargar).
-        // El id deriva de la posicion determinista de la mesa, asi si otro
-        // jugador abre el MISMO cajon y ya se reclamo, nace recogido.
+        // Objeto escondido en un CAJON abierto: se materializa DENTRO del
+        // hueco de la bandeja y se desliza con el cajon (es hijo suyo), de
+        // modo que NUNCA cae al suelo: queda visible reposando en el cajon
+        // abierto. El id deriva de la posicion determinista de la mesa, asi
+        // si otro jugador abre el MISMO cajon y ya se reclamo, nace recogido.
         spawnDrawerPickup(deskGroup, d) {
             if (!d || !d.itemType) return null;
             const id = 'dr:' + Math.round(deskGroup.position.x * 10) + ':' + Math.round(deskGroup.position.z * 10);
             if (this.claimedPickupIds.has(id)) return null;
-            // Posicion: delante del cajon abierto (local +Z del escritorio)
-            deskGroup.updateMatrixWorld(true);
-            const local = new THREE.Vector3(0.46, 0.02, 0.62);
-            const wp = local.applyMatrix4(deskGroup.matrixWorld);
             const data = {
                 id,
                 type: d.itemType,
-                x: wp.x,
-                z: wp.z,
+                x: deskGroup.position.x,
+                z: deskGroup.position.z,
                 collected: false,
                 mesh: null,
-                pos: new THREE.Vector3(wp.x, 0, wp.z)
+                pos: null,
+                drawerGroup: d.mesh   // el objeto vive DENTRO del cajon
             };
             if (d.itemType === 'chalk') { data.color = d.chalk.color; data.colorName = d.chalk.colorName; }
             if (d.itemType === 'note') { data.noteIndex = d.noteIndex; data.text = NOTE_POOL[d.noteIndex]; }
             this.pickupById.set(data.id, data);
             this.pickupData.push(data);
-            const ccx = Math.floor(wp.x / (CHUNK_SIZE * CELL_SIZE));
-            const ccz = Math.floor(wp.z / (CHUNK_SIZE * CELL_SIZE));
+            const ccx = Math.floor(deskGroup.position.x / (CHUNK_SIZE * CELL_SIZE));
+            const ccz = Math.floor(deskGroup.position.z / (CHUNK_SIZE * CELL_SIZE));
             const ch = this.chunks.get(ccx + ',' + ccz);
             if (ch) ch.pickupList.push(data);
             data.mesh = this.buildPickupMesh(data);
@@ -2726,7 +3633,7 @@
             if (!p || p.collected) return;
             p.collected = true;
             if (p.mesh) {
-                this.scene.remove(p.mesh);
+                (p.mesh.parent || this.scene).remove(p.mesh);
                 p.mesh = null;
             }
             this.rebuildUnions();

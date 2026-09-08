@@ -31,9 +31,9 @@ Juego de terror procedural estilo Backrooms en el navegador (Three.js).
 
 ## Versión
 
-La versión actual (`v1.2.0`) se muestra en el menú principal y en el HUD. Al hacer cambios:
+La versión actual (`v1.5.0`) se muestra en el menú principal y en el HUD. Al hacer cambios:
 
-1. Sube `GAME_VERSION` en `js/game.js` (p. ej. `1.2.0`).
+1. Sube `GAME_VERSION` en `js/game.js` (p. ej. `1.5.0`).
 2. Actualiza el `?v=...` de los `<script>`/`<link>` de `index.html` al mismo número (así el navegador descarta la caché vieja y los jugadores ven la versión nueva sin Ctrl+F5).
 3. Regenera `backrooms-single-file.html` embebiendo los `js/` actualizados (los `<script>` inline se generan a partir de `js/`).
 
@@ -47,5 +47,17 @@ Abre el juego desde el móvil y se activan los controles táctiles automáticame
 
 - **Mitad izquierda de la pantalla**: joystick virtual para moverse.
 - **Resto de la pantalla**: arrastra para mirar; un toque rápido dispara la cámara (si la llevas equipada) o interactúa con lo que apunte la mira.
-- **Botones en pantalla**: 🔦 linterna, 📓 cuaderno, **E** interactuar, 🏃 correr (mantener pulsado) y ✏️ dibujar con la tiza (mantener pulsado y arrastrar con el otro dedo).
+- **Botones en pantalla**: 🔦 linterna, 📓 cuaderno, 🗺️ mapa, **E** interactuar, 🏃 correr (mantener pulsado) y ✏️ dibujar con la tiza (mantener pulsado y arrastrar con el otro dedo).
 - Las ranuras del cinturón (tiza/cámara/agua/cuaderno) se tocan directamente.
+- **Mapa compartido**: el botón 🗺️ (o tecla **M**) abre el mapa del backroom, que se desbloquea al explorar y es **compartido con la sala**: lo que ve cualquier jugador lo veis todos (niebla de guerra sincronizada por MQTT). Arrastra para moverte, botones −/+ para zoom y 🎯 para centrarte en ti.
+- Coordenadas, semilla de sala y batería de la linterna son visibles en el HUD móvil.
+
+## Detalles de mundo
+
+- **Cajones reales**: las mesas tienen un pedestal con un cajón hueco que se abre con **[E]**; a veces esconde un objeto que queda **dentro del cajón** (se desliza con él, nunca cae al suelo) y es reclamable por red como cualquier pickup.
+- **Puertas falsas (señuelos)**: a escala real (0,9 m sencillas, 1,6 m dobles, 2,05 m de alto), pegadas a las paredes, a veces entornadas o con grafiti: desde lejos parecen una salida que no existe. Deterministas por semilla.
+- **Flechas del suelo**: chevrones brillantes que apuntan el camino hacia esas puertas falsas desde 8-34 m de distancia, con línea de visión despejada (nunca apuntan a través de un muro).
+- **Salas de seguridad (FNAF)**: refugios raros (~1 de cada 24 chunks) con UNA puerta de metal que sube al techo, alimentada por pilas (se gasta con la puerta cerrada; [E] la abre/cierra y recarga con pilas de repuesto) y un monitor que retransmite en vivo las cámaras de seguridad generadas. Con la puerta cerrada la Entidad no puede verte ni alcanzarte. El estado de la puerta se comparte con la sala.
+- **Cámaras de seguridad**: raras, montadas en las paredes; giran la cabeza y encienden su LED rojo cuando te vigilan, y su imagen se ve en el monitor de las salas de seguridad.
+- **Pilas almacenables**: mantén **[I]** para recargar la linterna con las pilas de repuesto guardadas; úsalas también para dar energía a las puertas de metal.
+- **Callejones sin salida variados**: rectos, en L, anchos, con alcoba lateral o con habitación muerta al fondo (a veces con un pilar que obliga a rodearlo).

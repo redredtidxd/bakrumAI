@@ -10,7 +10,7 @@
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.2.0';
+    const GAME_VERSION = '1.5.0';
 
     class BackroomsGame {
         constructor() {
@@ -125,9 +125,42 @@
             // dibujos visibles para toda la sala
             this.net.worldSync = this.worldSystem;
             this.net.onChalkDot = (pt, n, c) => this.chalkSystem.addDot(pt, n, c);
+            // Mapa compartido: publico lo que exploro y fusiono lo de los demas
+            this.net.mapChunksRef = this.exploredChunks;
+            this.net.onMapData = (chunks) => this.mergeMapData(chunks);
+            // Puertas de metal de las salas de seguridad: el estado abierto/
+            // cerrado se comparte con la sala (la pila es de cada jugador)
+            this.doorStates = new Map();   // id -> abierto?
+            this.net.onDoorData = (d) => {
+                // Se guarda SIEMPRE (aunque la sala no este cargada: se aplica
+                // al cargar el chunk); y si esta cargada, se aplica ya
+                this.doorStates.set(d.id, !!d.o);
+                const r = this.findSecurityRoomById(d.id);
+                if (r && r.state.doorOpen !== !!d.o) {
+                    r.state.doorOpen = !!d.o;
+                    this.worldSystem.rebuildUnions();
+                }
+            };
+            this._feedTimer = 0;
+            this._feedIdx = 0;
+            this._feedRT = null;
+            this._feedCam = null;
+            this._noSignalTex = null;
+            this._panelTimer = 0;
+            this._iRechargeAcc = 0;
 
             window.addEventListener('beforeunload', () => this.net.leave());
             window.addEventListener('pagehide', () => this.net.leave());
+
+            // Mapa del backroom: se desbloquea al explorar y se comparte con
+            // la sala (bitsets de celdas por chunk, sync por MQTT)
+            this.exploredChunks = new Map();   // "gx,gz" -> Uint8Array(32) (256 bits)
+            this.mapDirty = false;
+            this.mapOpen = false;
+            this.mapView = { x: 0, z: 0, zoom: 9 };   // centro (mundo) + px por celda
+            this._mapTick = 0;
+            this._mapPubTick = 0;
+            this._mapRedrawTick = 0;
 
             // Muebles con física: visibles y asentados desde el inicio (cero
             // flotación); se sincronizan tambien al cargar chunks nuevos
@@ -152,7 +185,7 @@
             this.initNoiseCanvas();
             this.initUI();
             const notesLabel = document.getElementById('notes-count-label');
-            if (notesLabel) notesLabel.textContent = `0 / ${this.inventory.totalNotes} NOTAS`;
+            if (notesLabel) notesLabel.textContent = `NOTAS: 0 / ${this.inventory.totalNotes}`;
             this.updateFlashlightHUD();
 
             setTimeout(() => {
@@ -250,6 +283,18 @@
                 lab.textContent = `${pct}%` + (this.inventory.batteries > 0 ? ` +${this.inventory.batteries}` : '');
                 lab.style.color = pct <= 0 ? '#d15b4a' : '#b7a97c';
             }
+            // Pildora de pila compacta (movil): misma bateria, mini barra
+            const fillM = document.getElementById('battery-fill-mobile');
+            const labM = document.getElementById('battery-label-mobile');
+            if (fillM) {
+                fillM.style.width = `${pct}%`;
+                fillM.style.background = pct <= 0 ? '#7a2c22' : (pct < 25 ? '#c98d2b' : '#a8c247');
+                fillM.style.animation = (this.flashlightOn && pct < 25) ? 'blink 0.7s infinite' : 'none';
+            }
+            if (labM) {
+                labM.textContent = `${pct}%` + (this.inventory.batteries > 0 ? ` +${this.inventory.batteries}` : '');
+                labM.style.color = pct <= 0 ? '#d15b4a' : '#b7a97c';
+            }
         }
 
         setupRandomSpawn() {
@@ -311,6 +356,7 @@
                 if (e.code === 'Digit3') this.selectSlot(3);
                 if (e.code === 'KeyE') this.handleInteraction();
                 if (e.code === 'KeyN') this.toggleNotebook();
+                if (e.code === 'KeyM') this.toggleMap();
             });
 
             document.addEventListener('keyup', (e) => {
@@ -371,11 +417,15 @@
 
             document.addEventListener('touchstart', (e) => {
                 if (!this.gameActive) return;
+                // IMPORTANTE: solo se hace preventDefault cuando el toque se
+                // CONSUME para joystick/mirar. Si el dedo cae sobre un boton
+                // o el cuaderno/mapa abiertos, NO se cancela nada: asi los
+                // clicks de los botones (CERRAR cuaderno, mapa...) funcionan
+                // en movil y el cuaderno puede hacer scroll.
+                let consumed = false;
                 for (const t of e.changedTouches) {
                     const el = document.elementFromPoint(t.clientX, t.clientY);
-                    // Nada de joystick/mirar dentro de botones, ranuras del
-                    // cinturón ni del cuaderno abierto (ahi se hace scroll)
-                    if (el && el.closest('button, .tool-slot, input, textarea, #notebook-modal')) continue;
+                    if (el && el.closest('button, .tool-slot, input, textarea, #notebook-modal, #map-modal')) continue;
                     if (joyId === null && t.clientX < window.innerWidth * LEFT_ZONE) {
                         joyId = t.identifier;
                         joyOx = t.clientX; joyOy = t.clientY;
@@ -384,6 +434,7 @@
                         joyBase.style.top = (t.clientY - 55) + 'px';
                         joyKnob.style.transform = 'translate(-50%, -50%)';
                         this.touchMove.x = 0; this.touchMove.y = 0;
+                        consumed = true;
                     } else if (lookId === null) {
                         lookId = t.identifier;
                         lookX = t.clientX; lookY = t.clientY;
@@ -392,13 +443,15 @@
                         if (this.touchDrawHeld && this.inventory.currentSlot === 1) {
                             this.isMouseDown = true;   // dibujar con la tiza
                         }
+                        consumed = true;
                     }
                 }
-                e.preventDefault();
+                if (consumed) e.preventDefault();
             }, { passive: false });
 
             document.addEventListener('touchmove', (e) => {
                 if (!this.gameActive) return;
+                let consumed = false;
                 for (const t of e.changedTouches) {
                     if (t.identifier === joyId) {
                         let dx = t.clientX - joyOx, dy = t.clientY - joyOy;
@@ -412,9 +465,11 @@
                         this.touchMove.x = dx / max;
                         this.touchMove.y = -dy / max;   // arriba en pantalla = hacia delante
                         joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                        consumed = true;
                     } else if (t.identifier === lookId) {
                         if (this.touchDrawHeld && this.inventory.currentSlot === 1) {
                             this.isMouseDown = true;    // dibujando: el dedo pinta en el centro de la pantalla
+                            consumed = true;
                             continue;
                         }
                         const dx = t.clientX - lookX, dy = t.clientY - lookY;
@@ -424,18 +479,21 @@
                         this.pitch -= dy * sens;
                         this.pitch = Math.max(-1.4, Math.min(1.4, this.pitch));
                         this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+                        consumed = true;
                     }
                 }
-                e.preventDefault();
+                if (consumed) e.preventDefault();
             }, { passive: false });
 
             const endTouch = (e) => {
                 if (!this.gameActive) return;
+                let consumed = false;
                 for (const t of e.changedTouches) {
                     if (t.identifier === joyId) {
                         joyId = null;
                         joyBase.style.display = 'none';
                         this.touchMove.x = 0; this.touchMove.y = 0;
+                        consumed = true;
                     } else if (t.identifier === lookId) {
                         lookId = null;
                         this.isMouseDown = false;
@@ -446,10 +504,11 @@
                             // Toque rapido: disparo de camara (slot 2) o interactuar
                             if (this.inventory.currentSlot === 2) this.triggerCameraFlash();
                             else this.handleInteraction();
+                            consumed = true;
                         }
                     }
                 }
-                e.preventDefault();
+                if (consumed) e.preventDefault();
             };
             document.addEventListener('touchend', endTouch, { passive: false });
             document.addEventListener('touchcancel', endTouch, { passive: false });
@@ -475,7 +534,16 @@
             };
             bindTap('btn-touch-flash', () => this.toggleFlashlight());
             bindTap('btn-touch-note', () => this.toggleNotebook());
+            bindTap('btn-touch-map', () => this.toggleMap());
             bindTap('btn-touch-interact', () => this.handleInteraction());
+            // Cerrar cuaderno/mapa tambien por toque directo (el click sintetico
+            // puede quedar bloqueado en algunos navegadores moviles)
+            bindTap('btn-close-notebook', () => this.toggleNotebook());
+            bindTap('btn-close-notebook-x', () => this.toggleNotebook());
+            bindTap('btn-close-map', () => this.toggleMap());
+            bindTap('btn-map-zoom-in', () => this.mapZoom(1.35));
+            bindTap('btn-map-zoom-out', () => this.mapZoom(1 / 1.35));
+            bindTap('btn-map-center', () => this.mapCenterOnPlayer());
         }
 
         initNoiseCanvas() {
@@ -579,6 +647,13 @@
             }
 
             document.getElementById('btn-close-notebook').onclick = () => this.toggleNotebook();
+            const closeNbX = document.getElementById('btn-close-notebook-x');
+            if (closeNbX) closeNbX.onclick = () => this.toggleNotebook();
+            document.getElementById('btn-close-map').onclick = () => this.toggleMap();
+            document.getElementById('btn-map-zoom-in').onclick = () => this.mapZoom(1.35);
+            document.getElementById('btn-map-zoom-out').onclick = () => this.mapZoom(1 / 1.35);
+            document.getElementById('btn-map-center').onclick = () => this.mapCenterOnPlayer();
+            this.initMapCanvas();
 
             document.getElementById('vol-slider').oninput = (e) => {
                 audio.setMasterVolume(parseFloat(e.target.value));
@@ -657,7 +732,8 @@
                     for (let p of this.worldSystem.pickups) {
                         if (!p.collected && (p.mesh === hit.object || p.mesh.children.includes(hit.object))) {
                             p.collected = true;
-                            this.scene.remove(p.mesh);
+                            // Objetos de cajon: hijo del cajon, no de la escena
+                            (p.mesh.parent || this.scene).remove(p.mesh);
                             // Cada objeto es DE UN SOLO jugador: se reclama por
                             // red y desaparece para toda la sala
                             if (p.id) this.net.claimPickup(p.id);
@@ -702,6 +778,39 @@
                         }
                     }
                     if (done) return;
+                    // Puerta de metal de la SALA DE SEGURIDAD: [E] abre/cierra
+                    // (con pila); sin pila, [E] recarga con una de repuesto.
+                    // Tambien se activa desde el panel de control (la pantalla
+                    // donde se ve la pila restante)
+                    for (const r of this.worldSystem.securityRooms) {
+                        if (!r.doorModel) continue;
+                        let o = hit.object;
+                        let hitDoor = false;
+                        while (o) {
+                            if (o === r.doorModel || o === r.panelGroup) { hitDoor = true; break; }
+                            o = o.parent;
+                        }
+                        if (!hitDoor) continue;
+                        if (r.state.battery <= 0) {
+                            if (this.inventory.batteries > 0) {
+                                this.inventory.batteries--;
+                                r.state.battery = 100;
+                                this.notify('🔋 PILA PUESTA EN LA PUERTA · 100%');
+                                audio.playSwitchClick();
+                                this.updateFlashlightHUD();
+                            } else {
+                                this.notify('⚡ SIN PILAS · busca pilas para recargar la puerta');
+                            }
+                        } else {
+                            r.state.doorOpen = !r.state.doorOpen;
+                            this.doorStates.set(r.id, r.state.doorOpen);
+                            this.net.publishDoor(r.id, r.state.doorOpen);
+                            audio.playSwitchClick();
+                            this.notify(r.state.doorOpen ? '🚪 PUERTA ABIERTA' : '🚪 PUERTA CERRADA');
+                        }
+                        this.worldSystem.rebuildUnions();
+                        return;
+                    }
                     // Cajones de las mesas: [E] los abre; a veces esconden un
                     // objeto que se materializa como pickup reclamable por red
                     for (const b of this.furnitureBodies) {
@@ -733,7 +842,8 @@
                 this.worldSystem.collectedNoteIndices.add(noteIndex);
             }
             this.inventory.notesCollected++;
-            document.getElementById('notes-count-label').textContent = `${this.inventory.notesCollected} / ${this.inventory.totalNotes} NOTAS`;
+            const ncl = document.getElementById('notes-count-label');
+            if (ncl) ncl.textContent = `NOTAS: ${this.inventory.notesCollected} / ${this.inventory.totalNotes}`;
 
             const notebookDiv = document.getElementById('notebook-text');
             const entry = document.createElement('div');
@@ -748,9 +858,235 @@
             const modal = document.getElementById('notebook-modal');
             const isOpen = modal.style.display === 'flex';
             modal.style.display = isOpen ? 'none' : 'flex';
+            if (!isOpen) {
+                // Abrir el cuaderno cierra el mapa (y viceversa)
+                const mapM = document.getElementById('map-modal');
+                if (mapM && mapM.style.display === 'flex') { mapM.style.display = 'none'; this.mapOpen = false; }
+            }
             if (IS_TOUCH) return;   // en movil no hay pointer lock que liberar
             if (!isOpen) document.exitPointerLock();
             else document.body.requestPointerLock();
+        }
+
+        // ---- MAPA COMPARTIDO --------------------------------------------
+        // Marca exploradas las celdas alrededor del jugador (radio de 2
+        // celdas): el mapa se desbloquea con la exploracion, la de cada uno y
+        // la de la sala entera (bitsets sincronizados por MQTT).
+        markExplored() {
+            const p = this.player.pos;
+            const C = 2.8, N = 16, CS = N * C;
+            const gx = Math.floor(p.x / CS);
+            const gz = Math.floor(p.z / CS);
+            const cx = Math.floor((p.x - gx * CS) / C);
+            const cz = Math.floor((p.z - gz * CS) / C);
+            let dirty = false;
+            for (let dx = -2; dx <= 2; dx++) {
+                for (let dz = -2; dz <= 2; dz++) {
+                    const x = cx + dx, z = cz + dz;
+                    if (x < 0 || x >= N || z < 0 || z >= N) continue;
+                    let bits = this.exploredChunks.get(gx + ',' + gz);
+                    if (!bits) {
+                        bits = new Uint8Array(32);
+                        this.exploredChunks.set(gx + ',' + gz, bits);
+                    }
+                    const idx = x * N + z;
+                    if (!(bits[idx >> 3] & (1 << (idx & 7)))) {
+                        bits[idx >> 3] |= (1 << (idx & 7));
+                        dirty = true;
+                    }
+                }
+            }
+            if (dirty) this.mapDirty = true;
+        }
+
+        // Fusiona los chunks explorados que llegan de otros jugadores
+        mergeMapData(list) {
+            if (!Array.isArray(list)) return;
+            for (const c of list) {
+                if (!Array.isArray(c) || c.length < 3) continue;
+                let bits = this.exploredChunks.get(c[0] + ',' + c[1]);
+                if (!bits) {
+                    bits = new Uint8Array(32);
+                    this.exploredChunks.set(c[0] + ',' + c[1], bits);
+                }
+                const s = String(c[2]);
+                // El emisor empaqueta pares de bytes como 4 digitos hex:
+                // primero se reconstruyen los 32 bytes y luego se expanden
+                // los 256 bits (idx = x*16+z)
+                const bytes = new Uint8Array(32);
+                for (let i = 0; i < 64; i += 2) {
+                    bytes[i / 2] = parseInt(s.substr(i, 2), 16) || 0;
+                }
+                for (let by = 0; by < 32; by++) {
+                    for (let p = 0; p < 8; p++) {
+                        if (bytes[by] & (1 << p)) {
+                            const idx = by * 8 + p;
+                            bits[idx >> 3] |= (1 << (idx & 7));
+                        }
+                    }
+                }
+            }
+        }
+
+        toggleMap() {
+            const modal = document.getElementById('map-modal');
+            if (!modal) return;
+            const isOpen = modal.style.display === 'flex';
+            if (!isOpen) {
+                const nb = document.getElementById('notebook-modal');
+                if (nb && nb.style.display === 'flex') nb.style.display = 'none';
+                modal.style.display = 'flex';
+                this.mapOpen = true;
+                this.mapView.x = this.player.pos.x;
+                this.mapView.z = this.player.pos.z;
+                this.renderMap();
+                if (IS_TOUCH) return;
+                document.exitPointerLock();
+            } else {
+                modal.style.display = 'none';
+                this.mapOpen = false;
+                if (!IS_TOUCH) document.body.requestPointerLock();
+            }
+        }
+
+        mapZoom(f) {
+            this.mapView.zoom = Math.max(3, Math.min(26, this.mapView.zoom * f));
+            this.renderMap();
+        }
+
+        mapCenterOnPlayer() {
+            this.mapView.x = this.player.pos.x;
+            this.mapView.z = this.player.pos.z;
+            this.renderMap();
+        }
+
+        renderMap() {
+            const canvas = document.getElementById('map-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const W = canvas.width, H = canvas.height;
+            const zoom = this.mapView.zoom;
+            const C = 2.8, N = 16, CS = N * C;
+            ctx.fillStyle = '#0c0f0a';
+            ctx.fillRect(0, 0, W, H);
+
+            // Rejilla sutil de chunks
+            ctx.strokeStyle = 'rgba(255,255,255,0.035)';
+            ctx.lineWidth = 1;
+            const g0x = Math.floor((this.mapView.x - (W / 2) / zoom) / CS);
+            const g1x = Math.ceil((this.mapView.x + (W / 2) / zoom) / CS);
+            const g0z = Math.floor((this.mapView.z - (H / 2) / zoom) / CS);
+            const g1z = Math.ceil((this.mapView.z + (H / 2) / zoom) / CS);
+            for (let gx = g0x; gx <= g1x; gx++) {
+                const sx = Math.round(W / 2 + (gx * CS - this.mapView.x) * zoom);
+                ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke();
+            }
+            for (let gz = g0z; gz <= g1z; gz++) {
+                const sy = Math.round(H / 2 + (gz * CS - this.mapView.z) * zoom);
+                ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke();
+            }
+
+            // Celdas exploradas (niebla de guerra: solo lo visto por la sala)
+            const cell = C * zoom;
+            for (const [key, bits] of this.exploredChunks) {
+                const [gx, gz] = key.split(',').map(Number);
+                const sx0 = W / 2 + (gx * CS - this.mapView.x) * zoom;
+                const sy0 = H / 2 + (gz * CS - this.mapView.z) * zoom;
+                if (sx0 + CS * zoom < -50 || sx0 > W + 50 || sy0 + CS * zoom < -50 || sy0 > H + 50) continue;
+                let ch = this.worldSystem.chunks.get(key);
+                if (!ch || !ch.grid) ch = this.worldSystem.getLayout(gx, gz);
+                const g = ch.grid;
+                for (let x = 0; x < N; x++) {
+                    for (let z = 0; z < N; z++) {
+                        const idx = x * N + z;
+                        if (!(bits[idx >> 3] & (1 << (idx & 7)))) continue;
+                        const v = g[x][z];
+                        ctx.fillStyle = (v === 0 || v === 2) ? '#2d3122' : (v === 3 ? '#191b13' : '#090b07');
+                        ctx.fillRect(Math.round(sx0 + x * cell), Math.round(sy0 + z * cell),
+                            Math.max(1, Math.ceil(cell - 0.7)), Math.max(1, Math.ceil(cell - 0.7)));
+                    }
+                }
+            }
+
+            // Marcador del jugador (flecha verde, orientada a su mirada)
+            const px = (wx) => W / 2 + (wx - this.mapView.x) * zoom;
+            const pz = (wz) => H / 2 + (wz - this.mapView.z) * zoom;
+            const p = this.player.pos;
+            ctx.save();
+            ctx.translate(px(p.x), pz(p.z));
+            ctx.rotate(-this.yaw);
+            ctx.fillStyle = '#57d957';
+            ctx.strokeStyle = '#0a0f0a';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(0, -9); ctx.lineTo(6, 7); ctx.lineTo(0, 3.5); ctx.lineTo(-6, 7);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+
+            // Compañeros de sala (puntos azules con inicial)
+            ctx.font = 'bold 8px Courier New';
+            for (const [pid, pp] of this.net.peers) {
+                if (!pp || !pp.hasState) continue;
+                ctx.fillStyle = '#4da6ff';
+                ctx.beginPath();
+                ctx.arc(px(pp.x), pz(pp.z), 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#0a0f0a';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.fillStyle = '#dfeaff';
+                ctx.fillText((pp.name || '?').charAt(0), px(pp.x) - 2.5, pz(pp.z) + 3);
+            }
+
+            // Entidad (rojo): posicion conocida (host la simula o espectro sync)
+            const entPos = (this.net.entityActive && this.net.entityGhost)
+                ? this.net.entityGhost.position
+                : (this.entity && this.entity.active ? this.entity.pos : null);
+            if (entPos) {
+                const g = entPos;
+                ctx.fillStyle = '#e03a2e';
+                ctx.beginPath();
+                ctx.arc(px(g.x), pz(g.z), 7, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#200805';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.fillStyle = '#ffd9d4';
+                ctx.font = 'bold 9px Courier New';
+                ctx.fillText('!', px(g.x) - 2.5, pz(g.z) + 3);
+            }
+
+            // Marco
+            ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+            ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
+        }
+
+        initMapCanvas() {
+            const canvas = document.getElementById('map-canvas');
+            if (!canvas) return;
+            let dragging = false, px0 = 0, py0 = 0;
+            const startPan = (x, y) => { dragging = true; px0 = x; py0 = y; };
+            const movePan = (x, y) => {
+                if (!dragging) return;
+                this.mapView.x -= (x - px0) / this.mapView.zoom;
+                this.mapView.z -= (y - py0) / this.mapView.zoom;
+                px0 = x; py0 = y;
+                this.renderMap();
+            };
+            const endPan = () => { dragging = false; };
+            canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startPan(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
+            canvas.addEventListener('touchmove', (e) => { e.preventDefault(); movePan(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
+            canvas.addEventListener('touchend', (e) => { e.preventDefault(); endPan(); }, { passive: false });
+            canvas.addEventListener('touchcancel', () => endPan());
+            canvas.addEventListener('mousedown', (e) => { e.preventDefault(); startPan(e.clientX, e.clientY); });
+            window.addEventListener('mousemove', (e) => movePan(e.clientX, e.clientY));
+            window.addEventListener('mouseup', () => endPan());
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                this.mapZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15);
+            }, { passive: false });
         }
 
         updateSanityHUD() {
@@ -1035,6 +1371,30 @@
                             break;
                         }
                     }
+                    if (found) break;
+                    // Puerta de metal de sala de seguridad (con su pila)
+                    for (const r of this.worldSystem.securityRooms) {
+                        if (!r.doorModel) continue;
+                        let o = hit.object;
+                        let hitDoor = false;
+                        while (o) {
+                            if (o === r.doorModel || o === r.panelGroup) { hitDoor = true; break; }
+                            o = o.parent;
+                        }
+                        if (!hitDoor) continue;
+                        found = true;
+                        const b = Math.round(r.state.battery);
+                        if (r.state.battery <= 0) {
+                            prompt.textContent = this.inventory.batteries > 0
+                                ? '⚡ SIN PILA · [E] RECARGAR (1 DE TUS PILAS)'
+                                : '⚡ SIN PILA · BUSCA PILAS DE REPUESTO';
+                        } else {
+                            prompt.textContent = r.state.doorOpen
+                                ? `[E] CERRAR PUERTA · PILA ${b}%`
+                                : `[E] ABRIR PUERTA · PILA ${b}%`;
+                        }
+                        break;
+                    }
                 }
             }
 
@@ -1117,11 +1477,15 @@
             }
 
             this.player.sanity -= 0.12 * dt;
-            if (this.entity.active && this.entity.state === 'CHASING') {
-                this.player.sanity -= 4.0 * dt;
-            } else if (this.net.entityNear(this.player.pos, 14)) {
-                // En multijugador el espectro sincronizado tambien drena cordura
-                this.player.sanity -= 3.0 * dt;
+            // En una sala de seguridad con la puerta CERRADA la entidad no
+            // puede verte: nada de drenaje (ni siquiera el del espectro sync)
+            if (!this.inSecurityRoomClosed()) {
+                if (this.entity.active && this.entity.state === 'CHASING') {
+                    this.player.sanity -= 4.0 * dt;
+                } else if (this.net.entityNear(this.player.pos, 14)) {
+                    // En multijugador el espectro sincronizado tambien drena cordura
+                    this.player.sanity -= 3.0 * dt;
+                }
             }
             this.updateSanityHUD();
 
@@ -1137,6 +1501,152 @@
             document.getElementById('game-over-reason').textContent = reason;
             document.getElementById('game-over-screen').style.display = 'flex';
             this.net.leave();
+        }
+
+        // ---- SALAS DE SEGURIDAD (FNAF) ---------------------------------
+        findSecurityRoomById(id) {
+            for (const r of this.worldSystem.securityRooms) {
+                if (r.id === id) return r;
+            }
+            return null;
+        }
+
+        // El jugador esta DENTRO de una sala de seguridad con la puerta cerrada
+        inSecurityRoomClosed() {
+            for (const r of this.worldSystem.securityRooms) {
+                if (r.state.doorOpen) continue;
+                const px = this.player.pos.x, pz = this.player.pos.z;
+                if (px > r.minX - 0.6 && px < r.maxX + 0.6 && pz > r.minZ - 0.6 && pz < r.maxZ + 0.6) return true;
+            }
+            return false;
+        }
+
+        // Pila de la puerta, animacion de subida/bajada, panel y monitor
+        updateSecurityRooms(dt) {
+            for (const r of this.worldSystem.securityRooms) {
+                // Estado de la puerta compartido por red: se aplica la primera
+                // vez que se carga la sala (si otro jugador la cerro antes)
+                if (!r._synced) {
+                    r._synced = true;
+                    if (this.doorStates.has(r.id)) {
+                        r.state.doorOpen = this.doorStates.get(r.id);
+                    }
+                }
+                // La pila se gasta SOLO con la puerta cerrada (como FNAF); si
+                // se agota, corte de energia: la puerta se abre sola
+                if (!r.state.doorOpen) {
+                    r.state.battery = Math.max(0, r.state.battery - dt * 0.7);
+                    if (r.state.battery <= 0) {
+                        r.state.doorOpen = true;
+                        this.doorStates.set(r.id, true);
+                        this.net.publishDoor(r.id, true);
+                        if (Math.hypot(r.centerX - this.player.pos.x, r.centerZ - this.player.pos.z) < 22) {
+                            this.notify('⚡ CORTE DE ENERGÍA · LA PUERTA SE ABRIÓ');
+                        }
+                        this.worldSystem.rebuildUnions();
+                    }
+                }
+                // La puerta sube al techo al abrirse y baja al cerrarse
+                if (r.doorGroup) {
+                    const target = r.state.doorOpen ? 2.42 : 0;
+                    r.doorGroup.position.y += (target - r.doorGroup.position.y) * Math.min(1, dt * 6);
+                }
+                // Pantalla de pila del panel de control (solo si estas cerca)
+                if (r.panelCanvas && Math.hypot(r.centerX - this.player.pos.x, r.centerZ - this.player.pos.z) < 22) {
+                    this._panelTimer += dt;
+                    if (this._panelTimer > 0.3) {
+                        this._panelTimer = 0;
+                        const x = r.panelCanvas.getContext('2d');
+                        x.clearRect(0, 0, 96, 48);
+                        x.fillStyle = '#0a1408';
+                        x.fillRect(0, 0, 96, 48);
+                        const b = Math.round(r.state.battery);
+                        x.fillStyle = b > 20 ? '#9be34a' : (b > 0 ? '#e3c34a' : '#e34a3a');
+                        x.font = 'bold 15px Courier New';
+                        x.textAlign = 'center';
+                        x.fillText('PILA ' + b + '%', 48, 29);
+                        r.panelTex.needsUpdate = true;
+                    }
+                }
+            }
+        }
+
+        // Las camaras de pared vigilan al jugador: giran la cabeza hacia el
+        // y encienden el LED rojo cuando esta en su radio
+        updateCameras(dt) {
+            for (const cam of this.worldSystem.cameras) {
+                const dx = this.player.pos.x - cam.x;
+                const dz = this.player.pos.z - cam.z;
+                const dist = Math.hypot(dx, dz);
+                const watching = dist < 24;
+                cam.group.userData.ledMat.emissiveIntensity = watching ? 2.5 : 0;
+                if (!watching) continue;
+                // Direccion del jugador en el sistema local de la camara
+                const cos = Math.cos(-cam.baseRy), sin = Math.sin(-cam.baseRy);
+                const lx = dx * cos - dz * sin;
+                const lz = dx * sin + dz * cos;
+                const target = Math.max(-1.3, Math.min(1.3, Math.atan2(lx, lz)));
+                const head = cam.group.userData.head;
+                let y = head.rotation.y;
+                let diff = target - y;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                head.rotation.y += diff * Math.min(1, dt * 3);
+            }
+        }
+
+        // Monitor de la sala de seguridad: retransmite (render target) la
+        // imagen de las camaras de pared generadas, rotando cada 0,5 s entre
+        // las 4 mas cercanas al jugador
+        updateCameraFeeds(dt) {
+            if (!this._feedRT) {
+                this._feedRT = new THREE.WebGLRenderTarget(320, 240);
+                this._feedCam = new THREE.PerspectiveCamera(60, 320 / 240, 0.1, 80);
+                const c = document.createElement('canvas');
+                c.width = 320; c.height = 240;
+                const x = c.getContext('2d');
+                x.fillStyle = '#0a0d12';
+                x.fillRect(0, 0, 320, 240);
+                x.fillStyle = '#3a4a3a';
+                x.font = 'bold 18px Courier New';
+                x.textAlign = 'center';
+                x.fillText('SIN SEÑAL', 160, 122);
+                this._noSignalTex = new THREE.CanvasTexture(c);
+            }
+            this._feedTimer += dt;
+            if (this._feedTimer < 0.5) return;
+            this._feedTimer = 0;
+            const cams = this.worldSystem.cameras;
+            if (cams.length) {
+                const near = cams.slice().sort((a, b) =>
+                    Math.hypot(a.x - this.player.pos.x, a.z - this.player.pos.z) -
+                    Math.hypot(b.x - this.player.pos.x, b.z - this.player.pos.z));
+                const cam = near[this._feedIdx % Math.min(near.length, 4)];
+                this._feedIdx++;
+                cam.group.updateMatrixWorld(true);
+                const pos = new THREE.Vector3();
+                cam.group.getWorldPosition(pos);
+                this._feedCam.position.copy(pos);
+                const q = new THREE.Quaternion();
+                cam.group.userData.head.getWorldQuaternion(q);
+                const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+                const tgt = pos.clone().addScaledVector(dir, 12);
+                tgt.y = Math.max(0.5, pos.y - 0.5);
+                this._feedCam.lookAt(tgt);
+                this.renderer.setRenderTarget(this._feedRT);
+                this.renderer.render(this.scene, this._feedCam);
+                this.renderer.setRenderTarget(null);
+            }
+            for (const r of this.worldSystem.securityRooms) {
+                if (!r.monitor) continue;
+                const mat = r.monitor.userData.screenMat;
+                if (r.state.battery > 0 && cams.length) {
+                    mat.map = this._feedRT.texture;
+                } else {
+                    mat.map = this._noSignalTex;
+                }
+                mat.needsUpdate = true;
+            }
         }
 
         updateNetHUD() {
@@ -1178,8 +1688,48 @@
                 this.updateLights(dt);
                 this.updateCoordsHUD();
                 this.updateFlashlightBattery(dt);
+                // Mantener [I] pulsado recarga la linterna con las pilas de
+                // repuesto almacenadas (1 pila ~ 0,9 s de recarga)
+                if (this.keys['KeyI'] && this.inventory.batteries > 0 && this.inventory.flashBattery < 100) {
+                    this.inventory.flashBattery = Math.min(100, this.inventory.flashBattery + dt * 110);
+                    this._iRechargeAcc += dt;
+                    if (this._iRechargeAcc > 0.9) {
+                        this._iRechargeAcc = 0;
+                        this.inventory.batteries--;
+                        this.notify('🔋 PILA COLOCADA EN LA LINTERNA');
+                        audio.playSwitchClick();
+                    }
+                    this.updateFlashlightHUD();
+                }
+                // Salas de seguridad: pila/animation de la puerta, camaras
+                // que vigilan y monitor con el feed de camaras
+                this.updateSecurityRooms(dt);
+                this.updateCameras(dt);
+                this.updateCameraFeeds(dt);
                 this.updateChalkDrawing();
                 this.checkInteractionsPrompt();
+                // Mapa: marcar explorado (cada 0,3 s), repintar si esta abierto
+                // y publicar los chunks nuevos a la sala (throttled)
+                this._mapTick += dt;
+                if (this._mapTick > 0.3) {
+                    this._mapTick = 0;
+                    this.markExplored();
+                }
+                if (this.mapOpen) {
+                    this._mapRedrawTick += dt;
+                    if (this._mapRedrawTick > 0.4) {
+                        this._mapRedrawTick = 0;
+                        this.renderMap();
+                    }
+                }
+                if (this.mapDirty) {
+                    this._mapPubTick += dt;
+                    if (this._mapPubTick > 2.5) {
+                        this._mapPubTick = 0;
+                        this.mapDirty = false;
+                        this.net.publishMap();
+                    }
+                }
                 this.net.update(dt, this.player.pos, this.yaw, this.pitch, this.flashlightOn, this.worldSystem.wallBoxes, this.entity);
                 this.updateNetHUD();
                 this.entity.update(
