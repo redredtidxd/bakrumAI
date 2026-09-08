@@ -57,11 +57,12 @@
 
             // Piscina de luces de techo AMARILLENTAS (0xffd878): antes eran 8
             // focos con radio 9 m que no llegaban ni a la lampara vecina y el
-            // pasillo quedaba negro hasta pisar cada foco. Ahora 28 focos con
-            // radio 16 m, repartidos con prioridad a las lamparas VISIBLES en
-            // pantalla: toda lampara a la vista tiene su luz.
+            // pasillo quedaba negro hasta pisar cada foco. Ahora 64 focos con
+            // radio 16 m: se iluminan siempre las 64 lamparas MAS CERCANAS
+            // (ver updateLights), asi una sala grande o un cruce con muchas
+            // lamparas queda entero encendido.
             this.lightPool = [];
-            for (let i = 0; i < 28; i++) {
+            for (let i = 0; i < 64; i++) {
                 const pl = new THREE.PointLight(0xffd878, 0, 16, 2.0);
                 this.scene.add(pl);
                 this.lightPool.push(pl);

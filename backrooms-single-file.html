@@ -557,7 +557,7 @@
                     <div id="slot-4" class="tool-slot">
                         <span class="tool-emoji">📓</span>
                         <span>CUADERNO</span>
-                        <span id="notes-count-label" style="font-size: 10px; color:#9c8f6e; margin-top:2px;">0 / 6 NOTAS</span>
+                        <span id="notes-count-label" style="font-size: 10px; color:#9c8f6e; margin-top:2px;">0 / 50 NOTAS</span>
                         <span class="tool-key">[N] Abrir</span>
                     </div>
                 </div>
@@ -1559,15 +1559,334 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         return (h ^ (h >>> 16)) >>> 0;
     }
 
-    // NOTAS DE LORE: cada texto solo se recoge UNA vez en toda la partida
+    // NOTAS DE LORE (50 DE TODO TIPO): cada texto solo se recoge UNA vez en
+    // toda la partida. Mezcla de diario (entradas), consejos de juego, avisos,
+    // mensajes de otros exploradores y notas de ambiente.
     const NOTE_POOL = [
         "Entrada 1: Doblar esquinas me salvo. Esa cosa corre hacia donde te vio por ultima vez, pero si cambias de pasillo, se desorienta.",
         "Entrada 2: El flash de la camara analogica es letal para sus ojos. No corras en vano, preparalo.",
         "Entrada 3: La tiza sobrevive en la moqueta. Dibuja flechas en cada giro para saber de donde venias.",
         "Entrada 4: Los pilares del centro de las salas bloquean su vision. Si te agachas tras ellos, pasara de largo.",
         "Entrada 5: Llevo dias caminando y nunca encuentro una pared exterior. Cada pasillo ancho desemboca en otro estrecho y el amarillo no cambia.",
-        "Entrada 6: Los pasillos anchos son mas seguros: hay donde esconderse. Los angostos solo sirven para perderte."
+        "Entrada 6: Los pasillos anchos son mas seguros: hay donde esconderse. Los angostos solo sirven para perderte.",
+        "Entrada 7: El agua de almendras sabe raro pero quita la sed. Nunca bebas de los grifos de las paredes.",
+        "Entrada 8: La humedad del techo gotea SIEMPRE en el mismo sitio. Si un dia no gotea, vete.",
+        "Entrada 9: Conté 37 salas identicas seguidas. En la 38 habia una silla. Me sente. No debi sentarme.",
+        "Entrada 10: Los que vuelven de explorar no son los mismos que se fueron. Aprendi a mirarles las manos.",
+        "Entrada 11: Las pilas duran mas si las guardas envueltas en recortes de moqueta.",
+        "Entrada 12: La moqueta absorbe el sonido. Todo excepto MIS pasos. Esa cosa tambien camina en silencio.",
+        "Entrada 13: Dormir es peligroso pero inevitable. Duermo con la linterna encendida y la espalda contra una esquina.",
+        "Entrada 14: El nivel tiene fallos: puertas que no deberian existir, luces que no deberian parpadear. Los fallos son la salida. O la trampa.",
+        "CONSEJO: El flash de la camara necesita pilas para recargarse. No lo gastes en cada esquina.",
+        "CONSEJO: La tiza negra se ve mejor sobre el papel pintado amarillo.",
+        "CONSEJO: Si la luz parpadea cerca de ti, esa cosa ya sabe donde estas.",
+        "CONSEJO: Correr hace ruido. A veces conviene andar.",
+        "CONSEJO: El agua de almendras recupera la estabilidad mental poco a poco.",
+        "CONSEJO: Deja marcas de tiza: las salas se repiten y es facil dar vueltas en circulos.",
+        "CONSEJO: La linterna se recarga con pilas. Si se apaga en la oscuridad, no corras: camina.",
+        "CONSEJO: Esa cosa no atraviesa paredes. Todavia.",
+        "CUIDADO: te persigue mas rapido si corres. Camina y la perderas en el siguiente giro.",
+        "CUIDADO: no mires fijamente las luces parpadeantes mas de unos segundos.",
+        "CUIDADO: si oyes un zumbido doble, hay DOS.",
+        "CUIDADO: los dibujos de las paredes no los hice yo.",
+        "CUIDADO: no te fies de las notas que no esten escritas a mano.",
+        "CUIDADO: si ves una sala iluminada que deberia estar a oscuras, no entres.",
+        "Alguien estuvo aqui: hola, si lees esto, la salida no existe.",
+        "Llevo 3 dias aqui. He dejado esta nota en 10 sitios distintos. Nunca encuentro ninguna de las anteriores.",
+        "Se llama 'el que vigila'. No le pongas nombre. Lo siento, ya se lo he puesto.",
+        "Si encuentras mi camara, el ultimo carrete no es mio.",
+        "ME SIGUE. Ya no importa donde me esconda. Que alguien borre esta nota cuando la lea.",
+        "La primera regla: no toques el papel pintado.",
+        "Estoy bien. Estoy bien. Estoy bien. Estoy bien. Estoy bien.",
+        "Hay 128 semillas diferentes y yo las he probado todas. Siempre el mismo amarillo.",
+        "El conserje existe. No es amable.",
+        "El zumbido de las luces se parece a una cancion. No la silbes.",
+        "Ayer encontre mi propia nota de hace una semana. Yo no la escribi.",
+        "Las tazas de cafe de las mesas siempre estan calientes. Nunca hay nadie.",
+        "Un cartel decia SALIDA. Anduve 3 horas hacia el. Sigue a 3 horas.",
+        "La moqueta tiene manchas que cambian de forma cuando apago la linterna.",
+        "Hay un punto del techo donde el papel pintado se arruga como una sonrisa.",
+        "Conté las lamparas: 100. Luego 100 otra vez. Luego 101.",
+        "El que escribio esto ya no esta. Yo sigo aqui. Por ahora.",
+        "Dicen que en el nivel 1 hay oficinas con ventanas. No conozco a nadie que lo haya logrado.",
+        "El tiempo no pasa aqui: pasa por aqui.",
+        "REGLA NO ESCRITA: los objetos del suelo son tuyos o de nadie. No los compartas con la cosa.",
+        "P.D.: la linterna tambien la frena si la miras de frente. Pero la pila no dura para siempre.",
+        "Ultima nota: si estas leyendo esto, tienes compania. Las notas se ven desde lejos. Eso la atrae."
     ];
+
+    // ---- GRAFITI: 100 variantes (frases y simbolos) de cosas tipicas de los
+    // backrooms, pintadas en BLANCO, NEGRO o ROJO sobre las paredes. Cada
+    // variante se dibuja en un canvas 256x256 al vuelo (cache por variante +
+    // color: solo se generan los que se usan de verdad) y se pega a la pared
+    // como un plano transparente. El RNG del chunk decide donde, cual y de
+    // que color: todos los jugadores ven exactamente los mismos grafitis. ----
+    const GRAFFITI_COLORS = ['#efe9dc', '#151209', '#c23a2b'];
+    const GRAFFITI_POOL = [
+        { t: 'SMILE!' }, { t: 'RUN.' }, { t: 'NO\nEXIT' }, { t: "DON'T\nBLINK" },
+        { t: 'TURN\nBACK' }, { t: 'WHY AM I\nHERE?' }, { t: "THEY'RE IN\nTHE WALLS" }, { t: 'LEVEL 0' },
+        { t: 'NOCLIP' }, { t: 'HELP ME' }, { t: "I'M STILL\nHERE" }, { t: "DON'T TRUST\nTHE LIGHTS" },
+        { t: 'KEEP\nWALKING' }, { t: "IT'S BEHIND\nYOU" }, { t: 'STAY CALM' }, { t: 'FOLLOW THE\nARROWS' },
+        { t: 'ALMOND\nWATER' }, { t: 'PRAY.' }, { t: "DON'T LOOK\nBACK" }, { t: 'OUT OF\nORDER' },
+        { t: 'SOMETHING\nFOLLOWS' }, { t: 'BREATHE.' }, { t: 'NOISE\nATTRACTS' }, { t: 'THE CARPET\nHUMS' },
+        { t: 'THE HUM\nLIES' }, { t: 'FALSE\nEXIT' }, { t: 'I SAW IT.\nIT SAW ME.' }, { t: 'WALLS BLEED\nYELLOW' },
+        { t: 'LEFT. LEFT.\nLEFT. LEFT.' }, { t: 'GO BACK\nWHILE YOU\nCAN' }, { t: 'NOTHING\nWORKS' }, { t: "THIS ISN'T\nREAL" },
+        { t: 'CURIOSITY\nKILLED ME' }, { t: 'SORRY.' }, { t: 'WELCOME\nTO HELL' }, { t: 'ENDLESS.' },
+        { t: 'IT HIDES IN\nTHE DARK' }, { t: 'STAY IN\nTHE LIGHT' }, { t: 'COVER THE\nDOOR' }, { t: 'SLEEP IS\nDEATH' },
+        { t: 'DRINK THE\nALMOND\nWATER' }, { t: 'FIND THE\nCAMERA' }, { t: 'THE FLASH\nSCARES IT' }, { t: 'CHALK\nSAVES' },
+        { t: 'LISTEN FOR\nTHE HUM' }, { t: 'REPEAT.' }, { t: 'IS ANYONE\nTHERE?' }, { t: 'HELLO?' },
+        { t: 'ANYONE?' }, { t: 'I WAS HERE' }, { t: 'MILK.' }, { t: 'FRED WAS\nHERE' },
+        { t: 'NO ESCAPE' }, { t: 'GIVE UP.' }, { t: 'KEEP GOING' }, { t: "DON'T SIT\nON THE\nFLOOR" },
+        { t: 'THE CEILING\nIS WATCHING' }, { t: 'IT\nBREATHES' }, { t: 'WE ARE\nALL LOST' }, { t: "SMILE IF\nYOU'RE\nSCARED" },
+        { t: 'I COUNTED\n1000 DOORS' }, { t: 'THE SAME\nWALL EVERY\nTIME' }, { t: 'MAYBE THIS\nIS HEAVEN' }, { t: 'MAYBE THIS\nIS HELL' },
+        { t: "DON'T." }, { t: 'STOP.' }, { t: 'GO BACK.' }, { t: 'KILL THE\nHUM' },
+        { t: 'NOTHING IS\nREAL HERE' },
+        { s: 'arrowR' }, { s: 'arrowL' }, { s: 'arrowU' }, { s: 'arrowD' },
+        { s: 'spiral' }, { s: 'tally' }, { s: 'tallyX' }, { s: 'xmark' },
+        { s: 'smile' }, { s: 'sad' }, { s: 'stick' }, { s: 'warn' },
+        { s: 'star' }, { s: 'circle' }, { s: 'nope' }, { s: 'sos' },
+        { s: 'heart' }, { s: 'cross' }, { s: 'hash' }, { s: 'eye' },
+        { s: 'skull' }, { s: 'qmark' }, { s: 'exclaim' }, { s: 'maze' },
+        { s: 'inf' }, { s: 'door' }, { s: 'key' }, { s: 'clock' },
+        { s: 'ghost' }, { s: 'crown' }, { s: 'ladder' }
+    ];
+
+    const graffitiTexCache = new Map();
+    function graffitiTexture(variant, colorHex) {
+        const ck = variant + '|' + colorHex;
+        let tex = graffitiTexCache.get(ck);
+        if (tex) return tex;
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        const entry = GRAFFITI_POOL[variant % GRAFFITI_POOL.length];
+        // Aspecto fijo por variante (mismo dibujo en todas las partidas)
+        const rng = mulberry32(variant * 2654435761 + 0x9E3779B9);
+        ctx.translate(128, 128);
+        ctx.rotate((rng() - 0.5) * 0.18);
+        if (entry.t) drawGraffitiText(ctx, entry.t, colorHex, rng);
+        else drawGraffitiSymbol(ctx, entry.s, colorHex, rng);
+        // Grano de pintura gastada
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = colorHex;
+        for (let i = 0; i < 380; i++) {
+            ctx.fillRect((rng() - 0.5) * 250, (rng() - 0.5) * 250, 1 + rng() * 1.7, 1 + rng() * 1.7);
+        }
+        ctx.globalAlpha = 1;
+        tex = new THREE.CanvasTexture(canvas);
+        graffitiTexCache.set(ck, tex);
+        return tex;
+    }
+
+    function drawGraffitiText(ctx, text, colorHex, rng) {
+        const lines = text.split('\n');
+        const fs = 40;
+        ctx.font = `900 ${fs}px "Segoe Print", "Comic Sans MS", "Marker Felt", cursive`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = colorHex;
+        for (let li = 0; li < lines.length; li++) {
+            const y = (li - (lines.length - 1) / 2) * fs * 1.2;
+            // Doble pasada desfasada: efecto spray/desgaste
+            ctx.globalAlpha = 0.4;
+            ctx.fillText(lines[li], (rng() - 0.5) * 3, y + (rng() - 0.5) * 3);
+            ctx.globalAlpha = 0.96;
+            ctx.fillText(lines[li], 0, y);
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    function drawGraffitiSymbol(ctx, sym, colorHex, rng) {
+        ctx.strokeStyle = colorHex;
+        ctx.fillStyle = colorHex;
+        ctx.lineWidth = 7;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.scale(1.05, 1.05);
+        switch (sym) {
+            case 'arrowR':
+                ctx.beginPath(); ctx.moveTo(-62, 0); ctx.lineTo(58, 0); ctx.moveTo(36, -22); ctx.lineTo(58, 0); ctx.lineTo(36, 22); ctx.stroke(); break;
+            case 'arrowL':
+                ctx.beginPath(); ctx.moveTo(62, 0); ctx.lineTo(-58, 0); ctx.moveTo(-36, -22); ctx.lineTo(-58, 0); ctx.lineTo(-36, 22); ctx.stroke(); break;
+            case 'arrowU':
+                ctx.beginPath(); ctx.moveTo(0, 62); ctx.lineTo(0, -58); ctx.moveTo(-22, -36); ctx.lineTo(0, -58); ctx.lineTo(22, -36); ctx.stroke(); break;
+            case 'arrowD':
+                ctx.beginPath(); ctx.moveTo(0, -62); ctx.lineTo(0, 58); ctx.moveTo(-22, 36); ctx.lineTo(0, 58); ctx.lineTo(22, 36); ctx.stroke(); break;
+            case 'spiral': {
+                ctx.beginPath();
+                for (let a = 0, first = true; a < Math.PI * 9; a += 0.14) {
+                    const r = 4 + a * 3.1;
+                    const px = Math.cos(a) * r, py = Math.sin(a) * r;
+                    if (first) { ctx.moveTo(px, py); first = false; } else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+                break;
+            }
+            case 'tally':
+                for (let i = -2; i <= 2; i++) {
+                    ctx.beginPath(); ctx.moveTo(i * 22, -58); ctx.lineTo(i * 22, 58); ctx.stroke();
+                }
+                ctx.beginPath(); ctx.moveTo(-55, -8); ctx.lineTo(55, 8); ctx.stroke();
+                break;
+            case 'tallyX':
+                for (let i = -2; i <= 2; i++) {
+                    ctx.beginPath(); ctx.moveTo(i * 22, -58); ctx.lineTo(i * 22, 58); ctx.stroke();
+                }
+                ctx.beginPath(); ctx.moveTo(-55, -58); ctx.lineTo(55, 58); ctx.moveTo(55, -58); ctx.lineTo(-55, 58); ctx.stroke();
+                break;
+            case 'xmark':
+                ctx.beginPath(); ctx.moveTo(-55, -55); ctx.lineTo(55, 55); ctx.moveTo(55, -55); ctx.lineTo(-55, 55); ctx.stroke(); break;
+            case 'smile':
+                ctx.beginPath(); ctx.arc(0, 0, 60, 0, Math.PI * 2); ctx.stroke();
+                ctx.beginPath(); ctx.arc(-24, -16, 7, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(24, -16, 7, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(0, 8, 34, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+                break;
+            case 'sad':
+                ctx.beginPath(); ctx.arc(0, 0, 60, 0, Math.PI * 2); ctx.stroke();
+                ctx.beginPath(); ctx.arc(-24, -16, 7, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(24, -16, 7, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(0, 24, 34, 1.15 * Math.PI, 1.85 * Math.PI); ctx.stroke();
+                break;
+            case 'stick': {
+                ctx.beginPath(); ctx.arc(0, -48, 18, 0, Math.PI * 2); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(0, 40); ctx.moveTo(0, -14); ctx.lineTo(-34, 14); ctx.moveTo(0, -14); ctx.lineTo(34, 14); ctx.moveTo(0, 40); ctx.lineTo(-26, 62); ctx.moveTo(0, 40); ctx.lineTo(26, 62); ctx.stroke();
+                break;
+            }
+            case 'warn':
+                ctx.beginPath(); ctx.moveTo(0, -62); ctx.lineTo(56, 54); ctx.lineTo(-56, 54); ctx.closePath(); ctx.stroke();
+                ctx.beginPath(); ctx.arc(0, 22, 8, 0, Math.PI * 2); ctx.fill();
+                ctx.fillRect(-4, -34, 8, 40);
+                break;
+            case 'star': {
+                ctx.beginPath();
+                for (let i = 0; i < 10; i++) {
+                    const r = i % 2 === 0 ? 62 : 26;
+                    const a = -Math.PI / 2 + i * Math.PI / 5;
+                    const px = Math.cos(a) * r, py = Math.sin(a) * r;
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                }
+                ctx.closePath(); ctx.fill();
+                break;
+            }
+            case 'circle':
+                ctx.beginPath(); ctx.arc(0, 0, 56, 0, Math.PI * 2); ctx.stroke(); break;
+            case 'nope':
+                ctx.beginPath(); ctx.arc(0, 0, 56, 0, Math.PI * 2); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(-42, -42); ctx.lineTo(42, 42); ctx.stroke();
+                break;
+            case 'sos':
+                ctx.font = '900 56px "Courier New", monospace';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText('SOS', 0, 4);
+                break;
+            case 'heart': {
+                ctx.beginPath();
+                ctx.moveTo(0, 52);
+                ctx.bezierCurveTo(-66, 8, -42, -58, 0, -18);
+                ctx.bezierCurveTo(42, -58, 66, 8, 0, 52);
+                ctx.fill();
+                break;
+            }
+            case 'cross':
+                ctx.fillRect(-16, -60, 32, 120);
+                ctx.fillRect(-60, -16, 120, 32);
+                break;
+            case 'hash':
+                ctx.beginPath();
+                ctx.moveTo(-14, -62); ctx.lineTo(-14, 62);
+                ctx.moveTo(14, -62); ctx.lineTo(14, 62);
+                ctx.moveTo(-62, -14); ctx.lineTo(62, -14);
+                ctx.moveTo(-62, 14); ctx.lineTo(62, 14);
+                ctx.stroke();
+                break;
+            case 'eye':
+                ctx.beginPath();
+                ctx.moveTo(-62, 0);
+                ctx.quadraticCurveTo(0, -52, 62, 0);
+                ctx.quadraticCurveTo(0, 52, -62, 0);
+                ctx.closePath(); ctx.stroke();
+                ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
+                break;
+            case 'skull':
+                ctx.beginPath(); ctx.arc(0, -4, 46, 0, Math.PI * 2); ctx.fill();
+                ctx.fillRect(-26, 26, 52, 16);
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath(); ctx.arc(-18, -16, 9, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(18, -16, 9, 0, Math.PI * 2); ctx.fill();
+                ctx.fillRect(-8, 30, 5, 12); ctx.fillRect(3, 30, 5, 12);
+                ctx.globalCompositeOperation = 'source-over';
+                break;
+            case 'qmark':
+                ctx.font = '900 120px "Arial Black", Arial, sans-serif';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText('?', 0, -6);
+                break;
+            case 'exclaim':
+                ctx.font = '900 120px "Arial Black", Arial, sans-serif';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText('!', 0, -6);
+                break;
+            case 'maze': {
+                ctx.beginPath();
+                for (const [x, y] of [[-52, -52], [0, -52], [52, -52], [-52, 0], [52, 0], [-52, 52], [0, 52], [52, 52]]) {
+                    ctx.rect(x, y, 26, 26);
+                }
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(-26, 0); ctx.lineTo(0, 0); ctx.lineTo(0, -26);
+                ctx.stroke();
+                break;
+            }
+            case 'inf':
+                ctx.beginPath();
+                ctx.arc(-26, 0, 34, 0.5 * Math.PI, 2.5 * Math.PI);
+                ctx.arc(26, 0, 34, -0.5 * Math.PI, 0.5 * Math.PI);
+                ctx.stroke();
+                break;
+            case 'door':
+                ctx.strokeRect(-46, -60, 92, 120);
+                ctx.beginPath(); ctx.arc(34, 0, 5, 0, Math.PI * 2); ctx.fill();
+                break;
+            case 'key':
+                ctx.beginPath(); ctx.arc(-34, 0, 26, 0, Math.PI * 2); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(56, 0); ctx.moveTo(44, 0); ctx.lineTo(44, 20); ctx.moveTo(30, 0); ctx.lineTo(30, 14); ctx.stroke();
+                break;
+            case 'clock':
+                ctx.beginPath(); ctx.arc(0, 0, 58, 0, Math.PI * 2); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -36); ctx.moveTo(0, 0); ctx.lineTo(28, 10); ctx.stroke();
+                ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+                break;
+            case 'ghost':
+                ctx.beginPath();
+                ctx.moveTo(-52, 56);
+                ctx.lineTo(-52, -20);
+                ctx.quadraticCurveTo(-52, -62, 0, -62);
+                ctx.quadraticCurveTo(52, -62, 52, -20);
+                ctx.lineTo(52, 56);
+                ctx.lineTo(34, 40); ctx.lineTo(17, 56); ctx.lineTo(0, 40); ctx.lineTo(-17, 56); ctx.lineTo(-34, 40);
+                ctx.closePath(); ctx.stroke();
+                ctx.beginPath(); ctx.arc(-18, -18, 7, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(18, -18, 7, 0, Math.PI * 2); ctx.fill();
+                break;
+            case 'crown':
+                ctx.beginPath();
+                ctx.moveTo(-52, 30); ctx.lineTo(-52, -12);
+                ctx.lineTo(-26, 22); ctx.lineTo(0, -34); ctx.lineTo(26, 22); ctx.lineTo(52, -12); ctx.lineTo(52, 30);
+                ctx.closePath(); ctx.fill();
+                break;
+            case 'ladder':
+                ctx.beginPath();
+                ctx.moveTo(-30, -58); ctx.lineTo(-30, 58);
+                ctx.moveTo(30, -58); ctx.lineTo(30, 58);
+                for (let y = -44; y <= 44; y += 22) {
+                    ctx.moveTo(-30, y); ctx.lineTo(30, y);
+                }
+                ctx.stroke();
+                break;
+        }
+    }
 
     class WorldGridSystem {
         constructor(scene) {
@@ -2316,8 +2635,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // El suelo sobrante alrededor de cada lamina queda transitable:
             // los pasillos se ensanchan solos.
             const T_MIN = 0.4, T_MAX = 1.2;
-            // Columnas de las esquinas de pared: ~1,05 m (antes bloques de
-            // 2,8 x 2,8 m que parecian pilares gigantes en cada esquina).
+            // Postes de esquinas y FINALES de pared: adoptan el grosor de la
+            // pared que conectan (ver mas abajo); 0,525 es solo el respaldo.
+            // Antes eran bloques fijos de 2,8 x 2,8 m, luego cuadrados de
+            // 1,05 m que sobresalian junto a paredes de 0,4-0,6 m.
             const R_POST = 0.525;
             const key = (x, z) => x + ',' + z;
             const open = (x, z) => x >= 0 && x < N && z >= 0 && z < N && (g[x][z] === 0 || g[x][z] === 2);
@@ -2357,13 +2678,21 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     }
                 }
             }
-            // Tamanio de las esquinas: define la cara enrasada donde la union
-            // rectangular toca a cada lamina contigua
+            // Tamanio de esquinas y FINALES de pared: el poste adopta el grosor
+            // de la pared/paredes que conecta (la mitad del grosor de la mas
+            // gruesa). Asi el final de una pared queda ENRASADO, del mismo
+            // tamano que el resto (antes era un cuadrado fijo de 1,05 m que se
+            // veia mas grande junto a paredes de 0,4-0,6 m).
             for (let x = 1; x < N - 1; x++) {
                 for (let z = 1; z < N - 1; z++) {
                     const k = key(x, z);
                     if (wallKind.get(k) === 'post' && !wallTMap.has(k)) {
-                        wallTMap.set(k, R_POST);
+                        let m = 0;
+                        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                            const nk = wallKind.get(key(x + dx, z + dz));
+                            if (nk === 'x' || nk === 'z') m = Math.max(m, wallTMap.get(key(x + dx, z + dz)) || 0);
+                        }
+                        wallTMap.set(k, m > 0 ? m / 2 : R_POST);
                     }
                 }
             }
@@ -2466,20 +2795,23 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             // (nunca se ve ni se alcanza)
                             box = { minX: posX - C / 2, maxX: posX + C / 2, minZ: posZ - C / 2, maxZ: posZ + C / 2 };
                         } else if (kind === 'post') {
-                            // Esquina = COLUMNA compacta (1,05 x 1,05 m) centrada
-                            // en la celda, enrasada con las laminas contiguas
-                            // (que se alargan hasta tocarla). Antes era un bloque
-                            // de 2,8 x 2,8 m: un pilar gigante en cada esquina y
-                            // final de pared. Un poste sin ningun tramo de pared
+                            // Esquina/final de pared = COLUMNA del mismo grosor
+                            // que la pared que la toca (wallTMap guarda su medio
+                            // grosor), centrada en la celda y enrasada con las
+                            // laminas contiguas (que se alargan hasta tocarla).
+                            // Antes era un bloque de 2,8 x 2,8 m y luego un
+                            // cuadrado fijo de 1,05 m que sobresalia junto a
+                            // paredes finas. Un poste sin ningun tramo de pared
                             // conectado es flotante y se elimina.
                             const runNeighbor = (dx, dz) => {
                                 const nk = wallKind.get(key(x + dx, z + dz));
                                 return nk === 'x' || nk === 'z';
                             };
                             if (runNeighbor(1, 0) || runNeighbor(-1, 0) || runNeighbor(0, 1) || runNeighbor(0, -1)) {
-                                const jb = { minX: posX - R_POST, maxX: posX + R_POST, minZ: posZ - R_POST, maxZ: posZ + R_POST };
+                                const rp = wallTMap.get(k) || R_POST;   // medio grosor del poste
+                                const jb = { minX: posX - rp, maxX: posX + rp, minZ: posZ - rp, maxZ: posZ + rp };
                                 dummy.position.set(posX, WALL_HEIGHT / 2, posZ);
-                                dummy.scale.set(R_POST * 2, WALL_HEIGHT, R_POST * 2);
+                                dummy.scale.set(rp * 2, WALL_HEIGHT, rp * 2);
                                 dummy.updateMatrix();
                                 wallT.push(dummy.matrix.clone());
                                 ch.wallBoxes.push(jb);
@@ -2514,13 +2846,14 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             const pN = wallKind.get(key(x, z - 1));
                             const pE = wallKind.get(key(x + 1, z));
                             const pW = wallKind.get(key(x - 1, z));
-                            // La lamina se alarga hasta tocar la columna vecina
-                            // (R_POST) o la junta de chunk. Si la celda del borde
-                            // es una PUERTA (hueco abierto), NO se extiende:
-                            // antes el alargue entraba hasta 2,45 m en el vano y
-                            // delataba el borde del chunk con un muro fantasma.
-                            const extTo = (nk, end, pos, borderCellWall) => {
-                                if (nk === 'post') return Math.max(0.05, C - R_POST - Math.abs(end - pos) + 0.05);
+                            // La lamina se alarga hasta tocar la cara del poste
+                            // vecino (1,45 m - su medio grosor) o la junta de
+                            // chunk. Si la celda del borde es una PUERTA (hueco
+                            // abierto), NO se extiende: antes el alargue entraba
+                            // hasta 2,45 m en el vano y delataba el borde del
+                            // chunk con un muro fantasma.
+                            const extTo = (nk, half, end, pos, borderCellWall) => {
+                                if (nk === 'post') return Math.max(0.05, 1.45 - half);
                                 // Junta de chunk: la lamina se alarga solo hasta
                                 // tocar la lamina del borde (interior a 0,4-0,6 m
                                 // del filo); si la cara ya llego (faceZ/borde) no
@@ -2529,11 +2862,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                                 return 0;
                             };
                             if (kind === 'x') {
-                                box.maxZ += extTo(pS, box.maxZ, posZ, g[x][N - 1] === 1);
-                                box.minZ -= extTo(pN, box.minZ, posZ, g[x][0] === 1);
+                                box.maxZ += extTo(pS, wallTMap.get(key(x, z + 1)) || 0.4, box.maxZ, posZ, g[x][N - 1] === 1);
+                                box.minZ -= extTo(pN, wallTMap.get(key(x, z - 1)) || 0.4, box.minZ, posZ, g[x][0] === 1);
                             } else {
-                                box.maxX += extTo(pE, box.maxX, posX, g[N - 1][z] === 1);
-                                box.minX -= extTo(pW, box.minX, posX, g[0][z] === 1);
+                                box.maxX += extTo(pE, wallTMap.get(key(x + 1, z)) || 0.4, box.maxX, posX, g[N - 1][z] === 1);
+                                box.minX -= extTo(pW, wallTMap.get(key(x - 1, z)) || 0.4, box.minX, posX, g[0][z] === 1);
                             }
                             // Extension LATERAL: si la lamina queda anclada en el
                             // borde opuesto de su celda y el poste esta centrado,
@@ -2648,6 +2981,71 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             addInst(offL, Materials.lampOff);
             addInst(flickL, Materials.lampFlicker);
             addInst(litL, Materials.lampLit);
+
+            // ---- GRAFITI en las paredes (100 variantes, blanco/negro/rojo) ----
+            // RNG propio del chunk: no altera la generacion del mundo y, con la
+            // misma semilla, toda la sala ve exactamente los mismos grafitis.
+            this.placeChunkGraffiti(ch, wallKind, key, curvedCells);
+        }
+
+        // ---- GRAFITI (100 variantes, blanco/negro/rojo) sobre las paredes ----
+        // Se eligen caras expuestas de paredes rectas (las curvas se omiten:
+        // su superficie no es plana). La cara sale de wallFaceMap, que guarda
+        // la caja REAL de cada celda (incluidos los alargues), asi el plano
+        // queda pegado a la superficie visible y no flotando.
+        placeChunkGraffiti(ch, wallKind, key, curvedCells) {
+            const N = CHUNK_SIZE;
+            const rng = mulberry32(hash2(ch.cx * 7919 + 101, ch.cz * 104729 + 503));
+            const g = ch.grid;
+            const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
+            const candidates = [];
+            for (let x = 0; x < N; x++) {
+                for (let z = 0; z < N; z++) {
+                    const k = key(x, z);
+                    if (g[x][z] !== 1 || curvedCells.has(k)) continue;
+                    const kind = wallKind.get(k);
+                    if (kind !== 'x' && kind !== 'z' && kind !== 'post' && kind !== 'border') continue;
+                    for (const [dx, dz, d] of dirs) {
+                        const nx = x + dx, nz = z + dz;
+                        if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
+                        if (g[nx][nz] === 0 || g[nx][nz] === 2) candidates.push([x, z, d]);
+                    }
+                }
+            }
+            if (!candidates.length) return;
+            const geo = new THREE.PlaneGeometry(1, 1);
+            const placed = new Set();
+            const count = 2 + Math.floor(rng() * 5);   // 2-6 grafitis por chunk
+            for (let i = 0; i < count; i++) {
+                const c = candidates[Math.floor(rng() * candidates.length)];
+                const fk = c[0] + ',' + c[1] + c[2];
+                if (placed.has(fk)) continue;
+                placed.add(fk);
+                const box = ch.wallFaceMap.get(key(c[0], c[1]));
+                if (!box) continue;
+                const color = GRAFFITI_COLORS[Math.floor(rng() * GRAFFITI_COLORS.length)];
+                const variant = Math.floor(rng() * GRAFFITI_POOL.length);
+                // Sin luces (como la tiza): el grafiti se ve tambien en las
+                // zonas de apagon, no solo bajo lamparas encendidas
+                const mat = new THREE.MeshBasicMaterial({
+                    map: graffitiTexture(variant, color),
+                    transparent: true
+                });
+                const m = new THREE.Mesh(geo, mat);
+                const w = 0.85 + rng() * 0.85;          // 0,85-1,7 m de ancho
+                const h = 0.5 + rng() * 0.55;           // 0,5-1,05 m de alto
+                m.scale.set(w, h, 1);
+                m.position.y = 1.05 + rng() * 1.15;     // lejos de rodapie y techo
+                const mx = (box.minX + box.maxX) / 2;
+                const mz = (box.minZ + box.maxZ) / 2;
+                if (c[2] === 'W') { m.position.set(box.minX - 0.022, m.position.y, mz); m.rotation.y = -Math.PI / 2; }
+                else if (c[2] === 'E') { m.position.set(box.maxX + 0.022, m.position.y, mz); m.rotation.y = Math.PI / 2; }
+                else if (c[2] === 'S') { m.position.set(mx, m.position.y, box.minZ - 0.022); m.rotation.y = Math.PI; }
+                else { m.position.set(mx, m.position.y, box.maxZ + 0.022); m.rotation.y = 0; }
+                m.rotation.z = (rng() - 0.5) * 0.22;    // ligeramente torcido
+                this.scene.add(m);
+                ch.meshes.push(m);
+            }
         }
 
         // Elige (de vez en cuando) UN tramo recto interior para convertirlo
@@ -2730,17 +3128,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const fixed0 = kind === 'x' ? ox + (first[0] + 0.5) * C : oz + (first[1] + 0.5) * C;
 
             // Sellado de extremos: como las paredes rectas, la pared curva se
-            // ALARGA hacia el poste/borde contiguo (misma extension: 1,12 m a
-            // postes, 2,45 m a bordes de chunk). Sin esto, un tramo curvo que
-            // terminaba en un borde dejaba un hueco de ~2 m por el que se
-            // colaba a la zona de atras de la pared.
+            // ALARGA hacia el poste/borde contiguo: hasta tocar la cara del
+            // poste (1,45 m menos su medio grosor) o 2,45 m a bordes de chunk.
+            // Sin esto, un tramo curvo que terminaba en un borde dejaba un
+            // hueco de ~2 m por el que se colaba a la zona de atras de la pared.
             const nk0 = kind === 'x' ? wallKind.get(key(first[0], first[1] - 1)) : wallKind.get(key(first[0] - 1, first[1]));
             const nk1 = kind === 'x' ? wallKind.get(key(last[0], last[1] + 1)) : wallKind.get(key(last[0] + 1, last[1]));
             // Sellado de extremos solo contra muro real: si la celda vecina es
             // una PUERTA del borde de chunk (hueco abierto), la curva termina
             // justa en su borde y no se mete en el vano.
             const extFor = (nk, cx2, cz2) => {
-                if (nk === 'post') return 1.12;
+                // El poste adopta el grosor de su pared (wallTMap guarda su
+                // medio grosor): la curva se alarga hasta tocar su cara
+                if (nk === 'post') return Math.max(0.05, 1.45 - (wallTMap.get(key(cx2, cz2)) || 0.525));
                 if (nk === 'border' && g[cx2] && g[cx2][cz2] === 1) return 2.45;
                 return 0;
             };
@@ -4542,11 +4942,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
             // Piscina de luces de techo AMARILLENTAS (0xffd878): antes eran 8
             // focos con radio 9 m que no llegaban ni a la lampara vecina y el
-            // pasillo quedaba negro hasta pisar cada foco. Ahora 28 focos con
-            // radio 16 m, repartidos con prioridad a las lamparas VISIBLES en
-            // pantalla: toda lampara a la vista tiene su luz.
+            // pasillo quedaba negro hasta pisar cada foco. Ahora 64 focos con
+            // radio 16 m: se iluminan siempre las 64 lamparas MAS CERCANAS
+            // (ver updateLights), asi una sala grande o un cruce con muchas
+            // lamparas queda entero encendido.
             this.lightPool = [];
-            for (let i = 0; i < 28; i++) {
+            for (let i = 0; i < 64; i++) {
                 const pl = new THREE.PointLight(0xffd878, 0, 16, 2.0);
                 this.scene.add(pl);
                 this.lightPool.push(pl);
