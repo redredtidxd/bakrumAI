@@ -31,7 +31,7 @@ Juego de terror procedural estilo Backrooms en el navegador (Three.js).
 
 ## Versión
 
-La versión actual (`v1.9.1`) se muestra en el menú principal y en el HUD. Al hacer cambios:
+La versión actual (`v1.9.2`) se muestra en el menú principal y en el HUD. Al hacer cambios:
 
 1. Sube `GAME_VERSION` en `js/game.js` (p. ej. `1.5.0`).
 2. Actualiza el `?v=...` de los `<script>`/`<link>` de `index.html` al mismo número (así el navegador descarta la caché vieja y los jugadores ven la versión nueva sin Ctrl+F5).
@@ -61,6 +61,15 @@ Abre el juego desde el móvil y se activan los controles táctiles automáticame
 - **Cámaras de seguridad**: montadas en las paredes; giran la cabeza y encienden su LED rojo cuando te vigilan (y miran SIEMPRE hacia ti, nunca al lado contrario), y su imagen se ve en el monitor de las salas de seguridad.
 - **Pilas almacenables**: mantén **[I]** para recargar la linterna con las pilas de repuesto guardadas; úsalas también para dar energía a las puertas de metal.
 - **Callejones sin salida variados**: rectos, en L, anchos, con alcoba lateral o con habitación muerta al fondo (a veces con un pilar que obliga a rodearlo).
+
+## Novedades de v1.9.2
+
+- **Mapa compartido arreglado**: el mapa que descubre cada jugador no se publicaba nunca a la sala (la referencia se enlazaba antes de crear el mapa y quedaba vacía). Ahora lo que explora un jugador se ve en el mapa de todos.
+- **Sin grafitis apilados**: los grafitis-guia ("POR AQUÍ" + flecha) y las flechas de pared ahora comparten dedup: nunca caen dos en la misma celda/cara de pared (antes salían 3 grafitis uno encima de otro).
+- **"POR AQUÍ" siempre al derecho**: cuando la puerta quedaba a la izquierda se rotaba el plano 180° y el texto salía boca abajo. Ahora se usa una textura espejada: texto legible y flecha apuntando a la izquierda.
+- **Menos flechas y más lejos de las puertas**: máximo 2 flechas por puerta falsa (antes 3), una sola guía (antes 2), a 6-24 m de la puerta (antes 5-30) y nunca sobre la puerta ni sobre otra flecha.
+- **Puertas falsas mucho más raras**: ~1 de cada 17 chunks y una sola (antes 1 de cada 6 con hasta 2).
+- **Armarios sin amontonarse**: los pasillos colocan como mucho 1 armario (antes 2), las salas lo intentan menos veces y ningún armario nace a menos de ~2 celdas de otro.
 
 ## Novedades de v1.9.1
 

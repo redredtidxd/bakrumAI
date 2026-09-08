@@ -266,12 +266,37 @@
         // inclinado o un mueble: la entidad se desliza, nunca los atraviesa.
         hitsWall(x, z) {
             const r = 0.4;
+            const slabBoxSet = this.worldSystem && this.worldSystem.slantedBoxSet;
             for (const box of this._wallBoxes) {
+                // Cajas-segmento de los tabiques inclinados: se saltan (la
+                // colision exacta con el rectangulo rotado de abajo las
+                // sustituye; si no, la escalera de cuadrados atascaba a la
+                // entidad a medio metro de la pared visible)
+                if (slabBoxSet && slabBoxSet.has(box)) continue;
                 if (x + r > box.minX && x - r < box.maxX && z + r > box.minZ && z - r < box.maxZ) return true;
             }
-            if (this.worldSystem && this.worldSystem.slantedAABBs) {
-                for (const b of this.worldSystem.slantedAABBs) {
-                    if (x + r > b.minX && x - r < b.maxX && z + r > b.minZ && z - r < b.maxZ) return true;
+            // Tabiques inclinados: colision EXACTA circulo vs rectangulo
+            // rotado. Antes se usaba la AABB del tabique entero (o la
+            // escalera de cajas por segmento): la entidad se atascaba en las
+            // esquinas de los cuadrados y se quedaba a medio metro de la
+            // pared visible.
+            if (this.worldSystem) {
+                const slabs = this.worldSystem.slantedSlabs;
+                if (slabs && slabs.length) {
+                    for (const s of slabs) {
+                        const cos = Math.cos(s.ang), sin = Math.sin(s.ang);
+                        const dx = x - s.cx, dz = z - s.cz;
+                        const lx = dx * cos - dz * sin;
+                        const lz = dx * sin + dz * cos;
+                        const T = Math.max(s.T0, s.T1);
+                        const cx2 = Math.max(-T / 2, Math.min(T / 2, lx));
+                        const cz2 = Math.max(-s.L / 2, Math.min(s.L / 2, lz));
+                        if (Math.hypot(lx - cx2, lz - cz2) < r) return true;
+                    }
+                } else if (this.worldSystem.slantedAABBs) {
+                    for (const b of this.worldSystem.slantedAABBs) {
+                        if (x + r > b.minX && x - r < b.maxX && z + r > b.minZ && z - r < b.maxZ) return true;
+                    }
                 }
             }
             for (const b of this._furniture) {

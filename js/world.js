@@ -252,8 +252,13 @@
     // Textos de los grafitis-guia hacia las puertas falsas
     const GUIDE_TEXTS = ['SALIDA', 'POR AQUI', 'EXIT', 'ALLI', 'AQUI'];
     const guideTexCache = new Map();
-    function guideArrowTexture(text, colorHex) {
-        const ck = text + '|' + colorHex;
+    // La flecha del plano apunta a lo largo de la pared hacia la puerta: si
+    // la puerta queda a la IZQUIERDA (flip), la textura se genera ESPEJADA
+    // (texto legible a la derecha y flecha apuntando a la izquierda). Antes
+    // se rotaba el plano 180 grados y el texto salia boca abajo ("POR AQUI
+    // al reves").
+    function guideArrowTexture(text, colorHex, flip) {
+        const ck = text + '|' + colorHex + (flip ? '|F' : '');
         let tex = guideTexCache.get(ck);
         if (tex) return tex;
         const canvas = document.createElement('canvas');
@@ -261,17 +266,28 @@
         canvas.height = 128;
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, 256, 128);
-        // Texto a la izquierda, flecha grande apuntando a la derecha
+        // Texto a un lado, flecha grande apuntando hacia el otro
         ctx.font = '900 46px "Segoe Print", "Comic Sans MS", "Marker Felt", cursive';
-        ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = colorHex;
-        ctx.globalAlpha = 0.4;
-        ctx.fillText(text, 16, 62);
-        ctx.globalAlpha = 0.95;
-        ctx.fillText(text, 12, 60);
-        ctx.globalAlpha = 1;
+        if (flip) {
+            ctx.textAlign = 'right';
+            ctx.globalAlpha = 0.4;
+            ctx.fillText(text, 244, 62);
+            ctx.globalAlpha = 0.95;
+            ctx.fillText(text, 248, 60);
+            ctx.globalAlpha = 1;
+        } else {
+            ctx.textAlign = 'left';
+            ctx.globalAlpha = 0.4;
+            ctx.fillText(text, 16, 62);
+            ctx.globalAlpha = 0.95;
+            ctx.fillText(text, 12, 60);
+            ctx.globalAlpha = 1;
+        }
         const drawArrow = (w, style) => {
+            ctx.save();
+            if (flip) { ctx.translate(384, 0); ctx.scale(-1, 1); }
             ctx.lineWidth = w;
             ctx.strokeStyle = style;
             ctx.lineCap = 'round';
@@ -283,6 +299,7 @@
             ctx.lineTo(234, 64);
             ctx.lineTo(196, 94);
             ctx.stroke();
+            ctx.restore();
         };
         drawArrow(15, 'rgba(10, 10, 8, 0.55)');
         drawArrow(10, colorHex);
@@ -725,13 +742,23 @@
             this.lamps = lamps;
             this.walkableCells = walkable;
             this.pickups = pickups;
-            // Tabiques inclinados de los chunks cargados (para la IA de la entidad)
+            // Tabiques inclinados de los chunks cargados (para la IA de la
+            // entidad y para la colision EXACTA del jugador)
             this.slantedAABBs = [];
+            this.slantedSlabs = [];
+            // Cajas-segmento de los tabiques: el jugador y la entidad las
+            // SALTAN en su colision AABB (usarian la escalera de cuadrados y
+            // se quedarian a ~0,8 m de la cara real; la colision exacta con
+            // el rectangulo rotado las sustituye). Set por referencia: son
+            // los MISMO objetos que entran en wallBoxes.
+            this.slantedBoxSet = new Set();
             this.cameras = [];
             this.securityRooms = [];
             for (const ch of this.chunks.values()) {
                 if (!ch.loaded) continue;
                 if (ch.slantedAABBs) this.slantedAABBs.push(...ch.slantedAABBs);
+                if (ch.slantedWalls) this.slantedSlabs.push(...ch.slantedWalls);
+                if (ch.slantedBoxes) for (const b of ch.slantedBoxes) this.slantedBoxSet.add(b);
                 if (ch.cameras) this.cameras.push(...ch.cameras);
                 if (ch.securityRooms) this.securityRooms.push(...ch.securityRooms);
                 // Puerta de metal CERRADA = caja de colision: bloquea al
@@ -742,8 +769,23 @@
             }
         }
 
-        // True si el punto (mundo, XZ) cae dentro de un tabique inclinado
+        // True si el punto (mundo, XZ) cae dentro de un tabique inclinado.
+        // Prueba EXACTA contra el rectangulo rotado (antes usaba la AABB
+        // envolvente del tabique entero: para un tabique a 45 grados la AABB
+        // es un cuadrado ~2x mas grande que la pared, y la entidad evitaba
+        // las esquinas del cuadrado aunque fueran suelo libre).
         pointInSlab(x, z) {
+            const slabs = this.slantedSlabs;
+            if (slabs && slabs.length) {
+                for (const s of slabs) {
+                    const dx = x - s.cx, dz = z - s.cz;
+                    const cos = Math.cos(s.ang), sin = Math.sin(s.ang);
+                    const lx = dx * cos - dz * sin;
+                    const lz = dx * sin + dz * cos;
+                    if (Math.abs(lx) <= Math.max(s.T0, s.T1) / 2 && Math.abs(lz) <= s.L / 2) return true;
+                }
+                return false;
+            }
             for (const b of this.slantedAABBs) {
                 if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ) return true;
             }
@@ -1528,6 +1570,10 @@
             // con su angulo real (no como cajas cuadradas): se conservan al
             // descargar, igual que wallBoxes.
             ch.slantedWalls = [];
+            // Cajas AABB de colision POR SEGMENTO de los tabiques inclinados:
+            // el mapa las SALTA (solo dibuja el rectangulo rotado) y la
+            // colision del jugador usa la geometria exacta del tabique.
+            ch.slantedBoxes = [];
 
             // RNG PROPIO DE CADA CONSTRUCCION. La rejilla (generateLayout)
             // se genera UNA sola vez por chunk, pero las MALLAS se
@@ -2391,10 +2437,11 @@
             }
             if (!candidates.length) return;
             const placedCells = new Set();
-            // RARAS: ~1 de cada 6 chunks tiene una puerta falsa (antes ~3 de
-            // cada 4: aparecian por todas partes y dejaban de sorprender)
-            if (rng() >= 0.16) return;
-            let budget = 1 + (rng() < 0.3 ? 1 : 0);
+            // MUY RARAS: ~1 de cada 17 chunks tiene UNA puerta falsa (antes
+            // 1 de cada 6 con hasta 2 puertas: aparecian por todas partes y
+            // dejaban de sorprender)
+            if (rng() >= 0.06) return;
+            let budget = 1;
             for (let i = 0; i < budget; i++) {
                 if (!candidates.length) break;
                 const ci = Math.floor(rng() * candidates.length);
@@ -2479,14 +2526,25 @@
                 }
                 let placedCount = 0;
                 for (const c of cands) {
-                    if (placedCount >= 2) break;
+                    if (placedCount >= 1) break;   // UNA guia por puerta (antes 2: demasiado)
                     const fk = c.x + ',' + c.z + c.d;
                     if (placed.has(fk)) continue;
+                    // Nada de guias encima de flechas-grafiti ya pintadas (y
+                    // al reves: las flechas saltan las celdas de guia). Sin
+                    // este dedup mutuo salian 3 grafitis apilados en la misma
+                    // pared (texto + flechas encimados). Misma clave que las
+                    // flechas: 'cx:celdaX:cz:celdaZ+cara'.
+                    if (this._arrowCells.has(ch.cx + ':' + c.x + ':' + ch.cz + ':' + c.z + c.d)) continue;
                     placed.add(fk);
                     const color = GRAFFITI_COLORS[Math.floor(rng() * GRAFFITI_COLORS.length)];
                     const text = GUIDE_TEXTS[Math.floor(rng() * GUIDE_TEXTS.length)];
+                    // La flecha del plano apunta a lo largo de la pared hacia
+                    // la puerta: si queda detras (local -X), textura ESPEJADA
+                    // (antes se rotaba el plano 180 grados: "POR AQUI" al reves)
+                    const t = TANGENT[c.d];
+                    const along = (door.x - c.wx) * t[0] + (door.z - c.wz) * t[2];
                     const mat = new THREE.MeshBasicMaterial({
-                        map: guideArrowTexture(text, color),
+                        map: guideArrowTexture(text, color, along < 0),
                         transparent: true
                     });
                     const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
@@ -2494,17 +2552,13 @@
                     const h = 0.85;
                     m.scale.set(w, h, 1);
                     m.position.y = 1.35;
-                    // Giro para que la flecha del plano apunte hacia la puerta
-                    // a lo largo de la pared (local +X = tangente de la cara)
-                    const t = TANGENT[c.d];
-                    const along = (door.x - c.wx) * t[0] + (door.z - c.wz) * t[2];
-                    m.rotation.z = along < 0 ? Math.PI : 0;
                     if (c.d === 'W') { m.position.set(c.box.minX - 0.022, 1.35, c.wz); m.rotation.y = -Math.PI / 2; }
                     else if (c.d === 'E') { m.position.set(c.box.maxX + 0.022, 1.35, c.wz); m.rotation.y = Math.PI / 2; }
                     else if (c.d === 'S') { m.position.set(c.wx, 1.35, c.box.minZ - 0.022); m.rotation.y = Math.PI; }
                     else { m.position.set(c.wx, 1.35, c.box.maxZ + 0.022); m.rotation.y = 0; }
                     this.scene.add(m);
                     ch.meshes.push(m);
+                    (ch.guideCells = ch.guideCells || new Set()).add(c.x + ',' + c.z + c.d);
                     placedCount++;
                 }
             }
@@ -2545,7 +2599,7 @@
             for (let di = 0; di < ch.fakeDoors.length; di++) {
                 const door = ch.fakeDoors[di];
                 const doorKey = ch.key + '#' + di;
-                if ((this._arrowDoorCount.get(doorKey) || 0) >= 3) continue;
+                if ((this._arrowDoorCount.get(doorKey) || 0) >= 2) continue;
                 const cands = [];
                 for (const lc of searchChunks) {
                     const g = lc.grid;
@@ -2571,6 +2625,11 @@
                                 if (d === 'E' && x === N - 1) continue;
                                 if (d === 'S' && z === 0) continue;
                                 if (d === 'N' && z === N - 1) continue;
+                                // Las flechas no pisan las celdas con
+                                // grafiti-guia (texto + flecha grande): sin
+                                // este dedup mutuo se apilaban 3 graffitis en
+                                // la misma pared
+                                if (lc.guideCells && lc.guideCells.has(x + ',' + z + d)) continue;
                                 const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
                                 if (faceLen < 1.2) continue;
                                 // La linea de vision se mide desde el CENTRO de
@@ -2582,7 +2641,9 @@
                                 const wx = ox + (x + 0.5) * C;
                                 const wz = oz + (z + 0.5) * C;
                                 const dist = Math.hypot(wx - door.x, wz - door.z);
-                                if (dist < 5 || dist > 30) continue;
+                                // Lejos de la puerta (6-24 m): ni flechas junto
+                                // a la puerta ni un campo de flechas infinito
+                                if (dist < 6 || dist > 24) continue;
                                 if (!this.lineClear(wx, wz, door.x, door.z)) continue;
                                 cands.push({ lc, x, z, d, wx, wz, box, faceLen });
                             }
@@ -2594,7 +2655,7 @@
                     [cands[i], cands[j]] = [cands[j], cands[i]];
                 }
                 for (const c of cands) {
-                    if ((this._arrowDoorCount.get(doorKey) || 0) >= 3) break;
+                    if ((this._arrowDoorCount.get(doorKey) || 0) >= 2) break;
                     // Clave GLOBAL (chunk + celda local + cara): dos chunks
                     // distintos podrian tener la misma celda local
                     const fk = c.lc.cx + ':' + c.x + ':' + c.lc.cz + ':' + c.z + c.d;
@@ -3267,6 +3328,13 @@
                     minZ: Math.min(...pts.map(p => p.z)), maxZ: Math.max(...pts.map(p => p.z))
                 });
             }
+            // El mapa las salta (isSlabBox las busca aqui) y la colision del
+            // jugador usa la geometria exacta, pero siguen en wallBoxes para
+            // muebles, lineas de vision y como caja conservadora.
+            if (ch) {
+                const sb = (ch.slantedBoxes = ch.slantedBoxes || []);
+                for (const b of boxes) sb.push(b);
+            }
 
             // Malla: las DOS formas usan la geometria de prisma con UVs de
             // papel pintado repetidos cada celda (antes los rectangulares se
@@ -3458,7 +3526,10 @@
                             this.dynamicFurniture.push({ mesh: chair, x: chairX, z: chairZ, fid: chair.userData.fid });
                             ch.occ.push({ x: chairX, z: chairZ, radius: 0.55 });
                         }
-                    } else {
+                    } else if (Math.random() < 0.45) {
+                        // Armarios en las salas MENOS comunes (antes 40% de
+                        // cada pieza de mobiliario intentaba un armario: las
+                        // salas acababan llenas de armarios pegados)
                         this.placeCabinetInRoom(rw, ch);
                     }
                 }
@@ -3569,6 +3640,8 @@
             this.furnitureMeshes.push(group);
             group.userData.fid = 'f:' + Math.round(bx * 10) + ':' + Math.round(bz * 10);
             if (ch) ch.occ.push({ x: bx, z: bz, radius: occupiedRadius * 0.9 });
+            // Registro para el espaciado entre armarios (celda de mundo aprox.)
+            if (ch) (ch.cabinetCells = ch.cabinetCells || []).push([Math.floor(bx / CELL_SIZE), Math.floor(bz / CELL_SIZE)]);
             this.furnitureBoxes.push({
                 minX: bb.min.x - 0.04, maxX: bb.max.x + 0.04,
                 minZ: bb.min.z - 0.04, maxZ: bb.max.z + 0.04
@@ -3708,7 +3781,9 @@
 
         placeCorridorCabinets(ch) {
             const C = CELL_SIZE;
-            const target = Math.min(2, Math.floor(ch.openCells.length / 110));
+            // UN armario de pasillo por chunk como mucho (antes hasta 2 y, con
+            // los de las salas, los pasillos quedaban llenos de armarios juntos)
+            const target = Math.min(1, Math.floor(ch.openCells.length / 110));
             let placedCount = 0;
 
             const cells = ch.openCells.slice();
@@ -3721,6 +3796,14 @@
                 if (placedCount >= target) break;
                 const cx = cell.x, cz = cell.z;
                 if (this.gridAt(cx, cz) !== 0) continue;
+                // Los armarios NO se amontonan: nada de otro armario a menos
+                // de ~2 celdas (los de las salas ya estan en ch.cabinetCells)
+                const cabs = ch.cabinetCells || [];
+                let nearCab = false;
+                for (const cc of cabs) {
+                    if (Math.abs(cc[0] - cx) <= 2 && Math.abs(cc[1] - cz) <= 2) { nearCab = true; break; }
+                }
+                if (nearCab) continue;
 
                 // Solo tramos rectos: exactamente UNA pared vecina
                 const dirs = [];

@@ -10,7 +10,7 @@
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.9.1';
+    const GAME_VERSION = '1.9.2';
 
     class BackroomsGame {
         constructor() {
@@ -129,8 +129,9 @@
             // dibujos visibles para toda la sala
             this.net.worldSync = this.worldSystem;
             this.net.onChalkDot = (pt, n, c) => this.chalkSystem.addDot(pt, n, c);
-            // Mapa compartido: publico lo que exploro y fusiono lo de los demas
-            this.net.mapChunksRef = this.exploredChunks;
+            // Mapa compartido: publico lo que exploro y fusiono lo de los demas.
+            // OJO: mapChunksRef se enlaza DESPUES de crear exploredChunks (si
+            // se enlaza antes queda undefined y nadie publica su mapa).
             this.net.onMapData = (chunks) => this.mergeMapData(chunks);
             // Puertas de metal de las salas de seguridad: el estado abierto/
             // cerrado se comparte con la sala (la pila es de cada jugador)
@@ -166,6 +167,7 @@
             // Mapa del backroom: se desbloquea al explorar y se comparte con
             // la sala (bitsets de celdas por chunk, sync por MQTT)
             this.exploredChunks = new Map();   // "gx,gz" -> Uint8Array(32) (256 bits)
+            this.net.mapChunksRef = this.exploredChunks;
             this.mapDirty = false;
             this.mapOpen = false;
             this.mapView = { x: 0, z: 0, zoom: 9 };   // centro (mundo) + px por celda
@@ -1071,12 +1073,14 @@
                     // no existian en el 3D ("puedo estar en una pared que el
                     // mapa dice que no existe").
                     const isSlabBox = (b) => {
-                        // Las cajas AABB de los tabiques inclinados se saltan:
-                        // su colision son segmentos cuadrados que en el mapa
-                        // parecian "hitboxes cuadrados". El tabique se dibuja
-                        // rotado mas abajo con su angulo real.
-                        if (!ch.slantedAABBs || !ch.slantedAABBs.length) return false;
-                        for (const s of ch.slantedAABBs) {
+                        // Las cajas de colision POR SEGMENTO de los tabiques
+                        // inclinados se saltan: son AABBs de segmentos rotados
+                        // que en el mapa parecian "hitboxes cuadrados" (la
+                        // escalera de cuadrados alrededor de la diagonal, con
+                        // huecos de suelo entre ellos). El tabique se dibuja
+                        // rotado mas abajo con su angulo real y solo el.
+                        if (!ch.slantedBoxes || !ch.slantedBoxes.length) return false;
+                        for (const s of ch.slantedBoxes) {
                             if (Math.abs(b.minX - s.minX) < 0.02 && Math.abs(b.maxX - s.maxX) < 0.02 &&
                                 Math.abs(b.minZ - s.minZ) < 0.02 && Math.abs(b.maxZ - s.maxZ) < 0.02) return true;
                         }
@@ -1776,12 +1780,67 @@
             let newZ = this.player.pos.z + deltaZ;
             const r = this.player.radius;
 
+            const slabBoxSet = this.worldSystem.slantedBoxSet;
             for (let box of this.worldSystem.wallBoxes) {
+                // Cajas-segmento de los tabiques inclinados: se saltan, la
+                // colision exacta con el rectangulo rotado (mas abajo) las
+                // sustituye. Sin esto la escalera de cuadrados paraba al
+                // jugador a ~0,8 m de la cara real de la pared diagonal.
+                if (slabBoxSet && slabBoxSet.has(box)) continue;
                 if (newX + r > box.minX && newX - r < box.maxX && this.player.pos.z + r > box.minZ && this.player.pos.z - r < box.maxZ) {
                     newX = deltaX > 0 ? box.minX - r : box.maxX + r;
                 }
                 if (this.player.pos.x + r > box.minX && this.player.pos.x - r < box.maxX && newZ + r > box.minZ && newZ - r < box.maxZ) {
                     newZ = deltaZ > 0 ? box.minZ - r : box.maxZ + r;
+                }
+            }
+
+            // Tabiques inclinados: colision EXACTA contra el rectangulo
+            // rotado (circulo del jugador vs rectangulo inflado por su
+            // radio). Las cajas AABB por segmentos de arriba son solo una
+            // caja conservadora; esta pasada empuja contra la cara REAL de
+            // la pared en diagonal. Antes el jugador chocaba contra la
+            // escalera de cuadrados de la colision: se quedaba a ~0,4 m de
+            // la cara visible y la pared parecia mal colocada.
+            const slabs = this.worldSystem.slantedSlabs;
+            if (slabs && slabs.length) {
+                for (const s of slabs) {
+                    const cos = Math.cos(s.ang), sin = Math.sin(s.ang);
+                    const dx = newX - s.cx, dz = newZ - s.cz;
+                    const lx = dx * cos - dz * sin;
+                    const lz = dx * sin + dz * cos;
+                    const T = Math.max(s.T0, s.T1);
+                    const cx2 = Math.max(-T / 2, Math.min(T / 2, lx));
+                    const cz2 = Math.max(-s.L / 2, Math.min(s.L / 2, lz));
+                    let ddx = lx - cx2, ddz = lz - cz2;
+                    const d = Math.hypot(ddx, ddz);
+                    if (d < r) {
+                        let nlx, nlz;
+                        if (d < 1e-6) {
+                            // Centro dentro del tabique: salir por el eje de
+                            // menor penetracion, hasta el radio fuera de la
+                            // cara mas cercana
+                            const penX = T / 2 - Math.abs(lx);
+                            const penZ = s.L / 2 - Math.abs(lz);
+                            if (penX < penZ) {
+                                const dir = lx >= 0 ? 1 : -1;
+                                nlx = dir * (T / 2 + r); nlz = lz;
+                            } else {
+                                const dir = lz >= 0 ? 1 : -1;
+                                nlx = lx; nlz = dir * (s.L / 2 + r);
+                            }
+                        } else {
+                            // Fuera del tabique: empujar desde el punto mas
+                            // cercano del rectangulo ALEJANDOSE de el (antes
+                            // la resta empujaba hacia la pared y el jugador
+                            // la atravesaba)
+                            ddx /= d; ddz /= d;
+                            nlx = cx2 + ddx * r;
+                            nlz = cz2 + ddz * r;
+                        }
+                        newX = s.cx + nlx * cos + nlz * sin;
+                        newZ = s.cz - nlx * sin + nlz * cos;
+                    }
                 }
             }
 
