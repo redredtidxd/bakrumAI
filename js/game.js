@@ -10,7 +10,7 @@
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.7.1';
+    const GAME_VERSION = '1.8.0';
 
     class BackroomsGame {
         constructor() {
@@ -1054,29 +1054,49 @@
                         ctx.fillRect(bx - Math.floor(bw / 2), bz - Math.floor(bh / 2), bw, bh);
                     }
                 } else {
-                    // Chunk lejano (descargado): paredes finas aproximadas
-                    // desde la rejilla, orientadas como las laminas reales
+                    // Chunk lejano (descargado): muros aproximados como en el
+                    // 3D real (buildChunkMeshes). Antes se pintaba un cuadrado
+                    // en TODA celda de muro y el mapa mostraba manchas negras
+                    // que en el juego eran suelo libre (postes aislados que el
+                    // 3D elimina) o muros desplazados (la junta del borde
+                    // salia centrada en la celda): "cosas negras que no son
+                    // las paredes reales".
                     const T = 0.6;
+                    const TH = T / C / 2;   // medio grosor en fraccion de celda
+                    const isOpen = (xx, zz) => xx >= 0 && xx < N && zz >= 0 && zz < N && (g[xx][zz] === 0 || g[xx][zz] === 2);
+                    const isWall = (xx, zz) => xx >= 0 && xx < N && zz >= 0 && zz < N && g[xx][zz] === 1;
                     for (let x = 0; x < N; x++) {
                         for (let z = 0; z < N; z++) {
                             if (g[x][z] !== 1 || !isExplored(x, z)) continue;
-                            const openW = x > 0 && (g[x - 1][z] === 0 || g[x - 1][z] === 2);
-                            const openE = x < N - 1 && (g[x + 1][z] === 0 || g[x + 1][z] === 2);
-                            const openN = z > 0 && (g[x][z - 1] === 0 || g[x][z - 1] === 2);
-                            const openS = z < N - 1 && (g[x][z + 1] === 0 || g[x][z + 1] === 2);
-                            let x0r, z0r, x1r, z1r;
-                            if ((openW || openE) && !(openN || openS)) {
-                                x0r = (x + 0.5 - T / C / 2) * cell; x1r = (x + 0.5 + T / C / 2) * cell;
-                                z0r = z * cell; z1r = (z + 1) * cell;
-                            } else if ((openN || openS) && !(openW || openE)) {
-                                x0r = x * cell; x1r = (x + 1) * cell;
-                                z0r = (z + 0.5 - T / C / 2) * cell; z1r = (z + 0.5 + T / C / 2) * cell;
+                            const openW = isOpen(x - 1, z), openE = isOpen(x + 1, z);
+                            const openN = isOpen(x, z - 1), openS = isOpen(x, z + 1);
+                            const paint = (x0r, z0r, x1r, z1r) => {
+                                ctx.fillRect(Math.round(sx0 + x0r), Math.round(sy0 + z0r),
+                                    Math.max(1, Math.ceil(x1r - x0r)), Math.max(1, Math.ceil(z1r - z0r)));
+                            };
+                            if (x === 0 || x === N - 1 || z === 0 || z === N - 1) {
+                                // Junta entre chunks: franja pegada al borde
+                                // (en las esquinas, las dos franjas)
+                                if (x === 0) paint(0, 0, TH * 2 * cell, cell);
+                                else if (x === N - 1) paint(cell - TH * 2 * cell, 0, cell, cell);
+                                if (z === 0) paint(0, 0, cell, TH * 2 * cell);
+                                else if (z === N - 1) paint(0, cell - TH * 2 * cell, cell, cell);
+                            } else if ((openW || openE) && (openN || openS)) {
+                                // Poste de esquina/final: cuadrado SOLO si toca
+                                // una pared real (los aislados se eliminan en
+                                // el 3D y no deben pintarse)
+                                if (!isWall(x - 1, z) && !isWall(x + 1, z) && !isWall(x, z - 1) && !isWall(x, z + 1)) continue;
+                                paint((x + 0.5 - TH) * cell, (z + 0.5 - TH) * cell, (x + 0.5 + TH) * cell, (z + 0.5 + TH) * cell);
+                            } else if (openW || openE) {
+                                // Lamina 'x' (corre a lo largo de Z)
+                                paint((x + 0.5 - TH) * cell, z * cell, (x + 0.5 + TH) * cell, (z + 1) * cell);
+                            } else if (openN || openS) {
+                                // Lamina 'z' (corre a lo largo de X)
+                                paint(x * cell, (z + 0.5 - TH) * cell, (x + 1) * cell, (z + 0.5 + TH) * cell);
                             } else {
-                                x0r = (x + 0.5 - T / C / 2) * cell; x1r = (x + 0.5 + T / C / 2) * cell;
-                                z0r = (z + 0.5 - T / C / 2) * cell; z1r = (z + 0.5 + T / C / 2) * cell;
+                                // Nucleo macizo: celda entera (bloque solido 3D)
+                                paint(0, 0, cell, cell);
                             }
-                            ctx.fillRect(Math.round(sx0 + x0r), Math.round(sy0 + z0r),
-                                Math.max(1, Math.ceil(x1r - x0r)), Math.max(1, Math.ceil(z1r - z0r)));
                         }
                     }
                     // Pilares de chunks lejanos: cuadrados finos
@@ -1565,11 +1585,32 @@
             // En una sala de seguridad con la puerta CERRADA la entidad no
             // puede verte: nada de drenaje (ni siquiera el del espectro sync)
             if (!this.inSecurityRoomClosed()) {
-                if (this.entity.active && this.entity.state === 'CHASING') {
-                    this.player.sanity -= 4.0 * dt;
-                } else if (this.net.entityNear(this.player.pos, 14)) {
-                    // En multijugador el espectro sincronizado tambien drena cordura
-                    this.player.sanity -= 3.0 * dt;
+                // La cordura drena de verdad SOLO mientras la entidad te VE
+                // y esta cerca (o muy cerca aunque no te vea). Antes bastaba
+                // con que el estado fuese CHASING: al perderle la pista
+                // seguia drenando a 4/s hasta llegar a tu ultima posicion
+                // ("al alejarme y perderlo, mi cordura sigue bajando rapido,
+                // da igual lo que haga").
+                const ent = this.entity;
+                if (ent.active) {
+                    const d = Math.hypot(ent.pos.x - this.player.pos.x, ent.pos.z - this.player.pos.z);
+                    if (ent.state === 'CHASING' && ent.seesPlayer && d < 25) {
+                        this.player.sanity -= 4.0 * dt;
+                    } else if (ent.state === 'CHASING' && d < 10) {
+                        this.player.sanity -= 1.0 * dt;
+                    } else if (ent.state === 'SEARCHING' && d < 10) {
+                        this.player.sanity -= 0.6 * dt;
+                    }
+                }
+                // En multijugador el espectro sincronizado tambien drena
+                // cordura, pero solo con linea de vision despejada: antes
+                // bastaba con estar a menos de 14 m (a traves de los muros)
+                if (this.net.entityActive && this.net.entityGhost && Date.now() - this.net.entityLastMsg < 3000) {
+                    const g = this.net.entityGhost.position;
+                    const d = Math.hypot(g.x - this.player.pos.x, g.z - this.player.pos.z);
+                    if (d < 14 && this.net.hasLOS(g.x, g.z, this.player.pos.x, this.player.pos.z, this.worldSystem.wallBoxes)) {
+                        this.player.sanity -= 3.0 * dt;
+                    }
                 }
             }
             this.updateSanityHUD();
@@ -1631,9 +1672,14 @@
                         this.worldSystem.rebuildUnions();
                     }
                 }
-                // La puerta sube al techo al abrirse y baja al cerrarse
+                // La puerta sube al techo al abrirse y baja al cerrarse. El
+                // techo esta a 2,7 m y los paneles miden 2,24 m: el tope es
+                // 2,72 para que el canto inferior quede JUSTO oculto tras el
+                // plano del techo. Antes se paraba en 2,42 y quedaba un
+                // trozo de puerta colgando del techo ("la puerta
+                // entreabierta atravesando la pared").
                 if (r.doorGroup) {
-                    const target = r.state.doorOpen ? 2.42 : 0;
+                    const target = r.state.doorOpen ? 2.72 : 0;
                     r.doorGroup.position.y += (target - r.doorGroup.position.y) * Math.min(1, dt * 6);
                 }
                 // Pantalla de pila del panel de control (solo si estas cerca)

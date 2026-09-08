@@ -58,24 +58,46 @@
         },
 
         createCeilingTexture() {
+            // Falso techo de losetas acusticas (cada loseta = 128 px = 1,4 m):
+            // borde biselado (luz arriba/izquierda, sombra abajo/derecha),
+            // rehundido central y poros de pladur. Antes era una losa plana
+            // con una cruz y parecia un pladur lavado, no un techo de
+            // backrooms.
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d');
 
-            ctx.fillStyle = '#7a7663';
+            ctx.fillStyle = '#757262';
             ctx.fillRect(0, 0, 512, 512);
-
-            ctx.strokeStyle = '#322f25';
-            ctx.lineWidth = 4;
-            ctx.strokeRect(2, 2, 508, 508);
-            ctx.beginPath();
-            ctx.moveTo(256, 0); ctx.lineTo(256, 512);
-            ctx.moveTo(0, 256); ctx.lineTo(512, 256);
-            ctx.stroke();
-
-            ctx.fillStyle = '#4c493c';
-            for (let i = 0; i < 400; i++) {
-                ctx.fillRect(texRng() * 504 + 4, texRng() * 504 + 4, 2, 2);
+            const rng = mulberry32Tex(0xC0FFEE);
+            for (let ty = 0; ty < 4; ty++) {
+                for (let tx = 0; tx < 4; tx++) {
+                    const x0 = tx * 128, y0 = ty * 128;
+                    // Bisel: borde superior/izquierdo claro, inferior/derecho oscuro
+                    ctx.fillStyle = '#8b887a';
+                    ctx.fillRect(x0, y0, 128, 3);
+                    ctx.fillRect(x0, y0, 3, 128);
+                    ctx.fillStyle = '#5d5a4e';
+                    ctx.fillRect(x0, y0 + 125, 128, 3);
+                    ctx.fillRect(x0 + 125, y0, 3, 128);
+                    // Rehundido central
+                    ctx.fillStyle = '#6e6b5d';
+                    ctx.fillRect(x0 + 4, y0 + 4, 120, 120);
+                    // Poros / granulacion del pladur
+                    for (let i = 0; i < 48; i++) {
+                        const px = x0 + 8 + rng() * 112;
+                        const py = y0 + 8 + rng() * 112;
+                        ctx.fillStyle = rng() < 0.5 ? 'rgba(20,18,10,0.10)' : 'rgba(255,255,255,0.05)';
+                        ctx.fillRect(px, py, 2, 2);
+                    }
+                }
+            }
+            // Rejilla de la junta entre losetas
+            ctx.strokeStyle = '#454238';
+            ctx.lineWidth = 2;
+            for (let i = 0; i <= 4; i++) {
+                ctx.beginPath(); ctx.moveTo(i * 128, 0); ctx.lineTo(i * 128, 512); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, i * 128); ctx.lineTo(512, i * 128); ctx.stroke();
             }
 
             const tex = new THREE.CanvasTexture(canvas);

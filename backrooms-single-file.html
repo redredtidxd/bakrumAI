@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>The Backrooms: Nivel 0 - Las Oficinas Infinitas</title>
     <!-- Three.js CDN + Paho MQTT (multijugador).
-         El ?v=1.7.1 fuerza al navegador a recargar los js/css al actualizar
+         El ?v=1.8.0 fuerza al navegador a recargar los js/css al actualizar
          (sube la versión también en js/game.js GAME_VERSION). -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
@@ -846,7 +846,7 @@
         <div class="hud-header">
             <div>
                 <div class="rec-tag"><div class="rec-dot"></div> REC [TAPE-00]</div>
-                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS <span id="hud-version" style="color: #4f4833;">v1.7.1</span></div>
+                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS <span id="hud-version" style="color: #4f4833;">v1.8.0</span></div>
             </div>
             <div class="sanity-container">
                 <div id="coords-label" class="coords-label">POS X:+0000.0 Y:+0001.6 Z:+0000.0</div>
@@ -936,7 +936,7 @@
                 🛰 <b style="color:#a39879;">MULTIJUGADOR · HASTA 6 EXPLORADORES:</b> quienes escriban la <b style="color:#a39879;">MISMA SEMILLA</b> caen en la misma sala (números o <b style="color:#a39879;">letras</b>: da igual mayúsculas o tildes). El código del HUD (SEMILLA) es el que hay que compartir. Si la sala está llena jugarás en solitario.
             </p>
             <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
-            <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.7.1</div>
+            <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.8.0</div>
             <div style="margin-top: 18px; font-size: 12px;">
                 <label for="vol-slider">VOLUMEN:</label>
                 <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="0.7" style="vertical-align:middle; accent-color:#bda052;">
@@ -1063,24 +1063,46 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         },
 
         createCeilingTexture() {
+            // Falso techo de losetas acusticas (cada loseta = 128 px = 1,4 m):
+            // borde biselado (luz arriba/izquierda, sombra abajo/derecha),
+            // rehundido central y poros de pladur. Antes era una losa plana
+            // con una cruz y parecia un pladur lavado, no un techo de
+            // backrooms.
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d');
 
-            ctx.fillStyle = '#7a7663';
+            ctx.fillStyle = '#757262';
             ctx.fillRect(0, 0, 512, 512);
-
-            ctx.strokeStyle = '#322f25';
-            ctx.lineWidth = 4;
-            ctx.strokeRect(2, 2, 508, 508);
-            ctx.beginPath();
-            ctx.moveTo(256, 0); ctx.lineTo(256, 512);
-            ctx.moveTo(0, 256); ctx.lineTo(512, 256);
-            ctx.stroke();
-
-            ctx.fillStyle = '#4c493c';
-            for (let i = 0; i < 400; i++) {
-                ctx.fillRect(texRng() * 504 + 4, texRng() * 504 + 4, 2, 2);
+            const rng = mulberry32Tex(0xC0FFEE);
+            for (let ty = 0; ty < 4; ty++) {
+                for (let tx = 0; tx < 4; tx++) {
+                    const x0 = tx * 128, y0 = ty * 128;
+                    // Bisel: borde superior/izquierdo claro, inferior/derecho oscuro
+                    ctx.fillStyle = '#8b887a';
+                    ctx.fillRect(x0, y0, 128, 3);
+                    ctx.fillRect(x0, y0, 3, 128);
+                    ctx.fillStyle = '#5d5a4e';
+                    ctx.fillRect(x0, y0 + 125, 128, 3);
+                    ctx.fillRect(x0 + 125, y0, 3, 128);
+                    // Rehundido central
+                    ctx.fillStyle = '#6e6b5d';
+                    ctx.fillRect(x0 + 4, y0 + 4, 120, 120);
+                    // Poros / granulacion del pladur
+                    for (let i = 0; i < 48; i++) {
+                        const px = x0 + 8 + rng() * 112;
+                        const py = y0 + 8 + rng() * 112;
+                        ctx.fillStyle = rng() < 0.5 ? 'rgba(20,18,10,0.10)' : 'rgba(255,255,255,0.05)';
+                        ctx.fillRect(px, py, 2, 2);
+                    }
+                }
+            }
+            // Rejilla de la junta entre losetas
+            ctx.strokeStyle = '#454238';
+            ctx.lineWidth = 2;
+            for (let i = 0; i <= 4; i++) {
+                ctx.beginPath(); ctx.moveTo(i * 128, 0); ctx.lineTo(i * 128, 512); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, i * 128); ctx.lineTo(512, i * 128); ctx.stroke();
             }
 
             const tex = new THREE.CanvasTexture(canvas);
@@ -1522,7 +1544,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 group.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.18;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else {
-                group.rotation.y = Math.random() * Math.PI * 2;
+                // De pie: alineada con la rejilla del mundo (0/90/180/270).
+                // Antes el giro Y era aleatorio y las mesas quedaban en
+                // diagonal en las salas ("no rectas").
+                group.rotation.y = Math.floor(Math.random() * 4) * Math.PI / 2;
             }
 
             return group;
@@ -1575,7 +1600,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 group.rotation.x = Math.PI + (Math.random() - 0.5) * 0.12;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else {
-                group.rotation.y = Math.random() * Math.PI * 2;
+                // De pie: alineada con la rejilla (0/90/180/270), como las
+                // mesas; las caidas conservan un giro aleatorio.
+                group.rotation.y = Math.floor(Math.random() * 4) * Math.PI / 2;
             }
 
             return group;
@@ -2161,7 +2188,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             leaf(pw, -W / 2 + 0.005, -a, false);   // hoja izquierda: bisagra en la jamba izquierda
             leaf(pw, W / 2 - 0.005, a, true);       // hoja derecha: bisagra en la jamba derecha, espejada al centro
         } else {
-            leaf(W - 0.01, -W / 2 + 0.005, o.ajar || 0.0);   // hoja unica
+            // Hoja unica: el ajar se NEGA para que la hoja abra SIEMPRE hacia
+            // la habitacion. Con ajar positivo la hoja gira hacia -Z (el plano
+            // del muro) y el canto libre se clavaba ~19 cm dentro de la pared:
+            // "la puerta esta entreabierta atravesando la pared".
+            leaf(W - 0.01, -W / 2 + 0.005, -(o.ajar || 0.0));
         }
         return group;
     }
@@ -2315,6 +2346,27 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }),
         lampOff: new THREE.MeshStandardMaterial({ color: 0x11100c, roughness: 0.9 }),
         lampFrame: new THREE.MeshStandardMaterial({ color: 0x2e2c24, metalness: 0.5, roughness: 0.6 })
+    };
+    // Las paredes son cajas UNITARIAS escaladas por instancia: con las UVs
+    // 0..1 de fabrica, la textura se estiraba una sola vez en cada cara y
+    // los postes/tramos cortos mostraban el papel pintado a otra escala que
+    // las paredes vecinas ("una parte mal hecha de la textura"). Se escala
+    // la UV por el tamanio real de la instancia: el papel se repite cada
+    // 2,8 m (una celda) en horizontal y mantiene el zocalo en vertical en
+    // TODAS las caras, sea cual sea el largo de la lamina o el poste.
+    Materials.wall.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader.replace(
+            '#include <uv_vertex>',
+            `#include <uv_vertex>
+            #ifdef USE_INSTANCING
+            vec3 _instScale = vec3(
+                length(vec3(instanceMatrix[0].x, instanceMatrix[1].x, instanceMatrix[2].x)),
+                length(vec3(instanceMatrix[0].y, instanceMatrix[1].y, instanceMatrix[2].y)),
+                length(vec3(instanceMatrix[0].z, instanceMatrix[1].z, instanceMatrix[2].z))
+            );
+            vUv = uv * vec2(_instScale.x / 2.8, _instScale.y / 2.66);
+            #endif`
+        );
     };
 
     // ---- RNG determinista: el mismo chunk siempre genera el mismo laberinto ----
@@ -3121,8 +3173,15 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.carveSecurityRoom(ch);
 
             // ---- 4) Celdas transitables (coordenadas de mundo) ----
-            for (let x = 1; x < N - 1; x++) {
-                for (let z = 1; z < N - 1; z++) {
+            // Se incluyen TAMBIEN las columnas/filas de borde (0 y N-1): son
+            // suelo real por el que camina el jugador (las puertas entre
+            // chunks se tallan en x=0/15). Antes se saltaban y el grafo de
+            // celdas de la ENTIDAD no podia cruzar de un chunk a otro: el
+            // BFS se quedaba sin camino en cuanto el destino estaba en otro
+            // chunk y la entidad se quedaba QUIETA ("la entidad no se
+            // mueve").
+            for (let x = 0; x < N; x++) {
+                for (let z = 0; z < N; z++) {
                     if (g[x][z] === 0 || g[x][z] === 2) {
                         ch.openCells.push({ x: ch.cx * N + x, z: ch.cz * N + z });
                     }
@@ -4017,7 +4076,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                                 const prz = typeof pr === 'object' ? pr.rz : pr;   // medio grosor en Z
                                 const jb = { minX: posX - prx, maxX: posX + prx, minZ: posZ - prz, maxZ: posZ + prz };
                                 dummy.position.set(posX, WALL_HEIGHT / 2, posZ);
-                                dummy.scale.set(prx * 2, WALL_HEIGHT, prz * 2);
+                                dummy.scale.set(prx * 2, WALL_HEIGHT - 0.04, prz * 2);
                                 dummy.updateMatrix();
                                 wallT.push(dummy.matrix.clone());
                                 ch.wallBoxes.push(jb);
@@ -4096,7 +4155,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         }
                         if (box) {
                             dummy.position.set((box.minX + box.maxX) / 2, WALL_HEIGHT / 2, (box.minZ + box.maxZ) / 2);
-                            dummy.scale.set(box.maxX - box.minX, WALL_HEIGHT, box.maxZ - box.minZ);
+                            // 2 cm de aire arriba: el techo esta a WALL_HEIGHT y
+                            // una caja de esa altura quedaba COPLANAR con el
+                            // plano del techo -> z-fighting en el filo superior
+                            // de todas las paredes ("el techo no se ve bien").
+                            dummy.scale.set(box.maxX - box.minX, WALL_HEIGHT - 0.04, box.maxZ - box.minZ);
                             dummy.updateMatrix();
                             wallT.push(dummy.matrix.clone());
                         }
@@ -4107,7 +4170,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         // Mallas y cajas extra (franjas de las esquinas del chunk)
                         for (const eb of extraBoxes) {
                             dummy.position.set((eb.minX + eb.maxX) / 2, WALL_HEIGHT / 2, (eb.minZ + eb.maxZ) / 2);
-                            dummy.scale.set(eb.maxX - eb.minX, WALL_HEIGHT, eb.maxZ - eb.minZ);
+                            dummy.scale.set(eb.maxX - eb.minX, WALL_HEIGHT - 0.04, eb.maxZ - eb.minZ);
                             dummy.updateMatrix();
                             wallT.push(dummy.matrix.clone());
                             ch.wallBoxes.push(eb);
@@ -4118,15 +4181,18 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         const r = 0.35 + ch.rng() * 0.1;
                         const round = ch.rng() < 0.5;
                         dummy.position.set(posX, WALL_HEIGHT / 2, posZ);
-                        dummy.scale.set(round ? r : r * 2, WALL_HEIGHT, round ? r : r * 2);
+                        dummy.scale.set(round ? r : r * 2, WALL_HEIGHT - 0.04, round ? r : r * 2);
                         dummy.updateMatrix();
                         (round ? cylT : wallT).push(dummy.matrix.clone());
                         ch.wallBoxes.push({ minX: posX - r, maxX: posX + r, minZ: posZ - r, maxZ: posZ + r });
                     }
 
                     if (type === 0 || type === 2) {
-                        dummy.position.set(posX, WALL_HEIGHT - 0.02, posZ);
-                        dummy.scale.set(1.6, 0.04, 0.6);
+                        // La tulipa cuelga 2 cm por debajo del techo: antes su
+                        // cara superior quedaba coplanar con el plano del techo
+                        // y el filo parpadeaba (z-fighting).
+                        dummy.position.set(posX, WALL_HEIGHT - 0.035, posZ);
+                        dummy.scale.set(1.6, 0.03, 0.6);
                         dummy.updateMatrix();
                         // Zona de luz del chunk (campo suave, como el tipo de
                         // chunk): hay sitios con TODOS los focos fundidos donde
@@ -4718,9 +4784,21 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             polygonOffsetUnits: -1
                         })
                     );
-                    mesh.position.set(wx, 0.05, wz);
+                    mesh.position.set(wx, 0.018, wz);
+                    // Orden YXZ: primero se tumba la hoja (rotation.x = -PI/2)
+                    // y DESPUES gira sobre el eje vertical del mundo. Con el
+                    // orden por defecto (XYZ) el giro se aplicaba ANTES de
+                    // tumbarla: la flecha quedaba plana solo con yaw=0 y en
+                    // cuanto apuntaba a otro lado se levantaba hasta ponerse
+                    // de CANTO ("flechas volando en el suelo", todas hacia
+                    // el mismo lado).
+                    mesh.rotation.order = 'YXZ';
                     mesh.rotation.set(-Math.PI / 2, 0, 0);
-                    mesh.rotation.y = Math.atan2(-dx, -dz);
+                    // La punta de la textura mira al local +X; tumbada, la
+                    // punta apunta en el mundo a (cos(yaw), -sin(yaw)). Para
+                    // que apunte a la puerta hace falta yaw = atan2(-dz, dx).
+                    // Antes se usaba atan2(-dx, -dz) y apuntaba perpendicular.
+                    mesh.rotation.y = Math.atan2(-dz, dx);
                     this.scene.add(mesh);
                     const own = this.chunks.get(gx + ',' + gz);
                     const host = own || ch;
@@ -5388,19 +5466,32 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const vert = (p, u, v) => { pos.push(p[0], p[1], p[2]); uv.push(u, v); return pos.length / 3 - 1; };
             const tri = (a, b, c) => idx.push(a, b, c);
             const u0 = 0, u1 = L / CELL_SIZE, v0 = 0, v1 = H / CELL_SIZE;
+            const t0u = T0 / CELL_SIZE, t1u = T1 / CELL_SIZE;
+            // Laterales: el papel pintado se repite cada celda a lo largo (u)
+            // y en vertical (v). Estos 8 vertices SOLO los usan las laterales.
             const a = vert(A, u0, v0), b = vert(B, u0, v0);
             const c = vert(C, u1, v0), d = vert(D, u1, v0);
             const e = vert(E, u0, v1), f = vert(F, u0, v1);
             const g = vert(G, u1, v1), h = vert(HH, u1, v1);
-            // Suelo (-Y) y techo (+Y)
-            tri(a, d, c); tri(a, b, d);
-            tri(f, g, h); tri(f, e, g);
             // Laterales (x- y x+)
             tri(a, g, e); tri(a, c, g);
             tri(b, f, h); tri(b, f, d);
-            // Tapas de los extremos (z- y z+)
-            tri(a, e, b); tri(b, e, f);
-            tri(d, h, g); tri(d, g, c);
+            // Tapas de los extremos (z- y z+): antes compartian los vertices
+            // de las laterales y toda la cara muestreaba la columna u=0 de la
+            // textura (una franja estirada de un pixel: "una parte mal hecha
+            // de la textura" en las paredes sueltas). Ahora cada tapa usa sus
+            // propios vertices con u repartido a lo largo del GROSOR, como
+            // una pared de verdad.
+            const na = vert(A, 0, 0), nb = vert(B, t0u, 0), nf = vert(F, t0u, v1), ne = vert(E, 0, v1);
+            tri(na, ne, nb); tri(nb, ne, nf);
+            const fc = vert(C, 0, 0), fd = vert(D, t1u, 0), fh = vert(HH, t1u, v1), fg = vert(G, 0, v1);
+            tri(fc, fg, fd); tri(fd, fg, fh);
+            // Suelo (-Y) y techo (+Y): u a lo largo de la pared, v segun el
+            // grosor (la franja del zocalo/remate, invisible en la practica).
+            const bta = vert(A, 0, 0), btb = vert(B, 0, t0u), btc = vert(C, u1, 0), btd = vert(D, u1, t1u);
+            tri(bta, btb, btd); tri(bta, btd, btc);
+            const tta = vert(E, 0, v1), ttb = vert(F, 0, v1 + t0u), ttc = vert(G, u1, v1), ttd = vert(HH, u1, v1 + t1u);
+            tri(tta, ttb, ttd); tri(tta, ttd, ttc);
             const geo = new THREE.BufferGeometry();
             geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
             geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
@@ -5470,9 +5561,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     const choice = Math.random();
                     if (choice < 0.35) {
                         // Poses de mesa: 0 de pie, 1 caida de lado (pata rota),
-                        // 2 patas arriba, 3 volcada hacia delante
+                        // 2 patas arriba, 3 volcada hacia delante. La mayoria
+                        // estan DE PIE (antes 4 de cada 10 nacian tumbadas o
+                        // patas arriba: "las mesas estan mal, patas arriba sin
+                        // ninguna logica"); las patas arriba son las mas raras.
                         const vr = Math.random();
-                        const variant = vr < 0.4 ? 0 : (vr < 0.6 ? 1 : (vr < 0.8 ? 2 : 3));
+                        const variant = vr < 0.55 ? 0 : (vr < 0.78 ? 1 : (vr < 0.9 ? 3 : 2));
                         const deskX = rx + (Math.random() - 0.5) * 1.5;
                         const deskZ = rz + (Math.random() - 0.5) * 1.5;
                         if (this.canPlaceFurniture(ch, deskX, deskZ, 0.95)) {
@@ -5508,7 +5602,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         // Poses de silla: 0 de pie, 1 caida de lado,
                         // 2 patas arriba (pata rota)
                         const vr = Math.random();
-                        const variant = vr < 0.55 ? 0 : (vr < 0.8 ? 1 : 2);
+                        const variant = vr < 0.6 ? 0 : (vr < 0.85 ? 1 : 2);
                         const chairX = rx + (Math.random() - 0.5) * 1.8;
                         const chairZ = rz + (Math.random() - 0.5) * 1.8;
                         if (this.canPlaceFurniture(ch, chairX, chairZ, 0.55)) {
@@ -5704,15 +5798,27 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             return false;
         }
 
-        // Cara de la lamina de pared hacia la direccion d (mundo, en metros)
+        // Cara de la lamina de pared hacia la direccion d (mundo, en metros).
+        // Dos errores corregidos aqui:
+        //  1) wallFaceMap guarda claves LOCALES del chunk (0..15), pero aqui
+        //     se consultaba con celdas de MUNDO: fuera del chunk (0,0) la
+        //     busqueda fallaba SIEMPRE y los armarios no se colocaban en
+        //     ningun otro sitio (solo en el chunk (0,0) coincidian por
+        //     casualidad).
+        //  2) Se devolvia la cara OPUESTA a d (la trasera del muro): el
+        //     armario nacía con el cuerpo DENTRO de la pared ("armarios que
+        //     atraviesan la pared"). d apunta del muro hacia el suelo libre,
+        //     asi que la cara visible es la que mira HACIA d.
         wallFaceAt(wcx, wcz, d) {
-            const ch = this.chunks.get(Math.floor(wcx / CHUNK_SIZE) + ',' + Math.floor(wcz / CHUNK_SIZE));
-            const box = ch && ch.wallFaceMap && ch.wallFaceMap.get(wcx + ',' + wcz);
+            const gcx = Math.floor(wcx / CHUNK_SIZE);
+            const gcz = Math.floor(wcz / CHUNK_SIZE);
+            const ch = this.chunks.get(gcx + ',' + gcz);
+            const box = ch && ch.wallFaceMap && ch.wallFaceMap.get((wcx - gcx * CHUNK_SIZE) + ',' + (wcz - gcz * CHUNK_SIZE));
             if (!box) return null;
-            if (d[0] === 1) return box.minX;
-            if (d[0] === -1) return box.maxX;
-            if (d[1] === 1) return box.minZ;
-            return box.maxZ;
+            if (d[0] === 1) return box.maxX;
+            if (d[0] === -1) return box.minX;
+            if (d[1] === 1) return box.maxZ;
+            return box.minZ;
         }
 
         placeCabinetInRoom(r, ch) {
@@ -6297,10 +6403,15 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this._blocked = 0;           // tiempo atascado contra un obstaculo
             this._wallBoxes = [];
             this._furniture = [];
-            // Reaparicion: la primera sale a los 50 s (lo activa el anfitrion)
-            // y si te alejas demasiado desaparece y vuelve mas tarde
-            this.respawnTimer = 50;
+            // Reaparicion: la primera sale a los 50 s (lo activa el anfitrion
+            // a los 50 s y el contador arranca casi a cero: antes contaba de
+            // 50 a 0 y la primera aparicion se retrasaba hasta ~100 s) y si
+            // te alejas demasiado desaparece y vuelve mas tarde
+            this.respawnTimer = 1;
             this.canRespawn = false;
+            // Linea de vision del ultimo frame: game.js la usa para el drenaje
+            // de cordura (solo drena mientras la entidad te ve de verdad).
+            this.seesPlayer = false;
 
             const model = createEntityModel();
             this.mesh = model.group;
@@ -6608,6 +6719,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         update(dt, playerPos, playerSanity, wallBoxes, walkableCells, onKill, furnitureBodies) {
             this._wallBoxes = wallBoxes;
             this._furniture = furnitureBodies || [];
+            this.seesPlayer = false;
 
             // Reaparicion: la primera salida la activa el anfitrion (canRespawn)
             // y si el jugador se aleja demasiado, desaparece y vuelve mas tarde
@@ -6667,6 +6779,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             }
 
             const canSeePlayer = this.hasLineOfSight(playerPos, wallBoxes);
+            this.seesPlayer = canSeePlayer;
             const forward = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
             const toPlayer = new THREE.Vector3().subVectors(playerPos, this.pos).normalize();
             const inFOV = forward.dot(toPlayer) > 0.25;
@@ -7711,7 +7824,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.7.1';
+    const GAME_VERSION = '1.8.0';
 
     class BackroomsGame {
         constructor() {
@@ -8755,29 +8868,49 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         ctx.fillRect(bx - Math.floor(bw / 2), bz - Math.floor(bh / 2), bw, bh);
                     }
                 } else {
-                    // Chunk lejano (descargado): paredes finas aproximadas
-                    // desde la rejilla, orientadas como las laminas reales
+                    // Chunk lejano (descargado): muros aproximados como en el
+                    // 3D real (buildChunkMeshes). Antes se pintaba un cuadrado
+                    // en TODA celda de muro y el mapa mostraba manchas negras
+                    // que en el juego eran suelo libre (postes aislados que el
+                    // 3D elimina) o muros desplazados (la junta del borde
+                    // salia centrada en la celda): "cosas negras que no son
+                    // las paredes reales".
                     const T = 0.6;
+                    const TH = T / C / 2;   // medio grosor en fraccion de celda
+                    const isOpen = (xx, zz) => xx >= 0 && xx < N && zz >= 0 && zz < N && (g[xx][zz] === 0 || g[xx][zz] === 2);
+                    const isWall = (xx, zz) => xx >= 0 && xx < N && zz >= 0 && zz < N && g[xx][zz] === 1;
                     for (let x = 0; x < N; x++) {
                         for (let z = 0; z < N; z++) {
                             if (g[x][z] !== 1 || !isExplored(x, z)) continue;
-                            const openW = x > 0 && (g[x - 1][z] === 0 || g[x - 1][z] === 2);
-                            const openE = x < N - 1 && (g[x + 1][z] === 0 || g[x + 1][z] === 2);
-                            const openN = z > 0 && (g[x][z - 1] === 0 || g[x][z - 1] === 2);
-                            const openS = z < N - 1 && (g[x][z + 1] === 0 || g[x][z + 1] === 2);
-                            let x0r, z0r, x1r, z1r;
-                            if ((openW || openE) && !(openN || openS)) {
-                                x0r = (x + 0.5 - T / C / 2) * cell; x1r = (x + 0.5 + T / C / 2) * cell;
-                                z0r = z * cell; z1r = (z + 1) * cell;
-                            } else if ((openN || openS) && !(openW || openE)) {
-                                x0r = x * cell; x1r = (x + 1) * cell;
-                                z0r = (z + 0.5 - T / C / 2) * cell; z1r = (z + 0.5 + T / C / 2) * cell;
+                            const openW = isOpen(x - 1, z), openE = isOpen(x + 1, z);
+                            const openN = isOpen(x, z - 1), openS = isOpen(x, z + 1);
+                            const paint = (x0r, z0r, x1r, z1r) => {
+                                ctx.fillRect(Math.round(sx0 + x0r), Math.round(sy0 + z0r),
+                                    Math.max(1, Math.ceil(x1r - x0r)), Math.max(1, Math.ceil(z1r - z0r)));
+                            };
+                            if (x === 0 || x === N - 1 || z === 0 || z === N - 1) {
+                                // Junta entre chunks: franja pegada al borde
+                                // (en las esquinas, las dos franjas)
+                                if (x === 0) paint(0, 0, TH * 2 * cell, cell);
+                                else if (x === N - 1) paint(cell - TH * 2 * cell, 0, cell, cell);
+                                if (z === 0) paint(0, 0, cell, TH * 2 * cell);
+                                else if (z === N - 1) paint(0, cell - TH * 2 * cell, cell, cell);
+                            } else if ((openW || openE) && (openN || openS)) {
+                                // Poste de esquina/final: cuadrado SOLO si toca
+                                // una pared real (los aislados se eliminan en
+                                // el 3D y no deben pintarse)
+                                if (!isWall(x - 1, z) && !isWall(x + 1, z) && !isWall(x, z - 1) && !isWall(x, z + 1)) continue;
+                                paint((x + 0.5 - TH) * cell, (z + 0.5 - TH) * cell, (x + 0.5 + TH) * cell, (z + 0.5 + TH) * cell);
+                            } else if (openW || openE) {
+                                // Lamina 'x' (corre a lo largo de Z)
+                                paint((x + 0.5 - TH) * cell, z * cell, (x + 0.5 + TH) * cell, (z + 1) * cell);
+                            } else if (openN || openS) {
+                                // Lamina 'z' (corre a lo largo de X)
+                                paint(x * cell, (z + 0.5 - TH) * cell, (x + 1) * cell, (z + 0.5 + TH) * cell);
                             } else {
-                                x0r = (x + 0.5 - T / C / 2) * cell; x1r = (x + 0.5 + T / C / 2) * cell;
-                                z0r = (z + 0.5 - T / C / 2) * cell; z1r = (z + 0.5 + T / C / 2) * cell;
+                                // Nucleo macizo: celda entera (bloque solido 3D)
+                                paint(0, 0, cell, cell);
                             }
-                            ctx.fillRect(Math.round(sx0 + x0r), Math.round(sy0 + z0r),
-                                Math.max(1, Math.ceil(x1r - x0r)), Math.max(1, Math.ceil(z1r - z0r)));
                         }
                     }
                     // Pilares de chunks lejanos: cuadrados finos
@@ -9266,11 +9399,32 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // En una sala de seguridad con la puerta CERRADA la entidad no
             // puede verte: nada de drenaje (ni siquiera el del espectro sync)
             if (!this.inSecurityRoomClosed()) {
-                if (this.entity.active && this.entity.state === 'CHASING') {
-                    this.player.sanity -= 4.0 * dt;
-                } else if (this.net.entityNear(this.player.pos, 14)) {
-                    // En multijugador el espectro sincronizado tambien drena cordura
-                    this.player.sanity -= 3.0 * dt;
+                // La cordura drena de verdad SOLO mientras la entidad te VE
+                // y esta cerca (o muy cerca aunque no te vea). Antes bastaba
+                // con que el estado fuese CHASING: al perderle la pista
+                // seguia drenando a 4/s hasta llegar a tu ultima posicion
+                // ("al alejarme y perderlo, mi cordura sigue bajando rapido,
+                // da igual lo que haga").
+                const ent = this.entity;
+                if (ent.active) {
+                    const d = Math.hypot(ent.pos.x - this.player.pos.x, ent.pos.z - this.player.pos.z);
+                    if (ent.state === 'CHASING' && ent.seesPlayer && d < 25) {
+                        this.player.sanity -= 4.0 * dt;
+                    } else if (ent.state === 'CHASING' && d < 10) {
+                        this.player.sanity -= 1.0 * dt;
+                    } else if (ent.state === 'SEARCHING' && d < 10) {
+                        this.player.sanity -= 0.6 * dt;
+                    }
+                }
+                // En multijugador el espectro sincronizado tambien drena
+                // cordura, pero solo con linea de vision despejada: antes
+                // bastaba con estar a menos de 14 m (a traves de los muros)
+                if (this.net.entityActive && this.net.entityGhost && Date.now() - this.net.entityLastMsg < 3000) {
+                    const g = this.net.entityGhost.position;
+                    const d = Math.hypot(g.x - this.player.pos.x, g.z - this.player.pos.z);
+                    if (d < 14 && this.net.hasLOS(g.x, g.z, this.player.pos.x, this.player.pos.z, this.worldSystem.wallBoxes)) {
+                        this.player.sanity -= 3.0 * dt;
+                    }
                 }
             }
             this.updateSanityHUD();
@@ -9332,9 +9486,14 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         this.worldSystem.rebuildUnions();
                     }
                 }
-                // La puerta sube al techo al abrirse y baja al cerrarse
+                // La puerta sube al techo al abrirse y baja al cerrarse. El
+                // techo esta a 2,7 m y los paneles miden 2,24 m: el tope es
+                // 2,72 para que el canto inferior quede JUSTO oculto tras el
+                // plano del techo. Antes se paraba en 2,42 y quedaba un
+                // trozo de puerta colgando del techo ("la puerta
+                // entreabierta atravesando la pared").
                 if (r.doorGroup) {
-                    const target = r.state.doorOpen ? 2.42 : 0;
+                    const target = r.state.doorOpen ? 2.72 : 0;
                     r.doorGroup.position.y += (target - r.doorGroup.position.y) * Math.min(1, dt * 6);
                 }
                 // Pantalla de pila del panel de control (solo si estas cerca)

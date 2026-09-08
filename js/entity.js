@@ -62,10 +62,15 @@
             this._blocked = 0;           // tiempo atascado contra un obstaculo
             this._wallBoxes = [];
             this._furniture = [];
-            // Reaparicion: la primera sale a los 50 s (lo activa el anfitrion)
-            // y si te alejas demasiado desaparece y vuelve mas tarde
-            this.respawnTimer = 50;
+            // Reaparicion: la primera sale a los 50 s (lo activa el anfitrion
+            // a los 50 s y el contador arranca casi a cero: antes contaba de
+            // 50 a 0 y la primera aparicion se retrasaba hasta ~100 s) y si
+            // te alejas demasiado desaparece y vuelve mas tarde
+            this.respawnTimer = 1;
             this.canRespawn = false;
+            // Linea de vision del ultimo frame: game.js la usa para el drenaje
+            // de cordura (solo drena mientras la entidad te ve de verdad).
+            this.seesPlayer = false;
 
             const model = createEntityModel();
             this.mesh = model.group;
@@ -373,6 +378,7 @@
         update(dt, playerPos, playerSanity, wallBoxes, walkableCells, onKill, furnitureBodies) {
             this._wallBoxes = wallBoxes;
             this._furniture = furnitureBodies || [];
+            this.seesPlayer = false;
 
             // Reaparicion: la primera salida la activa el anfitrion (canRespawn)
             // y si el jugador se aleja demasiado, desaparece y vuelve mas tarde
@@ -432,6 +438,7 @@
             }
 
             const canSeePlayer = this.hasLineOfSight(playerPos, wallBoxes);
+            this.seesPlayer = canSeePlayer;
             const forward = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
             const toPlayer = new THREE.Vector3().subVectors(playerPos, this.pos).normalize();
             const inFOV = forward.dot(toPlayer) > 0.25;

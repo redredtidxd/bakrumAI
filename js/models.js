@@ -110,7 +110,10 @@
                 group.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.18;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else {
-                group.rotation.y = Math.random() * Math.PI * 2;
+                // De pie: alineada con la rejilla del mundo (0/90/180/270).
+                // Antes el giro Y era aleatorio y las mesas quedaban en
+                // diagonal en las salas ("no rectas").
+                group.rotation.y = Math.floor(Math.random() * 4) * Math.PI / 2;
             }
 
             return group;
@@ -163,7 +166,9 @@
                 group.rotation.x = Math.PI + (Math.random() - 0.5) * 0.12;
                 group.rotation.y = Math.random() * Math.PI * 2;
             } else {
-                group.rotation.y = Math.random() * Math.PI * 2;
+                // De pie: alineada con la rejilla (0/90/180/270), como las
+                // mesas; las caidas conservan un giro aleatorio.
+                group.rotation.y = Math.floor(Math.random() * 4) * Math.PI / 2;
             }
 
             return group;
@@ -749,7 +754,11 @@
             leaf(pw, -W / 2 + 0.005, -a, false);   // hoja izquierda: bisagra en la jamba izquierda
             leaf(pw, W / 2 - 0.005, a, true);       // hoja derecha: bisagra en la jamba derecha, espejada al centro
         } else {
-            leaf(W - 0.01, -W / 2 + 0.005, o.ajar || 0.0);   // hoja unica
+            // Hoja unica: el ajar se NEGA para que la hoja abra SIEMPRE hacia
+            // la habitacion. Con ajar positivo la hoja gira hacia -Z (el plano
+            // del muro) y el canto libre se clavaba ~19 cm dentro de la pared:
+            // "la puerta esta entreabierta atravesando la pared".
+            leaf(W - 0.01, -W / 2 + 0.005, -(o.ajar || 0.0));
         }
         return group;
     }

@@ -31,7 +31,7 @@ Juego de terror procedural estilo Backrooms en el navegador (Three.js).
 
 ## Versión
 
-La versión actual (`v1.7.1`) se muestra en el menú principal y en el HUD. Al hacer cambios:
+La versión actual (`v1.8.0`) se muestra en el menú principal y en el HUD. Al hacer cambios:
 
 1. Sube `GAME_VERSION` en `js/game.js` (p. ej. `1.5.0`).
 2. Actualiza el `?v=...` de los `<script>`/`<link>` de `index.html` al mismo número (así el navegador descarta la caché vieja y los jugadores ven la versión nueva sin Ctrl+F5).
@@ -61,6 +61,20 @@ Abre el juego desde el móvil y se activan los controles táctiles automáticame
 - **Cámaras de seguridad**: raras, montadas en las paredes; giran la cabeza y encienden su LED rojo cuando te vigilan, y su imagen se ve en el monitor de las salas de seguridad.
 - **Pilas almacenables**: mantén **[I]** para recargar la linterna con las pilas de repuesto guardadas; úsalas también para dar energía a las puertas de metal.
 - **Callejones sin salida variados**: rectos, en L, anchos, con alcoba lateral o con habitación muerta al fondo (a veces con un pilar que obliga a rodearlo).
+
+## Novedades de v1.8.0
+
+- **La Entidad ya se mueve de verdad**: el grafo de celdas por el que navega (BFS) excluía las celdas de borde de cada chunk, así que en cuanto el destino estaba en otro chunk no encontraba camino y se quedaba clavada. Ahora las puertas entre chunks forman parte del grafo y la Entidad cruza de un chunk a otro para perseguirte o vagar.
+- **Cordura ligada a la visión real**: la estabilidad mental ya no drena solo porque la Entidad esté en modo persecución. Drena fuerte (4/s) mientras te ve de cerca, casi nada si va a tu última posición sin verte, y nada cuando te ha perdido. El espectro del multijugador tampoco drena a través de los muros.
+- **Armarios apoyados en la cara REAL del muro**: antes la cara se calculaba al revés (la trasera del muro) y con claves de chunk equivocadas: los armarios nacían con el cuerpo metido dentro de la pared y solo se generaban en el chunk (0,0). Ahora se apoyan en la superficie fina de cualquier pared del mundo.
+- **Puertas falsas entornadas hacia dentro**: la hoja sencilla abría la mitad de las veces hacia el interior del muro (se veía la puerta entreabierta atravesando la pared). Ahora siempre abre hacia la habitación.
+- **Flechas del suelo apuntando a las puertas**: apuntaban PERPENDICULARES a la puerta (todas hacia el mismo lado). Ahora la punta señala el camino real. Además bajan de 5 cm a 1,8 cm sobre la moqueta (ya no parecen flotar).
+- **Mesas y sillas más coherentes**: la mayoría nacen de pie y alineadas con la rejilla del mundo (0/90/180/270); las poses patas-arriba pasan a ser las más raras (antes 4 de cada 10 mesas nacían tumbadas o patas arriba).
+- **Mapa sin muros fantasma**: en los chunks lejanos el mapa dibujaba cuadrados negros por celdas de muro que en el 3D no existen (postes aislados eliminados) o desplazados (juntas de borde centradas). La aproximación ahora imita los muros reales: láminas en su sitio, postes solo si tocan pared, núcleos macizos completos y juntas pegadas al borde.
+- **Paredes y techo sin parpadeo ni textura estirada**: las cajas de pared ya no quedan coplanares con el plano del techo (z-fighting en el filo superior de todos los muros) y el papel pintado se repite cada 2,8 m en TODAS las caras (postes y tramos cortos ya no muestran el estampado a otra escala). Los tabiques diagonales tienen tapas con textura correcta (antes una franja estirada de un píxel).
+- **Techo de losetas acústicas**: nueva textura de falso techo con losetas biseladas, rehundidas y porosas en vez de la losa plana con una cruz.
+- **Puerta de metal sin colgar del techo**: al abrirse subía hasta 2,42 m y quedaba un trozo de puerta colgando bajo el techo; ahora se oculta tras el plano del techo.
+- **Primera aparición de la Entidad a ~50 s**: antes el contador arrancaba en 50 y la primera aparición se retrasaba hasta ~100 s.
 
 ## Novedades de v1.7.1
 
