@@ -906,13 +906,17 @@
         // SALA DE SEGURIDAD (estilo FNAF): busca un bolsillo de pared con
         // EXACTAMENTE una celda abierta en el anillo (la futura boca de la
         // puerta de metal) y lo convierte en habitacion sellada. Antes era
-        // muy rara (~1 de cada 24 chunks); ahora un poco mas comun:
-        // ~1 de cada 15 chunks. La puerta en si la monta buildSecurityRoom.
+        // muy rara (~1 de cada 24 chunks) y el requisito de la boca unica
+        // hacia que la mayoria de intentos fracasaran (~1 de cada 40 de
+        // verdad). Ahora, si no hay bolsillo con 1 boca, se usa uno
+        // totalmente sellado (0 bocas) y se TALLA la puerta en una celda del
+        // anillo que de a una celda transitable. Resultado real: ~1 de cada
+        // 8-9 chunks. La puerta en si la monta buildSecurityRoom.
         carveSecurityRoom(ch) {
             const N = CHUNK_SIZE;
             const g = ch.grid;
             const r = ch.rng;
-            if (r() >= 0.065) return;
+            if (r() >= 0.25) return;
             const sizes = [[3, 3], [3, 4], [4, 4]];
             const order = [0, 1, 2];
             for (let i = order.length - 1; i > 0; i--) {
@@ -921,7 +925,8 @@
             }
             for (const oi of order) {
                 const [w, h] = sizes[oi];
-                const spots = [];
+                const spots = [];    // bolsillos con 1 boca (FNAF perfecto)
+                const sealed = [];   // bolsillos sellados con boca tallable
                 for (let rx = 2; rx <= N - 2 - w; rx++) {
                     for (let rz = 2; rz <= N - 2 - h; rz++) {
                         let interiorWall = true;
@@ -933,27 +938,65 @@
                         }
                         if (!interiorWall) continue;
                         const ringOpen = [];
+                        // Una celda del anillo es esquina si no comparte fila
+                        // ni columna con el interior del bolsillo. Una puerta
+                        // en esquina quedaria DIAGONAL al interior (callejon
+                        // sin salida de 1 celda): prohibida.
+                        const cornerOk = (px, pz) => {
+                            const inRow = pz >= rz && pz < rz + h;
+                            const inCol = px >= rx && px < rx + w;
+                            if (px === rx - 1 || px === rx + w) return inRow;
+                            if (pz === rz - 1 || pz === rz + h) return inCol;
+                            return false;
+                        };
                         for (let dx = -1; dx <= w; dx++) {
                             for (let dz = -1; dz <= h; dz++) {
                                 if (dx >= 0 && dx < w && dz >= 0 && dz < h) continue;
                                 const px = rx + dx, pz = rz + dz;
                                 if (px < 1 || px > N - 2 || pz < 1 || pz > N - 2) continue;
                                 const v = g[px][pz];
-                                if (v === 0 || v === 2) ringOpen.push([px, pz]);
+                                if (v === 0 || v === 2) ringOpen.push([px, pz, cornerOk(px, pz)]);
                             }
                         }
-                        if (ringOpen.length === 1) spots.push([rx, rz, w, h, ringOpen[0]]);
+                        if (ringOpen.length === 1 && ringOpen[0][2]) {
+                            spots.push([rx, rz, w, h, [ringOpen[0][0], ringOpen[0][1]]]);
+                        } else if (ringOpen.length === 0 || (ringOpen.length === 1 && !ringOpen[0][2])) {
+                            // Sellado (o solo abierto en una esquina, que no
+                            // conecta con el interior): tallar la puerta en
+                            // una celda NO-esquina del anillo cuya cara
+                            // exterior de a una celda transitable (si no, el
+                            // jugador no podria entrar)
+                            for (let dx = -1; dx <= w; dx++) {
+                                for (let dz = -1; dz <= h; dz++) {
+                                    if (dx >= 0 && dx < w && dz >= 0 && dz < h) continue;
+                                    const px = rx + dx, pz = rz + dz;
+                                    if (px < 1 || px > N - 2 || pz < 1 || pz > N - 2) continue;
+                                    if (g[px][pz] !== 1 && g[px][pz] !== 3) continue;
+                                    if (!cornerOk(px, pz)) continue;
+                                    const ox = px < rx ? px - 1 : px >= rx + w ? px + 1 : px;
+                                    const oz = pz < rz ? pz - 1 : pz >= rz + h ? pz + 1 : pz;
+                                    if (ox < 1 || ox > N - 2 || oz < 1 || oz > N - 2) continue;
+                                    const v = g[ox][oz];
+                                    if (v === 0 || v === 2) {
+                                        sealed.push([rx, rz, w, h, [px, pz]]);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                if (!spots.length) continue;
-                const s = spots[Math.floor(r() * spots.length)];
-                const [rx, rz, rw2, rh2, doorCell] = s;
+                let chosen = null;
+                if (spots.length) chosen = spots[Math.floor(r() * spots.length)];
+                else if (sealed.length) chosen = sealed[Math.floor(r() * sealed.length)];
+                if (!chosen) continue;
+                const [rx2, rz2, rw2, rh2, doorCell] = chosen;
                 for (let dx = 0; dx < rw2; dx++) {
-                    for (let dz = 0; dz < rh2; dz++) g[rx + dx][rz + dz] = 2;
+                    for (let dz = 0; dz < rh2; dz++) g[rx2 + dx][rz2 + dz] = 2;
                 }
                 g[doorCell[0]][doorCell[1]] = 0;   // la boca de la puerta
                 ch.securityRoom = {
-                    rx, rz, w: rw2, h: rh2,
+                    rx: rx2, rz: rz2, w: rw2, h: rh2,
                     doorX: doorCell[0], doorZ: doorCell[1],
                     state: { battery: 100, doorOpen: true }
                 };
@@ -1528,7 +1571,7 @@
             ch.meshes.push(ceiling);
 
             const wallT = [], cylT = [];
-            const frameT = [], offB = [], flickB = [], litB = [];   // lamparas: carcasa + tubo por estado
+            const frameT = [], capT = [], offB = [], flickB = [], litB = [];   // lamparas: carcasa + casquillos + tubo por estado
             const dummy = new THREE.Object3D();
 
             // ---- Paredes finas (0,4-1,2 m) en lugar de celdas macizas ----
@@ -1911,19 +1954,32 @@
                     }
 
                     if (type === 0 || type === 2) {
-                        // LAMPARA DE TECHO REHECHA: soporte/carcasa de metal
-                        // (caja fina colgada del techo) + TUBO FLUORESCENTE
-                        // debajo (emisivo cuando esta encendido). Antes era
-                        // una sola caja plana pegada al techo que no parecia
-                        // una bombilla. Las fundidas cuelgan un poco torcidas.
+                        // LAMPARA DE TECHO REHECHA: luminaria fluorescente de
+                        // superficie. La carcasa metalica queda PEGADA al
+                        // techo (sin hueco) y el tubo va HORIZONTAL dentro de
+                        // ella, asomando un poco por abajo, con casquillos en
+                        // los extremos. Antes era una caja flotando a 7 cm del
+                        // techo con un cilindro vertical debajo que no parecia
+                        // una bombilla. Las fundidas dejan el tubo colgando.
                         const frameM = new THREE.Matrix4();
-                        frameM.makeScale(1.5, 0.05, 0.5);
-                        frameM.setPosition(posX, WALL_HEIGHT - 0.07, posZ);
+                        frameM.makeScale(1.6, 0.12, 0.55);
+                        frameM.setPosition(posX, WALL_HEIGHT - 0.06, posZ);   // tope superior a ras del techo
                         frameT.push(frameM);
 
+                        // Casquillos de los extremos (donde se monta el tubo)
+                        const capM = new THREE.Matrix4();
+                        capM.makeScale(0.14, 0.16, 0.56);
+                        capM.setPosition(posX - 0.575, WALL_HEIGHT - 0.13, posZ);
+                        capT.push(capM);
+                        const capM2 = capM.clone();
+                        capM2.setPosition(posX + 0.575, WALL_HEIGHT - 0.13, posZ);
+                        capT.push(capM2);
+
+                        // Tubo fluorescente HORIZONTAL a lo largo de la
+                        // carcasa (antes era un cilindro corto vertical)
                         const bulbM = new THREE.Matrix4();
-                        bulbM.makeScale(1, 1, 1);
-                        bulbM.setPosition(posX, WALL_HEIGHT - 0.16, posZ);
+                        bulbM.makeRotationZ(Math.PI / 2);
+                        bulbM.setPosition(posX, WALL_HEIGHT - 0.14, posZ);
                         // Zona de luz del chunk (campo suave, como el tipo de
                         // chunk): hay sitios con TODOS los focos fundidos donde
                         // solo alumbra la linterna, zonas tenues, lo normal y
@@ -1952,10 +2008,12 @@
                         else { offP = 0.16; flickP = 0.3; }               // casi todo encendido (rara)
                         const lr = ch.rng();
                         if (nearDark(x, z) || lr < offP) {
-                            // Fundida: el tubo cuelga torcido (aspecto roto)
+                            // Fundida: el tubo cuelga torcido (aspecto roto);
+                            // un extremo se hunde en la carcasa y el otro
+                            // queda colgando hacia abajo
                             const broken = bulbM.clone();
-                            broken.makeRotationZ((ch.rng() - 0.5) * 0.7);
-                            broken.setPosition(posX, WALL_HEIGHT - 0.16, posZ);
+                            broken.makeRotationZ(Math.PI / 2 + (ch.rng() - 0.5) * 0.6);
+                            broken.setPosition(posX, WALL_HEIGHT - 0.14, posZ);
                             offB.push(broken);
                         } else if (lr < offP + flickP) {
                             flickB.push(bulbM);
@@ -1988,11 +2046,12 @@
             };
             addInst(wallT, Materials.wall);
             addInst(cylT, Materials.wall, cylGeo);
-            // Lamparas rehechas: carcasa metalica para TODAS + tubo por estado
-            // (los fundidos usan el material oscuro; los encendidos/parpadeantes
-            // el emisivo, que brilla a traves de la niebla)
-            const tubeGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.36, 10);
+            // Luminaria: carcasa + casquillos de metal para TODAS, y el tubo
+            // horizontal por estado (fundido oscuro; encendido/parpadeante
+            // emisivo, que brilla a traves de la niebla)
+            const tubeGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.15, 10);
             addInst(frameT, Materials.lampFrame);
+            addInst(capT, Materials.lampFrame);
             addInst(offB, Materials.lampOff, tubeGeo);
             addInst(flickB, Materials.lampFlicker, tubeGeo);
             addInst(litB, Materials.lampLit, tubeGeo);
@@ -2066,7 +2125,7 @@
             let plane = 'x', doorX = 0, doorZ = 0;
             if (dc === sr.rx - 1) { plane = 'x'; doorX = ox + sr.rx * C; doorZ = dcz0 + C / 2; }
             else if (dc === sr.rx + sr.w) { plane = 'x'; doorX = ox + (sr.rx + sr.w) * C; doorZ = dcz0 + C / 2; }
-            else if (dc === sr.rz - 1) { plane = 'z'; doorX = dcx0 + C / 2; doorZ = oz + sr.rz * C; }
+            else if (dz === sr.rz - 1) { plane = 'z'; doorX = dcx0 + C / 2; doorZ = oz + sr.rz * C; }
             else { plane = 'z'; doorX = dcx0 + C / 2; doorZ = oz + (sr.rz + sr.h) * C; }
 
             const doorModel = createMetalDoorModel();
@@ -2101,7 +2160,7 @@
             const py = 1.08;
             if (dc === sr.rx - 1) { panelGroup.position.set(ox + sr.rx * C + 0.12, py, dcz0 + C / 2); panelGroup.rotation.y = Math.PI / 2; }
             else if (dc === sr.rx + sr.w) { panelGroup.position.set(ox + (sr.rx + sr.w) * C - 0.12, py, dcz0 + C / 2); panelGroup.rotation.y = -Math.PI / 2; }
-            else if (dc === sr.rz - 1) { panelGroup.position.set(dcx0 + C / 2, py, oz + sr.rz * C + 0.12); panelGroup.rotation.y = Math.PI; }
+            else if (dz === sr.rz - 1) { panelGroup.position.set(dcx0 + C / 2, py, oz + sr.rz * C + 0.12); panelGroup.rotation.y = Math.PI; }
             else { panelGroup.position.set(dcx0 + C / 2, py, oz + (sr.rz + sr.h) * C - 0.12); panelGroup.rotation.y = 0; }
             this.scene.add(panelGroup);
             ch.meshes.push(panelGroup);
@@ -2111,7 +2170,7 @@
             const my = 0.75;
             if (dc === sr.rx - 1) { monitor.position.set(ox + (sr.rx + sr.w) * C - 0.1, my, dcz0 + C / 2); monitor.rotation.y = -Math.PI / 2; }
             else if (dc === sr.rx + sr.w) { monitor.position.set(ox + sr.rx * C + 0.1, my, dcz0 + C / 2); monitor.rotation.y = Math.PI / 2; }
-            else if (dc === sr.rz - 1) { monitor.position.set(dcx0 + C / 2, my, oz + (sr.rz + sr.h) * C - 0.1); monitor.rotation.y = 0; }
+            else if (dz === sr.rz - 1) { monitor.position.set(dcx0 + C / 2, my, oz + (sr.rz + sr.h) * C - 0.1); monitor.rotation.y = 0; }
             else { monitor.position.set(dcx0 + C / 2, my, oz + sr.rz * C + 0.1); monitor.rotation.y = Math.PI; }
             this.scene.add(monitor);
             ch.meshes.push(monitor);

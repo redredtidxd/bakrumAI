@@ -31,7 +31,7 @@ Juego de terror procedural estilo Backrooms en el navegador (Three.js).
 
 ## Versión
 
-La versión actual (`v1.9.0`) se muestra en el menú principal y en el HUD. Al hacer cambios:
+La versión actual (`v1.9.1`) se muestra en el menú principal y en el HUD. Al hacer cambios:
 
 1. Sube `GAME_VERSION` en `js/game.js` (p. ej. `1.5.0`).
 2. Actualiza el `?v=...` de los `<script>`/`<link>` de `index.html` al mismo número (así el navegador descarta la caché vieja y los jugadores ven la versión nueva sin Ctrl+F5).
@@ -61,6 +61,11 @@ Abre el juego desde el móvil y se activan los controles táctiles automáticame
 - **Cámaras de seguridad**: montadas en las paredes; giran la cabeza y encienden su LED rojo cuando te vigilan (y miran SIEMPRE hacia ti, nunca al lado contrario), y su imagen se ve en el monitor de las salas de seguridad.
 - **Pilas almacenables**: mantén **[I]** para recargar la linterna con las pilas de repuesto guardadas; úsalas también para dar energía a las puertas de metal.
 - **Callejones sin salida variados**: rectos, en L, anchos, con alcoba lateral o con habitación muerta al fondo (a veces con un pilar que obliga a rodearlo).
+
+## Novedades de v1.9.1
+
+- **Luminarias de techo rediseñadas**: la bombilla ya no es un cilindro colgando bajo una caja flotante: ahora es una luminaria fluorescente de superficie, con la carcasa pegada al techo, el tubo horizontal asomando por debajo y casquillos en los extremos (los fundidos dejan el tubo colgando torcido).
+- **Salas de seguridad de verdad más comunes**: antes el requisito de bolsillo con boca única hacía que ~3 de cada 4 intentos fracasaran (~1 de cada 40 chunks reales). Ahora, si no hay bolsillo con 1 boca, se usa uno sellado y se talla la puerta en una celda del anillo que dé a una zona transitable (nunca en esquinas, que dejaban la puerta diagonal e inaccesible). Resultado: ~1 de cada 9 chunks. De paso se corrigió la colocación de la puerta/panel/monitor en los lados norte y sur (se comparaba la coordenada X con la fila).
 
 ## Novedades de v1.9.0
 
