@@ -473,6 +473,7 @@
             flash.position.set(-0.07, 0.18, 0.05);
 
             group.add(body, top, lens, flash);
+            group.scale.setScalar(0.92);   // camara de mano un poco mas pequena
             return group;
         },
 
@@ -550,6 +551,95 @@
             );
             paper.rotation.z = opts.rot || 0;   // giro dentro del plano de la pared
             group.add(paper);
+            return group;
+        },
+
+        // RELOJES LOCOS DE PARED: agujas desquiciadas que game.js hace girar
+        // a velocidades absurdas (a veces hacia atras). Aparecen raramente
+        // colgados (rectos o torcidos) o tirados en el suelo boca arriba /
+        // boca abajo. Algunos nacen ya APAGADOS (agujas congeladas) y los que
+        // llevan pila la tienen por DETRAS: sacarla con [E] los apaga de
+        // verdad. opts: { onWall, battery, running }.
+        createWallClockModel(opts = {}) {
+            const group = new THREE.Group();
+            const onWall = opts.onWall !== false;
+            const hasBattery = opts.battery !== false;
+            const running = opts.running !== false;
+
+            const caseMat = new THREE.MeshStandardMaterial({ color: 0x2c2620, roughness: 0.55, metalness: 0.3 });
+            const faceMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc6, roughness: 0.8 });
+            const handMat = new THREE.MeshStandardMaterial({ color: 0x15120c, roughness: 0.5 });
+            const secondMat = new THREE.MeshStandardMaterial({ color: 0xb31f1f, roughness: 0.5 });
+            const metalMat = new THREE.MeshStandardMaterial({ color: 0x8d8879, metalness: 0.7, roughness: 0.35 });
+
+            // Caja circular (eje de simetria en Z: la esfera mira hacia +Z)
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.055, 24), caseMat);
+            body.rotation.x = Math.PI / 2;
+            group.add(body);
+            const rim = new THREE.Mesh(new THREE.TorusGeometry(0.172, 0.013, 8, 26), metalMat);
+            rim.position.z = 0.027;
+            group.add(rim);
+            const face = new THREE.Mesh(new THREE.CircleGeometry(0.16, 24), faceMat);
+            face.position.z = 0.029;
+            group.add(face);
+
+            // 12 marcas de hora
+            for (let i = 0; i < 12; i++) {
+                const a = (i / 12) * Math.PI * 2;
+                const mk = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.045, 0.004), handMat);
+                mk.position.set(Math.sin(a) * 0.135, Math.cos(a) * 0.135, 0.031);
+                group.add(mk);
+            }
+
+            // Agujas con pivote central: nacen en posturas absurdas y el
+            // juego las hace girar a lo loco si el reloj esta encendido
+            const hands = {};
+            const mkHand = (w, h, mat, len) => {
+                const g = new THREE.Group();
+                const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.005), mat);
+                m.position.y = len;
+                g.add(m);
+                g.rotation.z = Math.random() * Math.PI * 2;
+                g.position.z = 0.031;
+                group.add(g);
+                return g;
+            };
+            hands.h = mkHand(0.016, 0.08, handMat, 0.04);
+            hands.m = mkHand(0.012, 0.115, handMat, 0.057);
+            hands.s = mkHand(0.006, 0.125, secondMat, 0.062);
+            const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.008, 8), metalMat);
+            hub.rotation.x = Math.PI / 2;
+            hub.position.z = 0.031;
+            group.add(hub);
+
+            // Pila por DETRAS (visible al descolgarlo o en los del suelo boca
+            // abajo): al sacarla con [E] el reloj se apaga para siempre
+            let batteryMesh = null;
+            if (hasBattery) {
+                batteryMesh = new THREE.Group();
+                const bb = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.019, 0.07, 8), metalMat);
+                bb.rotation.x = Math.PI / 2;
+                const band = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.018, 8),
+                    new THREE.MeshStandardMaterial({ color: 0xa03a24, roughness: 0.5, metalness: 0.2 }));
+                band.rotation.x = Math.PI / 2;
+                band.position.z = 0.012;
+                batteryMesh.add(bb, band);
+                batteryMesh.position.z = -0.05;
+                group.add(batteryMesh);
+            }
+
+            if (onWall) {
+                // Colgado: torcido y a veces descolgado de la pared
+                group.rotation.z = (Math.random() - 0.5) * 0.5;
+                group.rotation.x = (Math.random() - 0.5) * 0.25;
+            } else {
+                // Tirado en el suelo: boca arriba (esfera) o boca abajo (pila)
+                group.rotation.y = Math.random() * Math.PI * 2;
+                group.rotation.x = (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 2 + (Math.random() - 0.5) * 0.3);
+                group.rotation.z = (Math.random() - 0.5) * 0.5;
+            }
+
+            group.userData = { hands, running, battery: hasBattery, batteryMesh, onWall, clockId: null };
             return group;
         }
     };
@@ -791,6 +881,7 @@
         head.add(led);
         group.add(head);
 
+        group.scale.setScalar(0.78);   // camaras de seguridad mas discretas
         group.userData = { head, ledMat };
         return group;
     }

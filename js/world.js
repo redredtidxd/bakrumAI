@@ -565,6 +565,7 @@
             this.furnitureBoxes = [];         // muebles: cajas solidas (mundo, persistentes)
             this.dynamicFurniture = [];       // muebles con fisica (mundo)
             this.furnitureMeshes = [];        // mallas de muebles en la escena (para reconstruir)
+            this.clocks = [];                 // relojes locos (estaticos, como los muebles)
             this.collectedNoteIndices = new Set();
             this.pickupById = new Map();      // id persistente -> datos del objeto
             this.claimedPickupIds = new Set(); // objetos reclamados por CUALQUIER jugador
@@ -666,6 +667,8 @@
             this.chunks.clear();
             for (const m of this.furnitureMeshes) this.scene.remove(m);
             this.furnitureMeshes = [];
+            for (const c of this.clocks) this.scene.remove(c);
+            this.clocks = [];
             this.wallBoxes = [];
             this.lamps = [];
             this.pickups = [];
@@ -1074,7 +1077,7 @@
             const roll = r();
             if (roll < 0.4) return 3 + Math.floor(r() * 2);   // 3-4 pequena (40%)
             if (roll < 0.8) return 4 + Math.floor(r() * 2);   // 4-5 mediana (40%)
-            return 5 + Math.floor(r() * 2);                   // 5-6 grande (20%)
+            return 5;                                         // 5 grande (20%), antes 5-6
         }
 
         rollWidth(r) {
@@ -1362,9 +1365,9 @@
         carveHall(ch) {
             const N = CHUNK_SIZE;
             const r = ch.rng;
-            // Salones 4-6 (antes 5-7): menos campo abierto, mas mesas/pilares
-            const w = 4 + Math.floor(r() * 3);
-            const h = 4 + Math.floor(r() * 3);
+            // Salones 4-5 (antes 4-6): menos campo abierto, mas mesas/pilares
+            const w = 4 + Math.floor(r() * 2);
+            const h = 4 + Math.floor(r() * 2);
             const hx = 1 + Math.floor(r() * (N - 2 - w));
             const hz = 1 + Math.floor(r() * (N - 2 - h));
             for (let x = hx; x < hx + w; x++) {
@@ -2554,7 +2557,7 @@
                 const m = createSecurityCameraModel();
                 const mx = ch.cx * N * C + (c[0] + 0.5) * C;
                 const mz = ch.cz * N * C + (c[1] + 0.5) * C;
-                const off = 0.122;
+                const off = 0.1;
                 let ry = 0;
                 if (c[2] === 'W') { m.position.set(box.minX - off, 2.28, mz); ry = -Math.PI / 2; }
                 else if (c[2] === 'E') { m.position.set(box.maxX + off, 2.28, mz); ry = Math.PI / 2; }
@@ -3729,6 +3732,55 @@
             return true;
         }
 
+        // Comprueba si un mueble YA ROTADO cabe en el hueco usando su caja
+        // envolvente REAL (Box3 en el suelo): las mesas caidas o en diagonal
+        // ocupan mas que el circulo de canPlaceFurniture y se clavaban en
+        // pilares y paredes ("las mesas atraviesan el pilar"). Solo muros y
+        // pilares del PROPIO chunk: determinista para todos los clientes.
+        furnitureFits(ch, mesh, x, z, margin = 0.05) {
+            mesh.position.set(x, 0, z);
+            mesh.updateMatrixWorld(true);
+            const b = new THREE.Box3().setFromObject(mesh);
+            const minX = b.min.x - margin, maxX = b.max.x + margin;
+            const minZ = b.min.z - margin, maxZ = b.max.z + margin;
+            for (const box of ch.wallBoxes) {
+                if (maxX > box.minX && minX < box.maxX && maxZ > box.minZ && minZ < box.maxZ) return false;
+            }
+            for (const occ of ch.occ) {
+                const nx = Math.max(minX, Math.min(occ.x, maxX));
+                const nz = Math.max(minZ, Math.min(occ.z, maxZ));
+                const dx = occ.x - nx, dz = occ.z - nz;
+                // Holgura pequena y CONSTANTE: el radio de occ es una
+                // circunferencia conservadora (una silla ya colocada bajo el
+                // borde de una mesa no debe tumbar la mesa, ni bloquear las
+                // mesas emparejadas a 1,75 m).
+                if (dx * dx + dz * dz < 0.18 * 0.18) return false;
+            }
+            return true;
+        }
+
+        // Punto para una mesa PEGADA A LA PARED de una sala: elige una de las
+        // cuatro caras interiores del rectangulo de la sala y coloca la mesa
+        // con el canto a ~5 cm del muro, eje largo paralelo a la pared. La
+        // comprobacion real la hace furnitureFits al colocar.
+        roomWallDeskSpot(rw) {
+            const C = CELL_SIZE;
+            const r = Math.random;
+            const sides = ['N', 'S', 'E', 'W'];
+            for (let a = 0; a < 4; a++) {
+                const side = sides.splice(Math.floor(r() * sides.length), 1)[0];
+                const along = (side === 'N' || side === 'S') ? rw.w * C : rw.h * C;
+                if (along < 2.2) continue;   // mesa de 1,6 m + margenes
+                let x, z, ry;
+                if (side === 'N') { z = (rw.z + rw.h) * C - 0.49; ry = 0; x = rw.x * C + 0.7 + r() * (along - 2.4); }
+                else if (side === 'S') { z = rw.z * C + 0.49; ry = 0; x = rw.x * C + 0.7 + r() * (along - 2.4); }
+                else if (side === 'E') { x = (rw.x + rw.w) * C - 0.49; ry = Math.PI / 2; z = rw.z * C + 0.7 + r() * (along - 2.4); }
+                else { x = rw.x * C + 0.49; ry = Math.PI / 2; z = rw.z * C + 0.7 + r() * (along - 2.4); }
+                return { x, z, ry };
+            }
+            return null;
+        }
+
         // Ejecuta un bloque con Math.random sustituido por un generador
         // DETERMINISTA del chunk (muebles, armarios, escombros y detalles de
         // los modelos). Antes usaban Math.random global: con la misma semilla
@@ -3765,50 +3817,116 @@
                 if (area >= 9 && Math.random() < 0.6) pieces++;
                 if (area >= 20 && Math.random() < 0.5) pieces++;
 
+                // Ayudantes locales: colocacion segura con la caja REAL del
+                // mueble ya rotado (furnitureFits) y registro en la escena.
+                const trySpot = (mesh, x, z, margin) => {
+                    mesh.position.set(x, 0, z);
+                    snapToFloor(mesh, 0);
+                    return this.furnitureFits(ch, mesh, x, z, margin);
+                };
+                const registerDesk = (desk, x, z) => {
+                    if (!trySpot(desk, x, z, 0.06)) return false;
+                    // Id DETERMINISTA para la sincronizacion por red
+                    // (cajones y posiciones globales para la sala)
+                    desk.userData.fid = 'f:' + Math.round(x * 10) + ':' + Math.round(z * 10);
+                    // Cajon: de vez en cuando esconde un objeto. El tipo se
+                    // decide AQUI con el rng del chunk: todos los clientes
+                    // abren el mismo cajon con el mismo contenido (y el
+                    // objeto se reclama por red).
+                    const dr = desk.userData.drawer;
+                    if (dr && Math.random() < 0.35) {
+                        const ir = Math.random();
+                        dr.itemType = ir < 0.4 ? 'almond' : (ir < 0.75 ? 'battery' : (ir < 0.9 ? 'chalk' : 'note'));
+                        if (dr.itemType === 'chalk') {
+                            const ci = Math.floor(Math.random() * 3);
+                            const chalkColors = ['#ffffff', '#ff3333', '#111111'];
+                            const chalkNames = ['BLANCO', 'ROJO', 'NEGRO'];
+                            dr.chalk = { color: chalkColors[ci], colorName: chalkNames[ci] };
+                        }
+                        if (dr.itemType === 'note') {
+                            dr.noteIndex = Math.floor(Math.random() * NOTE_POOL.length);
+                        }
+                    }
+                    this.scene.add(desk);
+                    this.furnitureMeshes.push(desk);
+                    this.dynamicFurniture.push({ mesh: desk, x, z, fid: desk.userData.fid });
+                    ch.occ.push({ x, z, radius: 0.95 });
+                    return true;
+                };
+                const registerChair = (chair, x, z) => {
+                    if (!trySpot(chair, x, z, 0.05)) return false;
+                    chair.userData.fid = 'f:' + Math.round(x * 10) + ':' + Math.round(z * 10);
+                    this.scene.add(chair);
+                    this.furnitureMeshes.push(chair);
+                    this.dynamicFurniture.push({ mesh: chair, x, z, fid: chair.userData.fid });
+                    ch.occ.push({ x, z, radius: 0.55 });
+                    return true;
+                };
+
                 for (let p = 0; p < pieces; p++) {
                     const choice = Math.random();
                     if (choice < 0.35) {
                         // Poses de mesa: 0 de pie, 1 caida de lado (pata rota),
                         // 2 patas arriba, 3 volcada hacia delante. La mayoria
-                        // estan DE PIE (antes 4 de cada 10 nacian tumbadas o
-                        // patas arriba: "las mesas estan mal, patas arriba sin
-                        // ninguna logica"); las patas arriba son las mas raras.
+                        // estan DE PIE; las patas arriba son las mas raras.
                         const vr = Math.random();
                         const variant = vr < 0.55 ? 0 : (vr < 0.78 ? 1 : (vr < 0.9 ? 3 : 2));
-                        const deskX = rx + (Math.random() - 0.5) * 1.5;
-                        const deskZ = rz + (Math.random() - 0.5) * 1.5;
-                        if (this.canPlaceFurniture(ch, deskX, deskZ, 0.95)) {
-                            const desk = ModelBuilder.createOfficeDesk(variant);
-                            desk.position.set(deskX, 0, deskZ);
-                            snapToFloor(desk, 0);
-                            // Id DETERMINISTA para la sincronizacion por red
-                            // (cajones y posiciones globales para la sala)
-                            desk.userData.fid = 'f:' + Math.round(deskX * 10) + ':' + Math.round(deskZ * 10);
-                            // Cajon: de vez en cuando esconde un objeto. El
-                            // tipo se decide AQUI con el rng del chunk: todos
-                            // los clientes abren el mismo cajon con el mismo
-                            // contenido (y el objeto se reclama por red).
-                            // TODAS las mesas tienen cajon abrible (antes las
-                            // patas-arriba y volcadas no: "esta mesa no tiene
-                            // cajon").
-                            const dr = desk.userData.drawer;
-                            if (dr && Math.random() < 0.35) {
-                                const ir = Math.random();
-                                dr.itemType = ir < 0.4 ? 'almond' : (ir < 0.75 ? 'battery' : (ir < 0.9 ? 'chalk' : 'note'));
-                                if (dr.itemType === 'chalk') {
-                                    const ci = Math.floor(Math.random() * 3);
-                                    const chalkColors = ['#ffffff', '#ff3333', '#111111'];
-                                    const chalkNames = ['BLANCO', 'ROJO', 'NEGRO'];
-                                    dr.chalk = { color: chalkColors[ci], colorName: chalkNames[ci] };
-                                }
-                                if (dr.itemType === 'note') {
-                                    dr.noteIndex = Math.floor(Math.random() * NOTE_POOL.length);
+                        const desk = ModelBuilder.createOfficeDesk(variant);
+                        let deskX = 0, deskZ = 0;
+                        let placed = false;
+                        if (variant === 0) {
+                            // De pie: casi siempre recta; a veces en diagonal,
+                            // como las mesas de los backrooms
+                            desk.rotation.y = Math.random() < 0.15
+                                ? Math.floor(Math.random() * 4) * Math.PI / 2 + Math.PI / 4
+                                : Math.floor(Math.random() * 4) * Math.PI / 2;
+                            // Variedad: a veces pegada a una pared de la sala
+                            if (Math.random() < 0.22) {
+                                const ws = this.roomWallDeskSpot(rw);
+                                if (ws) {
+                                    desk.rotation.y = ws.ry;
+                                    placed = registerDesk(desk, ws.x, ws.z);
+                                    if (placed) { deskX = ws.x; deskZ = ws.z; }
                                 }
                             }
-                            this.scene.add(desk);
-                            this.furnitureMeshes.push(desk);
-                            this.dynamicFurniture.push({ mesh: desk, x: deskX, z: deskZ, fid: desk.userData.fid });
-                            ch.occ.push({ x: deskX, z: deskZ, radius: 0.95 });
+                        }
+                        if (!placed) {
+                            deskX = rx + (Math.random() - 0.5) * 1.5;
+                            deskZ = rz + (Math.random() - 0.5) * 1.5;
+                            placed = registerDesk(desk, deskX, deskZ);
+                        }
+                        if (!placed) continue;   // no cabe: se descarta
+                        // VARIEDAD backrooms: a veces una segunda mesa hace
+                        // pareja (en fila o una enfrente de otra) y/o una
+                        // silla la acompaña
+                        if (variant === 0) {
+                            const ry = desk.rotation.y;
+                            const cos = Math.cos(ry), sin = Math.sin(ry);
+                            if (Math.random() < 0.28) {
+                                const offsets = [
+                                    [cos * 1.75, -sin * 1.75],
+                                    [sin * 1.75, cos * 1.75],
+                                    [-cos * 1.75, sin * 1.75]
+                                ];
+                                for (const [ox, oz] of offsets) {
+                                    const desk2 = ModelBuilder.createOfficeDesk(0);
+                                    desk2.rotation.y = ry;
+                                    if (registerDesk(desk2, deskX + ox, deskZ + oz)) break;
+                                }
+                            }
+                            if (Math.random() < 0.35) {
+                                const spots = [
+                                    [sin * 0.95, cos * 0.95],
+                                    [-sin * 0.95, -cos * 0.95],
+                                    [cos * 0.95, -sin * 0.95],
+                                    [-cos * 0.95, sin * 0.95]
+                                ];
+                                for (const [ox, oz] of spots) {
+                                    const chair = ModelBuilder.createOfficeChair(0);
+                                    chair.rotation.y = ry;
+                                    if (registerChair(chair, deskX + ox, deskZ + oz)) break;
+                                }
+                            }
                         }
                     } else if (choice < 0.6) {
                         // Poses de silla: 0 de pie, 1 caida de lado,
@@ -3817,16 +3935,8 @@
                         const variant = vr < 0.6 ? 0 : (vr < 0.85 ? 1 : 2);
                         const chairX = rx + (Math.random() - 0.5) * 1.8;
                         const chairZ = rz + (Math.random() - 0.5) * 1.8;
-                        if (this.canPlaceFurniture(ch, chairX, chairZ, 0.55)) {
-                            const chair = ModelBuilder.createOfficeChair(variant);
-                            chair.position.set(chairX, 0, chairZ);
-                            snapToFloor(chair, 0);
-                            chair.userData.fid = 'f:' + Math.round(chairX * 10) + ':' + Math.round(chairZ * 10);
-                            this.scene.add(chair);
-                            this.furnitureMeshes.push(chair);
-                            this.dynamicFurniture.push({ mesh: chair, x: chairX, z: chairZ, fid: chair.userData.fid });
-                            ch.occ.push({ x: chairX, z: chairZ, radius: 0.55 });
-                        }
+                        const chair = ModelBuilder.createOfficeChair(variant);
+                        registerChair(chair, chairX, chairZ);
                     } else if (Math.random() < 0.45) {
                         // Armarios en las salas MENOS comunes (antes 40% de
                         // cada pieza de mobiliario intentaba un armario: las
@@ -3838,6 +3948,83 @@
 
             // Armarios de pasillo contra las paredes de los tramos rectos
             this.placeCorridorCabinets(ch);
+            // Relojes locos: raros, colgados en las paredes o tirados en el
+            // suelo (tambien con el rng del chunk: toda la sala ve los mismos)
+            this.placeChunkClocks(ch);
+        }
+
+        // RELOJES LOCOS: aparecen raramente (1 de cada ~3 chunks), colgados
+        // en una pared (torcidos o descolgados) o tirados en el suelo boca
+        // arriba / boca abajo. Algunos nacen ya APAGADOS; los encendidos
+        // llevan una pila por detras que se puede sacar con [E] (se reclama
+        // por red como cualquier objeto).
+        placeChunkClocks(ch) {
+            const r = ch.rng;
+            const n = r() < 0.05 ? 2 : (r() < 0.32 ? 1 : 0);
+            for (let i = 0; i < n; i++) {
+                const id = 'clk:' + ch.cx + ',' + ch.cz + ':' + i;
+                const battery = !this.claimedPickupIds.has(id) && r() < 0.6;
+                const running = battery && r() < 0.62;
+                let clock = null;
+                if (r() < 0.55) {
+                    const ws = this.pickWallClockSpot(ch);
+                    if (ws) {
+                        clock = ModelBuilder.createWallClockModel({ onWall: true, battery, running });
+                        clock.position.set(ws.x, ws.y, ws.z);
+                        clock.rotation.y = ws.ry;
+                    }
+                }
+                if (!clock) {
+                    const spot = this.pickupSpot(ch);
+                    if (!spot) continue;
+                    // Nunca dentro de la cabina de seguridad
+                    const sr = ch.securityRoom;
+                    if (sr) {
+                        const lx = Math.floor(spot.x / CELL_SIZE) - ch.cx * CHUNK_SIZE;
+                        const lz = Math.floor(spot.z / CELL_SIZE) - ch.cz * CHUNK_SIZE;
+                        if (lx >= sr.rx && lx < sr.rx + sr.w && lz >= sr.rz && lz < sr.rz + sr.h) continue;
+                    }
+                    clock = ModelBuilder.createWallClockModel({ onWall: false, battery, running });
+                    clock.position.set(spot.x, 0, spot.z);
+                    snapToFloor(clock, 0.01);
+                }
+                clock.userData.clockId = id;
+                this.scene.add(clock);
+                this.clocks.push(clock);
+            }
+        }
+
+        // Punto de un reloj COLGADO: reaprovecha la seleccion de caras de
+        // las notas de pared y devuelve posicion/rotacion para colgarlo a la
+        // altura de la vista, nunca dentro de la cabina de seguridad. El
+        // centro del reloj debe quedar FUERA de todas las cajas reales de
+        // muro (las cajas de las esquinas cubren a veces la cara elegida y
+        // enterrarian el reloj dentro del muro); la pared de apoyo queda
+        // detras del centro, asi que no molesta.
+        pickWallClockSpot(ch) {
+            for (let attempt = 0; attempt < 8; attempt++) {
+                const spot = this.pickWallNoteSpot(ch);
+                if (!spot) return null;
+                const sr = ch.securityRoom;
+                if (sr) {
+                    const lx = Math.floor(spot.x / CELL_SIZE) - ch.cx * CHUNK_SIZE;
+                    const lz = Math.floor(spot.z / CELL_SIZE) - ch.cz * CHUNK_SIZE;
+                    if (lx >= sr.rx && lx < sr.rx + sr.w && lz >= sr.rz && lz < sr.rz + sr.h) continue;
+                }
+                const off = 0.085;
+                let x = spot.x, z = spot.z, ry = 0;
+                if (spot.dir === 'W') { x = spot.box.minX - off; ry = -Math.PI / 2; }
+                else if (spot.dir === 'E') { x = spot.box.maxX + off; ry = Math.PI / 2; }
+                else if (spot.dir === 'S') { z = spot.box.minZ - off; ry = Math.PI; }
+                else { z = spot.box.maxZ + off; ry = 0; }
+                let ok = true;
+                for (const w of ch.wallBoxes) {
+                    if (x > w.minX + 0.03 && x < w.maxX - 0.03 && z > w.minZ + 0.03 && z < w.maxZ - 0.03) { ok = false; break; }
+                }
+                if (!ok) continue;
+                return { x, z, y: 1.5 + ch.rng() * 0.35, ry };
+            }
+            return null;
         }
 
         _CABDIM = { w: 1.0, h: 2.2, d: 0.56 };
@@ -4491,6 +4678,19 @@
         markPickupCollected(id) {
             if (id == null) return;
             this.claimedPickupIds.add(id);
+            // Relojes locos: otro jugador saco la pila -> aqui tambien se
+            // apaga el reloj (estado compartido por la sala)
+            if (typeof id === 'string' && id.indexOf('clk:') === 0) {
+                for (const c of this.clocks) {
+                    const ud = c.userData;
+                    if (ud && ud.clockId === id && ud.battery) {
+                        ud.battery = false;
+                        ud.running = false;
+                        if (ud.batteryMesh) c.remove(ud.batteryMesh);
+                    }
+                }
+                return;
+            }
             const p = this.pickupById.get(id);
             if (!p || p.collected) return;
             p.collected = true;

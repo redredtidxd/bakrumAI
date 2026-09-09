@@ -31,11 +31,21 @@ Juego de terror procedural estilo Backrooms en el navegador (Three.js).
 
 ## Versión
 
-La versión actual (`v1.9.2`) se muestra en el menú principal y en el HUD. Al hacer cambios:
+La versión actual (`v1.13.0`) se muestra en el menú principal y en el HUD, con un selector de versiones jugables en el menú.
 
-1. Sube `GAME_VERSION` en `js/game.js` (p. ej. `1.5.0`).
-2. Actualiza el `?v=...` de los `<script>`/`<link>` de `index.html` al mismo número (así el navegador descarta la caché vieja y los jugadores ven la versión nueva sin Ctrl+F5).
-3. Regenera `backrooms-single-file.html` embebiendo los `js/` actualizados (los `<script>` inline se generan a partir de `js/`).
+**Convención (autorecordada):** cada versión publicada — sea una versión `1.X.0` o una subversión `1.X.Y` — se añade a la lista de versiones jugables **siempre con sus dos variantes**: la normal y la muy optimizada **"Opt"**. Ninguna versión anterior se elimina: queda almacenada en el historial y sigue siendo jugable.
+
+Para publicar una versión nueva:
+
+1. Sube `CURRENT_VERSION` en `js/game.js` (p. ej. `1.13.0` → `1.14.0`, o `1.13.1` como subversión).
+2. Mueve la versión anterior al principio de `RELEASED_VERSIONS` (también en `js/game.js`).
+3. Sube `CURRENT_OPT_LEVEL` y añade una fila más agresiva a `OPT_TABLE` en `js/game.js`: **cada versión nueva tiene más contenido, así que su variante Opt debe optimizar más que la anterior** (más resolución recortada, menos luces, CCTV más espaciado, física e interacción a mitad de frecuencia). La versión anterior conserva su propio nivel Opt en el historial.
+4. Actualiza el `?v=...` de los `<script>`/`<link>` de `index.html` al mismo número (así el navegador descarta la caché vieja y los jugadores ven la versión nueva sin Ctrl+F5).
+5. Regenera `backrooms-single-file.html` embebiendo los `js/` actualizados (los `<script>` inline se generan a partir de `js/`).
+
+El selector del menú se rellena **solo** desde `VERSION_HISTORY` (que se construye automáticamente a partir de `CURRENT_VERSION` + `RELEASED_VERSIONS`): no hay que tocar el HTML. Si una versión publicada se quedara sin su variante Opt, el juego avisa en la consola del navegador.
+
+**Niveles Opt publicados:** `1.12.0` Opt = nivel 1 (pixel ratio 0.78, 20 luces, CCTV 0.30 s); `1.13.0` Opt = nivel 2 (pixel ratio 0.62, 12 luces, CCTV 0.45 s, aniso 2, física e interacción a 30 Hz).
 
 ## Cómo jugar
 

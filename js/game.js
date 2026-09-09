@@ -7,18 +7,56 @@
     const IS_TOUCH = (('ontouchstart' in window) || navigator.maxTouchPoints > 0) &&
         (window.innerWidth < 1100 || !window.matchMedia('(pointer: fine)').matches);
 
-    // HISTORIAL DE VERSIONES: no se borra una entrega al publicar otra. Las
-    // dos variantes 1.12.0 siguen seleccionables: la normal prioriza calidad
-    // y la Opt activa el perfil de rendimiento fuerte. Las anteriores quedan
-    // archivadas y visibles para no perder el historial (este archivo contiene
-    // el motor actual; no se finge cargar codigo que ya no esta incluido).
-    const VERSION_HISTORY = Object.freeze([
-        { id: '1.12.0-opt', version: '1.12.0', optimized: true, selectable: true, label: 'Version 1.12.0 Opt', note: 'Rendimiento fuerte · CCTV por turnos' },
-        { id: '1.12.0', version: '1.12.0', optimized: false, selectable: true, label: 'Version 1.12.0 normal', note: 'Perfil normal · maxima calidad' },
-        { id: '1.11.0', version: '1.11.0', optimized: false, selectable: false, archived: true, label: 'Version 1.11.0 · archivada', note: 'Sala CCTV original' },
-        { id: '1.10.0', version: '1.10.0', optimized: false, selectable: false, archived: true, label: 'Version 1.10.0 · archivada', note: 'Base anterior' }
+    // VERSIONES JUGABLES. AUTORECORDATORIO: cada entrega publicada, sea una
+    // version 1.X.0 o una subversion 1.X.Y, se registra AQUI con sus DOS
+    // variantes seleccionables: la normal (maxima calidad) y la muy
+    // optimizada "Opt" (perfil de rendimiento fuerte). Para publicar una
+    // version nueva solo hay que:
+    //   1) subir CURRENT_VERSION y
+    //   2) mover la version anterior al principio de RELEASED_VERSIONS.
+    // El selector del menu se rellena SOLO desde VERSION_HISTORY: nunca se
+    // publica una version sin su Opt, ni se elimina una anterior (queda
+    // almacenada y jugable en el historial).
+    const CURRENT_VERSION = '1.13.0';   // <-- UNICA constante que subir al publicar
+    // NIVEL DE OPTIMIZACION de la variante Opt de la version actual. REGLA
+    // AUTORECORDADA: cada version nueva llega con MAS contenido, asi que su
+    // Opt debe optimizar MAS que la anterior. Al publicar se sube
+    // CURRENT_OPT_LEVEL junto a CURRENT_VERSION y se anade una fila mas
+    // agresiva a OPT_TABLE.
+    const CURRENT_OPT_LEVEL = 2;
+    // Parametros de rendimiento de la variante Opt por nivel, en orden:
+    // [pixelRatio, luces, intervaloLuces(s), intervaloRuido(s),
+    //  intervaloFeed(s), readbackFeed, distanciaCaptura(m), aniso]
+    const OPT_TABLE = Object.freeze([
+        [0.78, 20, 0.12, 0.12, 0.30, 4, 36, 8],   // nivel 1: 1.12.0 Opt
+        [0.62, 12, 0.20, 0.20, 0.45, 6, 30, 2]    // nivel 2: 1.13.0 Opt (mas contenido -> mas optimizado)
     ]);
-    const DEFAULT_VERSION_ID = '1.12.0-opt';
+    function optParams(level) {
+        const row = OPT_TABLE[Math.max(0, Math.min(OPT_TABLE.length - 1, (level || 1) - 1))];
+        return { pixelRatio: row[0], lights: row[1], lightInterval: row[2], noiseInterval: row[3], feedInterval: row[4], feedReadback: row[5], feedDistance: row[6], aniso: row[7] };
+    }
+    const RELEASED_VERSIONS = [
+        { version: '1.12.0', optLevel: 1, note: 'Sala CCTV · estadísticas · salas privadas' },
+        { version: '1.11.0', optLevel: 1, note: 'Sala CCTV original' },
+        { version: '1.10.0', optLevel: 1, note: 'Base anterior' }
+    ];
+    const VERSION_HISTORY = Object.freeze((() => {
+        const out = [
+            { id: CURRENT_VERSION + '-opt', version: CURRENT_VERSION, optimized: true, optLevel: CURRENT_OPT_LEVEL, selectable: true, current: true, label: 'Version ' + CURRENT_VERSION + ' Opt', note: 'Rendimiento fuerte · Opt nivel ' + CURRENT_OPT_LEVEL + ' (más contenido, más optimizado)' },
+            { id: CURRENT_VERSION, version: CURRENT_VERSION, optimized: false, selectable: true, current: true, label: 'Version ' + CURRENT_VERSION + ' normal', note: 'Perfil normal · máxima calidad' }
+        ];
+        for (const r of RELEASED_VERSIONS) {
+            out.push({ id: r.version + '-opt', version: r.version, optimized: true, optLevel: r.optLevel || 1, selectable: true, archived: true, label: 'Version ' + r.version + ' Opt', note: (r.note || '') + ' · Opt nivel ' + (r.optLevel || 1) });
+            out.push({ id: r.version, version: r.version, optimized: false, selectable: true, archived: true, label: 'Version ' + r.version + ' normal', note: r.note || '' });
+        }
+        return out;
+    })());
+    // Red de seguridad en desarrollo: una version publicada SIN su variante
+    // Opt jugable seria un olvido; avisar alto y claro en consola.
+    if (!VERSION_HISTORY.some(v => v.selectable && v.optimized && v.version === CURRENT_VERSION)) {
+        console.warn('[VERSION] ¡Falta la variante Opt de ' + CURRENT_VERSION + ' en VERSION_HISTORY! Cada version debe incluir su Opt.');
+    }
+    const DEFAULT_VERSION_ID = CURRENT_VERSION + '-opt';
     function storedVersionId() {
         try {
             const id = localStorage.getItem('backrooms-version-id');
@@ -79,21 +117,26 @@
             this.optimizedMode = GAME_OPTIMIZED;
             this.activeVersion = ACTIVE_VERSION;
             this._renderFrame = 0;
+            this._optTick = 0;
+            // Parametros de rendimiento de la variante Opt SEGUN EL NIVEL de
+            // su version: cada version nueva optimiza mas que la anterior
+            // (OPT_TABLE). La variante normal no muestra "Opt" y mantiene el
+            // techo de calidad.
+            this.optParams = this.optimizedMode ? optParams(ACTIVE_VERSION.optLevel) : null;
             this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,
-                // Opt es un perfil de rendimiento real: reduce la carga de
-                // píxeles además de limitar luces/CCTV. La versión normal no
-                // muestra "Opt" porque mantiene este techo de calidad.
-                this.optimizedMode ? (IS_TOUCH ? 0.78 : 0.78) : (IS_TOUCH ? 1.15 : 1.5)));
+                this.optimizedMode ? this.optParams.pixelRatio : (IS_TOUCH ? 1.15 : 1.5)));
             this.renderer.setClearColor(FOG_COLOR);
             // Control de exposición: mapeado de tonos oscuro y aterrador
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
             this.renderer.toneMappingExposure = 0.62;
             this.container.appendChild(this.renderer.domElement);
 
-            // Anisotropía: paredes y moqueta se ven nítidas incluso en ángulo rasante
+            // Anisotropía: paredes y moqueta se ven nítidas incluso en ángulo
+            // rasante. En Opt se baja para aligerar el muestreo de texturas.
             const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
+            const aniso = this.optimizedMode ? Math.min(this.optParams.aniso, maxAniso) : Math.min(8, maxAniso);
             [Materials.floor.map, Materials.wall.map, Materials.ceiling.map].forEach(t => {
-                if (t) t.anisotropy = Math.min(8, maxAniso);
+                if (t) t.anisotropy = aniso;
             });
 
             // Luz ambiental casi nula: paredes y moqueta en penumbra ocre
@@ -129,8 +172,9 @@
             // lamparas queda entero encendido.
             this.lightPool = [];
             // En Opt se mantienen las luces cercanas imprescindibles, pero se
-            // reduce mucho el número de PointLights que WebGL evalúa.
-            const lightCount = this.optimizedMode ? 20 : 64;
+            // reduce mucho el número de PointLights que WebGL evalúa (menos
+            // aun en niveles Opt superiores: mas contenido, mas optimizado).
+            const lightCount = this.optimizedMode ? this.optParams.lights : 64;
             for (let i = 0; i < lightCount; i++) {
                 const pl = new THREE.PointLight(0xffd878, 0, 18, 2.0);
                 this.scene.add(pl);
@@ -266,9 +310,9 @@
             this._feedTime = 0;
             this._feedFrame = 0;
             this._feedRoundRobin = 0;
-            this._feedReadbackEvery = this.optimizedMode ? 4 : 2; // solo el feed abierto lee pixeles
-            this._feedCaptureDistance = this.optimizedMode ? 36 : 42;
-            this._feedMinInterval = this.optimizedMode ? 0.30 : 0.16; // Opt: una captura por turno, sin tres renders a la vez
+            this._feedReadbackEvery = this.optimizedMode ? this.optParams.feedReadback : 2; // solo el feed abierto lee pixeles
+            this._feedCaptureDistance = this.optimizedMode ? this.optParams.feedDistance : 42;
+            this._feedMinInterval = this.optimizedMode ? this.optParams.feedInterval : 0.16; // Opt: una captura por turno, sin tres renders a la vez
             this._feedOverlayStamp = '';
             this._noSignalTex = null;
             this._panelTimer = 0;
@@ -746,6 +790,28 @@
             const versionSelect = document.getElementById('version-selector');
             const versionNote = document.getElementById('version-note');
             if (versionSelect) {
+                // Rellena el selector SOLO desde VERSION_HISTORY: al publicar
+                // una version nueva (normal + Opt) aparece aqui sin tocar HTML
+                versionSelect.innerHTML = '';
+                let archGroup = null;
+                for (const v of VERSION_HISTORY) {
+                    if (v.archived) {
+                        if (!archGroup) {
+                            archGroup = document.createElement('optgroup');
+                            archGroup.label = 'Historial almacenado · jugable';
+                            versionSelect.appendChild(archGroup);
+                        }
+                        const opt = document.createElement('option');
+                        opt.value = v.id;
+                        opt.textContent = v.label;
+                        archGroup.appendChild(opt);
+                    } else {
+                        const opt = document.createElement('option');
+                        opt.value = v.id;
+                        opt.textContent = v.label;
+                        versionSelect.appendChild(opt);
+                    }
+                }
                 versionSelect.value = ACTIVE_VERSION_ID;
                 versionSelect.onchange = (e) => {
                     const next = VERSION_HISTORY.find(v => v.id === e.target.value && v.selectable);
@@ -1360,6 +1426,29 @@
                             return;
                         }
                     }
+                    // RELOJES LOCOS: [E] saca la pila de detras y se apaga
+                    for (const clk of this.worldSystem.clocks) {
+                        const ud = clk.userData;
+                        if (!ud || !ud.battery) continue;
+                        let o = hit.object;
+                        while (o && o !== clk) o = o.parent;
+                        if (o !== clk) continue;
+                        ud.battery = false;
+                        ud.running = false;
+                        if (ud.batteryMesh) clk.remove(ud.batteryMesh);
+                        if (ud.clockId) this.net.claimPickup(ud.clockId);
+                        if (this.inventory.flashBattery < 100) {
+                            this.inventory.flashBattery = 100;
+                            this.notify('🔋 RELOJ APAGADO · LINTERNA AL 100%');
+                        } else {
+                            this.inventory.batteries = Math.min(9, this.inventory.batteries + 1);
+                            this.notify(`🔋 PILA SACADA DEL RELOJ (${this.inventory.batteries})`);
+                        }
+                        audio.playSwitchClick();
+                        this.updateFlashlightHUD();
+                        this.stats.pickups++;
+                        return;
+                    }
                 }
             }
         }
@@ -1971,7 +2060,7 @@
             // La iluminacion sigue siendo estable, pero se elimina una
             // ordenacion costosa de cientos de lamparas por frame.
             this._lightUpdateTimer -= dt;
-            const lightInterval = this.optimizedMode ? 0.12 : 0.033;
+            const lightInterval = this.optimizedMode ? this.optParams.lightInterval : 0.033;
             if (this._lightUpdateTimer > 0) return;
             this._lightUpdateTimer = lightInterval;
             // La luz depende SOLO de la posicion del jugador, nunca de hacia
@@ -2283,6 +2372,17 @@
                                 ? `[E] CERRAR PUERTA · PILA ${b}%`
                                 : `[E] ABRIR PUERTA · PILA ${b}%`;
                         }
+                        break;
+                    }
+                    // Relojes locos con pila detras: se puede sacar
+                    for (const clk of this.worldSystem.clocks) {
+                        const ud = clk.userData;
+                        if (!ud || !ud.battery) continue;
+                        let o = hit.object;
+                        while (o && o !== clk) o = o.parent;
+                        if (o !== clk) continue;
+                        found = true;
+                        prompt.textContent = '[E] SACAR LA PILA DEL RELOJ';
                         break;
                     }
                 }
@@ -2761,6 +2861,20 @@
             }
         }
 
+        // RELOJES LOCOS: las agujas giran a velocidades absurdas, cada una
+        // a su ritmo y a veces hacia atras (el reloj esta totalmente loco).
+        updateClocks(dt) {
+            const t = this.clock.elapsedTime || 0;
+            for (const clk of this.worldSystem.clocks) {
+                const ud = clk.userData;
+                if (!ud || !ud.running || !ud.hands) continue;
+                const j = ud.jitter || (ud.jitter = Math.random() * 10);
+                ud.hands.h.rotation.z += dt * (1.1 + Math.sin(t * 2.2 + j) * 0.8);
+                ud.hands.m.rotation.z -= dt * (2.3 + Math.cos(t * 3.4 + j) * 1.3);
+                ud.hands.s.rotation.z += dt * (8 + Math.sin(t * 5.1 + j * 2) * 4);
+            }
+        }
+
         // Actores que solo se muestran durante una captura CCTV. La vista
         // normal conserva exactamente las visibilidades que decide el juego:
         // el avatar local se oculta, los remotos pueden estar fuera del radio
@@ -3036,7 +3150,11 @@
                 this.worldSystem.update(this.player.pos);
                 this.syncFurnitureBodies();
                 this.updatePhysics(dt);
-                this.updateFurniturePhysics(dt);
+                // Opt: la fisica de muebles a mitad de frecuencia y el raycast
+                // del prompt de interaccion en frames alternos (CPU barata,
+                // sin cambio visible)
+                this._optTick = (this._optTick + 1) & 1;
+                if (!this.optimizedMode || this._optTick === 1) this.updateFurniturePhysics(dt);
                 this.updateLights(dt);
                 this.updateCoordsHUD();
                 this.updateFlashlightBattery(dt);
@@ -3057,10 +3175,11 @@
                 // que vigilan y monitor con el feed de camaras
                 this.updateSecurityRooms(dt);
                 this.updateCameras(dt);
+                this.updateClocks(dt);
                 this.updateCameraFeeds(dt);
                 this.updateCameraFeedOverlay();
                 this.updateChalkDrawing();
-                this.checkInteractionsPrompt();
+                if (!this.optimizedMode || this._optTick === 1) this.checkInteractionsPrompt();
                 // Mapa: marcar explorado (cada 0,3 s), repintar si esta abierto
                 // y publicar los chunks nuevos a la sala (throttled)
                 this._mapTick += dt;
@@ -3141,7 +3260,7 @@
             // 256x256 en cada frame. Opt lo actualiza con mucha menos
             // frecuencia; el efecto visual sigue siendo continuo.
             this._noiseUpdateTimer -= dt;
-            const noiseInterval = this.optimizedMode ? 0.12 : 0.05;
+            const noiseInterval = this.optimizedMode ? this.optParams.noiseInterval : 0.05;
             if (this._noiseUpdateTimer <= 0) {
                 this._noiseUpdateTimer = noiseInterval;
                 this.renderNoise();
