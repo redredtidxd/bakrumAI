@@ -245,12 +245,19 @@
                 rod.position.set(0, 1.86, -0.05);
                 body.add(rod);
 
-                // Colgador + prenda
+                // Colgador + prenda. La tela cuelga DENTRO del cuerpo del
+                // armario (profundidad util ~0.44 m entre el fondo y las
+                // puertas): antes media 0.6-0.9 m y con el giro X se salia
+                // por DETRAS del panel trasero hasta 0.22 m, asomando por la
+                // pared contra la que apoya el armario ("ropa atravesando el
+                // muro"). Ahora nunca sobresale del armario.
                 const addHangerGarment = (seed) => {
                     const g = new THREE.Group();
                     const mat = clothMats[seed % clothMats.length];
                     const isLong = Math.random() < 0.45;
-                    const ch = isLong ? 0.9 : 0.6;
+                    const ch = isLong ? 0.36 : 0.26;
+                    // Rango en Z de la tela (tras el giro X): -0.05 +- ch/2,
+                    // siempre dentro del interior (-0.26..0.26) del armario
                     const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.3, ch, 1, 6), mat);
                     cloth.rotation.x = -Math.PI / 2;
                     cloth.position.y = -ch / 2 - 0.02;
@@ -629,9 +636,10 @@
             }
 
             if (onWall) {
-                // Colgado: torcido y a veces descolgado de la pared
-                group.rotation.z = (Math.random() - 0.5) * 0.5;
-                group.rotation.x = (Math.random() - 0.5) * 0.25;
+                // Colgado: solo un pelin torcido (antes se descolgaba hasta
+                // 14 grados de la pared y parecia flotando en el aire)
+                group.rotation.z = (Math.random() - 0.5) * 0.3;
+                group.rotation.x = (Math.random() - 0.5) * 0.08;
             } else {
                 // Tirado en el suelo: boca arriba (esfera) o boca abajo (pila)
                 group.rotation.y = Math.random() * Math.PI * 2;

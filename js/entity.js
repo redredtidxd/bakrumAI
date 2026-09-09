@@ -375,8 +375,18 @@
                         const nz = this.pos.z + (dz / d) * step;
                         this.yaw = Math.atan2(dx, dz);
                         let moved = false;
-                        if (!this.hitsWall(nx, this.pos.z)) { this.pos.x = nx; moved = true; }
-                        if (!this.hitsWall(this.pos.x, nz)) { this.pos.z = nz; moved = true; }
+                        // Movimiento DIAGONAL real: antes se avanzaba primero X
+                        // y luego Z por separado ("el monstruo solo se mueve
+                        // recto"); ahora se mueve directo hacia el punto y solo
+                        // se desliza por un eje si la diagonal esta bloqueada.
+                        if (!this.hitsWall(nx, nz)) {
+                            this.pos.x = nx;
+                            this.pos.z = nz;
+                            moved = true;
+                        } else {
+                            if (!this.hitsWall(nx, this.pos.z)) { this.pos.x = nx; moved = true; }
+                            if (!this.hitsWall(this.pos.x, nz)) { this.pos.z = nz; moved = true; }
+                        }
                         if (moved) this._blocked = 0;
                         else {
                             this._blocked += dt;
@@ -416,8 +426,15 @@
             const nz = this.pos.z + (dz / d) * step;
             this.yaw = Math.atan2(dx, dz);
             let moved = false;
-            if (!this.hitsWall(nx, this.pos.z)) { this.pos.x = nx; moved = true; }
-            if (!this.hitsWall(this.pos.x, nz)) { this.pos.z = nz; moved = true; }
+            // Diagonal real, con deslizamiento por eje solo si choca
+            if (!this.hitsWall(nx, nz)) {
+                this.pos.x = nx;
+                this.pos.z = nz;
+                moved = true;
+            } else {
+                if (!this.hitsWall(nx, this.pos.z)) { this.pos.x = nx; moved = true; }
+                if (!this.hitsWall(this.pos.x, nz)) { this.pos.z = nz; moved = true; }
+            }
             if (moved) this._blocked = 0;
             else {
                 this._blocked += dt;

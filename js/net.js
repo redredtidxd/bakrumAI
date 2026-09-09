@@ -23,6 +23,10 @@
             this.onKill = opts.onKill || (() => {});
             this.onRoomListings = opts.onRoomListings || (() => {});
             this.MAX_PLAYERS = 6;
+            // Etiqueta de version (p. ej. "v1.13.1 Opt"): se publica en la
+            // presencia y en el listado de salas para que cada sala diga que
+            // version esta jugando cada explorador.
+            this.versionLabel = opts.versionLabel || 'v?';
 
             // Identidad unica de esta sesion (solo [0-9a-zA-Z], requisito MQTT)
             this.pid = 'p' + Math.random().toString(36).slice(2, 8);
@@ -59,6 +63,11 @@
             this.entityTentacles = [];
             this.entityActive = false;
             this.entityLastMsg = 0;
+            // Destino interpolado del espectro: el host publica a ~10 Hz y el
+            // resto lo movia a saltos ("el monstruo se ve a trompicones");
+            // ahora se interpola suavemente hacia la ultima posicion recibida.
+            this.entityTgt = null;
+            this.fpsSource = null;   // () => fps local; game.js lo engancha
             this.entity = null;       // entidad local (solo la usa el host)
 
             this.pubTimer = 0;
@@ -188,7 +197,8 @@
                     count: list.length,
                     names,
                     max: this.MAX_PLAYERS,
-                    visibility: 'public'
+                    visibility: 'public',
+                    version: first.ver || 'v?'
                 });
             }
             out.sort((a, b) => (b.count || 0) - (a.count || 0));
@@ -279,7 +289,7 @@
                 this.client.send(this.directoryTopic(this.roomKey, this.pid), JSON.stringify({
                     v: 'public', p: this.pid, n: this.playerName,
                     seed: this.roomSeed, roomName: this.roomName,
-                    t: Date.now()
+                    ver: this.versionLabel, t: Date.now()
                 }), 0, true);
                 this._directoryAdvertised = true;
             } catch (e) { /* noop */ }
@@ -400,6 +410,8 @@
             }
             this.snapshotDone = true;
             this.joined = true;
+            // La sala se entera por el chat de que este explorador ha entrado
+            this.publishChat('ha entrado en la sala');
             this.updateHost();
             this.publishDirectoryPresence();
             this.emitRoomListings();
@@ -416,6 +428,10 @@
 
         // Desconexion limpia: se borra la presencia retenida y se sale
         leave() {
+            // La sala se entera por el chat de que este explorador se va
+            if (this.joined && this.connected) {
+                try { this.publishChat('ha salido de la sala'); } catch (e) { /* noop */ }
+            }
             this.clearDirectoryPresence();
             this.snapshotDone = false;
             this.joined = false;
@@ -465,7 +481,7 @@
         publishPresence() {
             if (!this.client || !this.connected) return;
             try {
-                this.client.send(this.presenceTopic(this.pid), JSON.stringify({ n: this.playerName, j: Date.now() }), 0, true);
+                this.client.send(this.presenceTopic(this.pid), JSON.stringify({ n: this.playerName, j: Date.now(), v: this.versionLabel }), 0, true);
             } catch (e) { /* noop */ }
         }
 
@@ -474,10 +490,13 @@
             try {
                 // Se envia la posicion de los PIES (y = ojos - 1.55) para que el
                 // modelo remoto apoye en el suelo; la camara local esta a 1.55 m
+                // El fps local viaja con el estado: la tabla de jugadores
+                // muestra el rendimiento de cada explorador.
                 this.client.send(this.stateTopic(this.pid), JSON.stringify({
                     x: pos.x, y: pos.y - 1.55, z: pos.z,
                     yaw: yaw, pitch: pitch,
-                    f: flashlightOn ? 1 : 0, t: Date.now()
+                    f: flashlightOn ? 1 : 0, t: Date.now(),
+                    fps: this.fpsSource ? Math.round(this.fpsSource()) : 0
                 }), 0, false);
             } catch (e) { /* noop */ }
         }
@@ -702,22 +721,30 @@
                     // primer estado, ya en su posicion real
                     this.peers.set(pid, {
                         name: String(data.n),
+                        version: data.v || 'v?',
                         lastSeen: Date.now(),
                         x: 0, y: 0, z: 0, yaw: 0,
                         tx: 0, ty: 0, tz: 0, tyaw: 0,
                         f: false,
                         hasState: false,
                         hist: [],
-                        timeBase: undefined
+                        timeBase: undefined,
+                        ping: undefined
                     });
                     if (this.snapshotDone && this.joined && !this.roomFull) {
                         this.onToast('👤 ' + this.peers.get(pid).name + ' entró en la sala');
+                        // Versiones distintas en la misma sala: se avisa (cada
+                        // uno puede ver cosas distintas, pero se juega junto)
+                        if (data.v && data.v !== this.versionLabel) {
+                            this.onToast('🔄 ' + this.peers.get(pid).name + ' juega ' + data.v + ' (tú: ' + this.versionLabel + ') · el mundo puede variar');
+                        }
                         this.updateHost();
                     }
                 } else {
                     const p = this.peers.get(pid);
                     p.lastSeen = Date.now();
                     p.name = String(data.n);
+                    if (data.v) p.version = data.v;
                 }
                 return;
             }
@@ -739,6 +766,7 @@
                 p.tz = d.z || 0;
                 p.tyaw = d.yaw || 0;
                 p.f = !!d.f;
+                p.fps = (typeof d.fps === 'number' && d.fps > 0) ? d.fps : p.fps;
                 p.lastSeen = Date.now();
                 p.lastStateAt = Date.now();
                 // Historial con marcas de tiempo para interpolar con retraso
@@ -748,6 +776,13 @@
                 // de llegada.
                 if (p.timeBase === undefined) {
                     p.timeBase = (typeof d.t === 'number' && isFinite(d.t)) ? Date.now() - d.t : 0;
+                }
+                // Latencia aproximada por jugador: el emisor marca cada estado
+                // con su reloj; timeBase cancela la desviacion entre relojes,
+                // asi el resto es el retardo real de red, suavizado.
+                if (typeof d.t === 'number' && isFinite(d.t)) {
+                    const rtt = Math.max(0, Math.min(999, Date.now() - (d.t + p.timeBase)));
+                    p.ping = p.ping === undefined ? rtt : p.ping * 0.8 + rtt * 0.2;
                 }
                 const tLocal = (typeof d.t === 'number' && isFinite(d.t)) ? d.t + p.timeBase : Date.now();
                 p.hist = p.hist || [];
@@ -799,9 +834,16 @@
             if (!this.entityGhost) this.buildEntityGhost();
             this.entityActive = !!d.a;
             if (this.entityGhost) this.entityGhost.visible = this.entityActive;
-            if (this.entityActive && this.entityGhost) {
-                this.entityGhost.position.set(d.x || 0, 0, d.z || 0);
-                this.entityGhost.rotation.y = d.yaw || 0;
+            if (this.entityActive) {
+                this.entityTgt = { x: d.x || 0, z: d.z || 0, yaw: d.yaw || 0 };
+                if (this.entityGhost) {
+                    // Primera muestra: colocar en su sitio; despues, interpolar
+                    if (!this.entityGhost.userData._entInit) {
+                        this.entityGhost.userData._entInit = true;
+                        this.entityGhost.position.set(this.entityTgt.x, 0, this.entityTgt.z);
+                        this.entityGhost.rotation.y = this.entityTgt.yaw;
+                    }
+                }
                 this.entityLastMsg = Date.now();
             }
             if (d.spawned) audio.playMonsterRoar();
@@ -995,6 +1037,18 @@
         update(dt, playerPos, yaw, pitch, flashlightOn, wallBoxes, entity, furnitureBodies) {
             this.entity = entity;
             this._lastState = { x: playerPos.x, y: playerPos.y, z: playerPos.z, yaw, pitch, flashlightOn };
+            // Interpolacion suave del espectro hacia la ultima posicion del
+            // host (a ~10 Hz): movimiento continuo, sin trompicones.
+            if (!this.isHost && this.entityGhost && this.entityActive && this.entityTgt) {
+                const g = this.entityGhost;
+                const k = Math.min(1, dt * 9);
+                g.position.x += (this.entityTgt.x - g.position.x) * k;
+                g.position.z += (this.entityTgt.z - g.position.z) * k;
+                let dy = this.entityTgt.yaw - g.rotation.y;
+                while (dy > Math.PI) dy -= Math.PI * 2;
+                while (dy < -Math.PI) dy += Math.PI * 2;
+                g.rotation.y += dy * Math.min(1, dt * 8);
+            }
             // Cajas ACTUALES de los muebles (no las de su spawn): el fantasma
             // X-RAY se bloquea tambien con el mobiliario movido
             const furnitureBoxes = furnitureBodies ? furnitureBodies.map(b => b.aabb).filter(Boolean) : null;

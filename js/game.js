@@ -17,25 +17,28 @@
     // El selector del menu se rellena SOLO desde VERSION_HISTORY: nunca se
     // publica una version sin su Opt, ni se elimina una anterior (queda
     // almacenada y jugable en el historial).
-    const CURRENT_VERSION = '1.13.0';   // <-- UNICA constante que subir al publicar
+    const CURRENT_VERSION = '1.13.1';   // <-- UNICA constante que subir al publicar
     // NIVEL DE OPTIMIZACION de la variante Opt de la version actual. REGLA
     // AUTORECORDADA: cada version nueva llega con MAS contenido, asi que su
     // Opt debe optimizar MAS que la anterior. Al publicar se sube
     // CURRENT_OPT_LEVEL junto a CURRENT_VERSION y se anade una fila mas
     // agresiva a OPT_TABLE.
-    const CURRENT_OPT_LEVEL = 2;
+    const CURRENT_OPT_LEVEL = 3;
     // Parametros de rendimiento de la variante Opt por nivel, en orden:
     // [pixelRatio, luces, intervaloLuces(s), intervaloRuido(s),
-    //  intervaloFeed(s), readbackFeed, distanciaCaptura(m), aniso]
+    //  intervaloFeed(s), readbackFeed, distanciaCaptura(m), aniso,
+    //  renderSkip (render principal cada N frames)]
     const OPT_TABLE = Object.freeze([
-        [0.78, 20, 0.12, 0.12, 0.30, 4, 36, 8],   // nivel 1: 1.12.0 Opt
-        [0.62, 12, 0.20, 0.20, 0.45, 6, 30, 2]    // nivel 2: 1.13.0 Opt (mas contenido -> mas optimizado)
+        [0.78, 20, 0.12, 0.12, 0.30, 4, 36, 8, 2],   // nivel 1: 1.12.0 Opt
+        [0.62, 12, 0.20, 0.20, 0.45, 6, 30, 2, 2],   // nivel 2: 1.13.0 Opt
+        [0.55, 8, 0.25, 0.25, 0.60, 8, 26, 1, 2]     // nivel 3: 1.13.1 Opt (30 fps visuales: 20fps hacia el monstruo a trompicones)
     ]);
     function optParams(level) {
         const row = OPT_TABLE[Math.max(0, Math.min(OPT_TABLE.length - 1, (level || 1) - 1))];
-        return { pixelRatio: row[0], lights: row[1], lightInterval: row[2], noiseInterval: row[3], feedInterval: row[4], feedReadback: row[5], feedDistance: row[6], aniso: row[7] };
+        return { pixelRatio: row[0], lights: row[1], lightInterval: row[2], noiseInterval: row[3], feedInterval: row[4], feedReadback: row[5], feedDistance: row[6], aniso: row[7], renderSkip: row[8] };
     }
     const RELEASED_VERSIONS = [
+        { version: '1.13.0', optLevel: 2, note: 'Relojes locos · mesas arregladas · salones más pequeños' },
         { version: '1.12.0', optLevel: 1, note: 'Sala CCTV · estadísticas · salas privadas' },
         { version: '1.11.0', optLevel: 1, note: 'Sala CCTV original' },
         { version: '1.10.0', optLevel: 1, note: 'Base anterior' }
@@ -222,6 +225,12 @@
             this._entityEncounterActive = false;
             this._lastEntityActive = false;
             this.statsOpen = false;
+            this.scoreboardOpen = false;
+            this._scoreAcc = 0;
+            // FPS locales para la tabla de jugadores (contador por segundo)
+            this._fpsFrames = 0;
+            this._fpsTime = 0;
+            this._fps = 60;
             this._noiseTimer = 0;
             this._interactionTimer = 0;
             // El bot debe aparecer pronto y de forma comprobable, sin esperar
@@ -274,11 +283,12 @@
                 onRoomListings: (rooms) => {
                     this.roomListings = rooms || [];
                     if (this.roomsModalOpen) this.renderRoomList(this.roomListings);
-                }
+                },
+                versionLabel: GAME_VERSION_LABEL
             });
             // El mundo y la tiza se sincronizan por red: objetos reclamados y
-            // dibujos visibles para toda la sala
-            this.net.worldSync = this.worldSystem;
+            // dibujos visibles para toda la sala                this.net.worldSync = this.worldSystem;
+            this.net.fpsSource = () => this._fps;
             this.net.onChalkDot = (pt, n, c) => this.chalkSystem.addDot(pt, n, c);
             // Mapa compartido: publico lo que exploro y fusiono lo de los demas.
             // OJO: mapChunksRef se enlaza DESPUES de crear exploredChunks (si
@@ -534,6 +544,11 @@
                 this.keys[e.code] = true;
                 if (!this.gameActive) return;
 
+                // Tabla de jugadores de la sala: [TAB]
+                if (e.code === 'Tab') {
+                    e.preventDefault();
+                    this.toggleScoreboard();
+                }
                 if (e.code === 'KeyF') this.toggleFlashlight();
                 if (e.code === 'Digit1') this.selectSlot(1);
                 if (e.code === 'Digit2') this.selectSlot(2);
@@ -560,6 +575,7 @@
                 if (e.code === 'KeyT' && !this.chatOpen) this.toggleChat(true);
                 if (e.code === 'Escape') {
                     if (this.cameraFeedView.open) this.closeCameraFeed();
+                    else if (this.scoreboardOpen) this.toggleScoreboard(false);
                     else if (this.chatOpen) this.toggleChat(false);
                 }
             });
@@ -747,6 +763,7 @@
             bindTap('btn-touch-chat', () => this.toggleChat());
             bindTap('btn-touch-map', () => this.toggleMap());
             bindTap('btn-touch-stats', () => this.toggleStats());
+            bindTap('btn-touch-score', () => this.toggleScoreboard());
             bindTap('btn-touch-interact', () => this.handleInteraction());
             // Cerrar cuaderno/mapa tambien por toque directo (el click sintetico
             // puede quedar bloqueado en algunos navegadores moviles)
@@ -778,7 +795,9 @@
 
         updateSeedLabel() {
             const el = document.getElementById('seed-label');
-            if (el) el.textContent = 'SEMILLA: ' + (this.roomCode !== null ? this.roomCode : this.worldSeed);
+            if (!el) return;
+            // La sala dice tambien QUE VERSION esta jugando cada explorador
+            el.textContent = 'SALA ' + (this.roomCode !== null ? this.roomCode : this.worldSeed) + ' · ' + GAME_VERSION_LABEL;
         }
 
         initUI() {
@@ -1006,6 +1025,8 @@
             // Stats: se pueden abrir durante la partida y se conservan en muerte.
             const closeStats = document.getElementById('btn-close-stats');
             if (closeStats) closeStats.onclick = () => this.toggleStats(false);
+            const closeScore = document.getElementById('btn-close-scoreboard');
+            if (closeScore) closeScore.onclick = () => this.toggleScoreboard(false);
             const showDeathStats = document.getElementById('btn-show-stats');
             if (showDeathStats) showDeathStats.onclick = () => this.toggleStats(true);
             // Chat: Enter envia, Escape cierra, boton ENVIAR tambien
@@ -1087,7 +1108,7 @@
                 title.textContent = room.name || ('SALA ' + (room.seed || room.key));
                 const meta = document.createElement('div');
                 meta.className = 'room-item-meta';
-                meta.textContent = 'CÓDIGO: ' + String(room.seed || room.key) + ' · ' + (room.count || 0) + '/6 · ' + (room.names || []).join(', ');
+                meta.textContent = 'CÓDIGO: ' + String(room.seed || room.key) + ' · ' + (room.count || 0) + '/6 · VERSIÓN: ' + String(room.version || 'v?') + ' · ' + (room.names || []).join(', ');
                 info.append(title, meta);
                 const state = document.createElement('span');
                 state.className = 'room-item-meta';
@@ -1131,6 +1152,66 @@
                     if (lock && lock.catch) lock.catch(() => {});
                 } catch (err) { /* noop */ }
             }
+        }
+
+        // ---- TABLA DE JUGADORES DE LA SALA -------------------------------
+        // Se abre con [TAB] (o el boton movil 👥): lista al explorador local
+        // y a los companeros con su VERSION, ping aproximado y posicion.
+        toggleScoreboard(force) {
+            const modal = document.getElementById('scoreboard-modal');
+            if (!modal) return;
+            const open = force === undefined ? !this.scoreboardOpen : !!force;
+            this.scoreboardOpen = open;
+            modal.classList.toggle('open', open);
+            modal.setAttribute('aria-hidden', open ? 'false' : 'true');
+            if (open) {
+                this.renderScoreboard();
+                if (!IS_TOUCH && document.exitPointerLock && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (err) { /* noop */ }
+                }
+            } else if (!IS_TOUCH && this.gameActive && document.body.requestPointerLock) {
+                try {
+                    const lock = document.body.requestPointerLock();
+                    if (lock && lock.catch) lock.catch(() => {});
+                } catch (err) { /* noop */ }
+            }
+        }
+
+        renderScoreboard() {
+            const box = document.getElementById('scoreboard-content');
+            if (!box) return;
+            const esc = (v) => this.escapeStatText(v);
+            const net = this.net;
+            const peers = net && net.peers ? [...net.peers.values()] : [];
+            const rows = [];
+            rows.push(`<tr class="score-local">
+                <td>${esc(net ? net.playerName : 'EXPLORADOR')} <em>(tú)</em></td>
+                <td>${esc(GAME_VERSION_LABEL)}</td>
+                <td>—</td>
+                <td>${this._fps} fps</td>
+                <td>${this.player.pos.x.toFixed(1)} , ${this.player.pos.z.toFixed(1)}</td>
+            </tr>`);
+            for (const p of peers) {
+                if (!p || !p.name) continue;
+                const ping = p.ping === undefined ? '—' : Math.round(p.ping) + ' ms';
+                const fps = p.fps ? Math.round(p.fps) + ' fps' : '—';
+                const pos = p.hasState ? (p.tx.toFixed(1) + ' , ' + p.tz.toFixed(1)) : 'CONECTANDO…';
+                rows.push(`<tr>
+                    <td>${esc(p.name)}</td>
+                    <td>${esc(p.version || 'v?')}</td>
+                    <td>${ping}</td>
+                    <td>${fps}</td>
+                    <td>${pos}</td>
+                </tr>`);
+            }
+            box.innerHTML = `
+                <div class="score-table-wrap">
+                    <table class="score-table">
+                        <thead><tr><th>JUGADOR</th><th>VERSIÓN</th><th>PING</th><th>FPS</th><th>POSICIÓN</th></tr></thead>
+                        <tbody>${rows.join('')}</tbody>
+                    </table>
+                </div>
+                ${peers.length ? '' : '<div class="stats-note">SIN OTROS EXPLORADORES · COMPARTE EL CÓDIGO ' + esc(this.roomCode !== null ? this.roomCode : (this.worldSeed || '--')) + ' PARA QUE ENTREN</div>'}`;
         }
 
         formatPlayTime() {
@@ -1345,12 +1426,15 @@
                                 audio.playDrink();
                                 this.notify('🥤 AGUA DE ALMENDRAS (+1)');
                             } else if (p.type === 'battery') {
-                                if (this.inventory.flashBattery < 100) {
-                                    this.inventory.flashBattery = 100;
-                                    this.notify('🔋 LINTERNA RECARGADA AL 100%');
+                                // SIEMPRE suma una pila de repuesto visible en el
+                                // inventario (antes, con la linterna casi llena,
+                                // solo recargaba y parecia que no se sumaba nada)
+                                this.inventory.batteries = Math.min(9, this.inventory.batteries + 1);
+                                if (this.inventory.flashBattery < 40) {
+                                    this.inventory.flashBattery = Math.min(100, this.inventory.flashBattery + 60);
+                                    this.notify(`🔋 PILA +1 · LINTERNA +60% (${this.inventory.batteries})`);
                                 } else {
-                                    this.inventory.batteries = Math.min(9, this.inventory.batteries + 1);
-                                    this.notify(`🔋 PILA DE REPUESTO (${this.inventory.batteries})`);
+                                    this.notify(`🔋 PILA DE REPUESTO +1 (${this.inventory.batteries})`);
                                 }
                                 audio.playSwitchClick();
                                 this.updateFlashlightHUD();
@@ -2616,6 +2700,10 @@
 
         triggerGameOver(reason) {
             if (!this.gameActive) return;
+            // La sala se entera por el chat de la muerte de este explorador
+            if (this.net && this.net.publishChat) {
+                this.net.publishChat('ha muerto: ' + (reason || 'SEÑAL PERDIDA'));
+            }
             // Captura el ultimo desplazamiento/tiempo y el encuentro que
             // provoco la muerte antes de apagar el bucle de partida.
             this.updateStats(0);
@@ -2958,30 +3046,38 @@
                 Math.hypot(r.centerX - px, r.centerZ - pz) <= this._feedCaptureDistance
             );
             if (!activeRooms.length || !cams.length) return;
-            // Un solo render target por frame: el índice se elige UNA vez por
-            // actualización, no dentro del bucle de monitores. Antes se
-            // incrementaba dentro del bucle y, por coincidencia, cada CRT
-            // obtenía su propio turno en el mismo frame (tres renders completos
-            // por frame y una caída de FPS justo al acercarse a la cabina).
-            const totalSlots = activeRooms.reduce((n, room) => n + room.monitors.length, 0);
-            const refreshSlot = this._feedRoundRobin++ % Math.max(1, totalSlots);
-            let slotIndex = 0;
+            // Sistema de captura ROBUSTO: antes el reparto de turnos contaba
+            // en el total monitores "sin señal" que luego no consumian turno
+            // (slotIndex saltaba los invalidos pero refreshSlot los contaba) y
+            // algunas pantallas podian quedarse en "INICIALIZANDO" para
+            // siempre. Ahora: 1) el primer frame de cada monitor se captura YA
+            // (timer arranca vencido); 2) cada frame se captura UNO de los
+            // feeds cuyo temporizador ha vencido, elegido en rotacion entre
+            // los listos; 3) las camaras se normalizan siempre, asi con una
+            // sola camara TODAS las pantallas muestran senal en vez de quedarse
+            // sin señal o inicializando.
+            const ready = [];
             for (const r of activeRooms) {
-                r._monPicks = r._monPicks || [0, 1, 2];
+                r._monPicks = r._monPicks || r.monitors.map((_, n) => n);
                 // Cámaras ordenadas por cercanía a la SALA, igual que en el
                 // visor: así la imagen del monitor y la ampliada siempre son
                 // exactamente la misma señal.
                 const near = this.getRoomFeedCameras(r);
                 for (let i = 0; i < r.monitors.length; i++) {
                     const mon = r.monitors[i];
-                    const pick = r._monPicks[i];
+                    const pick = near.length
+                        ? ((((Number.isFinite(r._monPicks[i]) ? r._monPicks[i] : i) % near.length) + near.length) % near.length)
+                        : -1;
+                    r._monPicks[i] = pick;
                     const key = r.id + ':' + i;
                     let feed = this._monFeeds.get(key);
                     if (!feed) {
                         feed = {
                             rt: new THREE.WebGLRenderTarget(256, 192),
                             cam: new THREE.PerspectiveCamera(60, 256 / 192, 0.1, 80),
-                            timer: i * 0.2,
+                            // Arranca VENCIDO: la primera captura ocurre en la
+                            // primera pasada, nada de "INICIALIZANDO" eterno.
+                            timer: this._feedMinInterval,
                             lastPick: -1,
                             // Vision nocturna verde (FNAF): el feed en crudo
                             // salia casi negro (los pasillos estan oscuros) y
@@ -3026,24 +3122,30 @@
                         }
                     }
                     const mat = mon.userData.screenMat;
-                    if (r.state.battery <= 0 || pick >= near.length) {
+                    if (r.state.battery <= 0 || pick < 0) {
                         if (mat.uniforms) mat.uniforms.map.value = this._noSignalTex;
                         else { mat.map = this._noSignalTex; mat.needsUpdate = true; }
                         continue;
                     }
                     feed.timer += dt;
-                    // Un solo CRT se actualiza por frame de juego (round-robin)
-                    // y no tres render targets completos a la vez. La señal
-                    // sigue siendo fluida y el coste baja mucho en salas con
-                    // varias pantallas.
-                    const thisSlot = slotIndex++;
-                    if (feed.timer < this._feedMinInterval || thisSlot !== refreshSlot) {
-                        if (mat.uniforms) mat.uniforms.map.value = feed.tex || feed.rt.texture;
-                        else { mat.map = feed.tex || feed.rt.texture; mat.needsUpdate = true; }
-                        continue;
+                    if (feed.timer >= this._feedMinInterval) {
+                        ready.push({ feed, mon, r, near, pick, i });
                     }
-                    feed.timer = 0;
-                    const camObj = near[pick];
+                    // Textura actual: la primera captura la sustituye al instante
+                    if (mat.uniforms) mat.uniforms.map.value = feed.tex || feed.rt.texture;
+                    else { mat.map = feed.tex || feed.rt.texture; mat.needsUpdate = true; }
+                }
+            }
+            if (!ready.length) return;
+            // UNA captura por frame, en rotacion entre los feeds listos
+            const slot = ready[this._feedRoundRobin++ % ready.length];
+            const feed = slot.feed;
+            const mon = slot.mon;
+            const near = slot.near;
+            const pick = slot.pick;
+            const i = slot.i;
+            feed.timer = 0;
+            const camObj = near[pick];
                     camObj.group.updateMatrixWorld(true);
                     const pos = new THREE.Vector3();
                     camObj.group.getWorldPosition(pos);
@@ -3111,8 +3213,6 @@
                         mat.map = feed.tex || feed.rt.texture;
                         mat.needsUpdate = true;
                     }
-                }
-            }
         }
 
         updateNetHUD() {
@@ -3136,6 +3236,15 @@
             requestAnimationFrame(() => this.animate());
 
             const dt = Math.min(this.clock.getDelta(), 0.1);
+            // FPS locales: contador por segundo (para la tabla de jugadores y
+            // para que la sala vea el rendimiento de cada uno)
+            this._fpsFrames++;
+            this._fpsTime += dt;
+            if (this._fpsTime >= 1) {
+                this._fps = Math.round(this._fpsFrames / this._fpsTime);
+                this._fpsFrames = 0;
+                this._fpsTime = 0;
+            }
 
             if (this.gameActive) {
                 // Boton de dibujo visible solo con la tiza equipada (movil)
@@ -3157,6 +3266,14 @@
                 if (!this.optimizedMode || this._optTick === 1) this.updateFurniturePhysics(dt);
                 this.updateLights(dt);
                 this.updateCoordsHUD();
+                // Tabla de jugadores abierta: refresco periodico (ping, posiciones)
+                if (this.scoreboardOpen) {
+                    this._scoreAcc += dt;
+                    if (this._scoreAcc >= 0.5) {
+                        this._scoreAcc = 0;
+                        this.renderScoreboard();
+                    }
+                }
                 this.updateFlashlightBattery(dt);
                 // Mantener [I] pulsado recarga la linterna con las pilas de
                 // repuesto almacenadas (1 pila ~ 0,9 s de recarga)
@@ -3271,7 +3388,11 @@
             // una imagen cada dos frames (30 fps visuales con movimiento
             // suave de física y red). La variante normal renderiza todos.
             this._renderFrame++;
-            if (!this.optimizedMode || (this._renderFrame & 1) === 0) {
+            // Opt: la simulacion sigue a la frecuencia completa pero el
+            // rasterizado principal se reduce segun el nivel de la version
+            // (nivel 1-2: cada 2 frames = 30 fps visuales; nivel 3: cada 3
+            // frames = 20 fps visuales con movimiento de fisica/red suave).
+            if (!this.optimizedMode || (this._renderFrame % this.optParams.renderSkip) === 0) {
                 this.renderer.render(this.scene, this.camera);
             }
         }

@@ -969,9 +969,10 @@
             const g = ch.grid;
             const r = ch.rng;
             // Las salas pequenas se cuelan en casi cualquier bolsillo de
-            // pared: con el 25% de antes salian ~1 de cada 4 chunks (demasiado
-            // comunes para un refugio raro). Con 0.15 vuelven a ~1 de cada 7.
-            if (r() >= 0.15) return;
+            // pared: antes salian ~1 de cada 7 chunks (demasiado comunes para
+            // un refugio raro). Con 0.08 vuelven a ~1 de cada 12: encontrarlas
+            // vuelve a ser un evento.
+            if (r() >= 0.08) return;
             // Cabina PEQUENA y ESTRECHA a proposito: 1x2, 2x1 o 1x3
             // celdas (2,8x5,6 m como maximo). Antes eran 2x2/2x3/3x2 y,
             // al no tener una carcasa propia, parecian una sala abierta con
@@ -2509,7 +2510,9 @@
             const outsideBooth = (wx, wz) => !sr || wx < sr.shellMinX - 0.05 || wx > sr.shellMaxX + 0.05 ||
                 wz < sr.shellMinZ - 0.05 || wz > sr.shellMaxZ + 0.05;
             const insideRoom = (x, z) => !!sr && x >= sr.rx && x < sr.rx + sr.w && z >= sr.rz && z < sr.rz + sr.h;
-            if (!sr && rng() >= 0.45) return;
+            // Camaras de pared mas raras (antes 45% de los chunks): ahora
+            // ~28%, asi ver una camara sigue siendo un hallazgo.
+            if (!sr && rng() >= 0.28) return;
             const g = ch.grid;
             const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
             const cands = [];
@@ -3714,29 +3717,11 @@
         // ================================================================
         //  MUEBLES (permanecen en el mundo aunque el chunk se descargue)
         // ================================================================
-        // Comprueba si cabe un mueble usando SOLO datos de SU chunk (cajas de
-        // muros y ocupacion propia): el resultado no depende de que chunks
-        // vecinos esten cargados, asi todos los jugadores colocan los muebles
-        // exactamente en los mismos sitios (requisito del multijugador).
-        canPlaceFurniture(ch, x, z, radius) {
-            for (let box of ch.wallBoxes) {
-                if (x + radius > box.minX && x - radius < box.maxX && z + radius > box.minZ && z - radius < box.maxZ) {
-                    return false;
-                }
-            }
-            for (let occ of ch.occ) {
-                if (Math.hypot(x - occ.x, z - occ.z) < radius + occ.radius + 0.45) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
         // Comprueba si un mueble YA ROTADO cabe en el hueco usando su caja
         // envolvente REAL (Box3 en el suelo): las mesas caidas o en diagonal
-        // ocupan mas que el circulo de canPlaceFurniture y se clavaban en
-        // pilares y paredes ("las mesas atraviesan el pilar"). Solo muros y
-        // pilares del PROPIO chunk: determinista para todos los clientes.
+        // ocupan mas que un circulo y se clavaban en pilares y paredes
+        // ("las mesas atraviesan el pilar"). Solo muros y pilares del PROPIO
+        // chunk: determinista para todos los clientes.
         furnitureFits(ch, mesh, x, z, margin = 0.05) {
             mesh.position.set(x, 0, z);
             mesh.updateMatrixWorld(true);
@@ -3975,15 +3960,8 @@
                     }
                 }
                 if (!clock) {
-                    const spot = this.pickupSpot(ch);
+                    const spot = this.pickFloorClockSpot(ch);
                     if (!spot) continue;
-                    // Nunca dentro de la cabina de seguridad
-                    const sr = ch.securityRoom;
-                    if (sr) {
-                        const lx = Math.floor(spot.x / CELL_SIZE) - ch.cx * CHUNK_SIZE;
-                        const lz = Math.floor(spot.z / CELL_SIZE) - ch.cz * CHUNK_SIZE;
-                        if (lx >= sr.rx && lx < sr.rx + sr.w && lz >= sr.rz && lz < sr.rz + sr.h) continue;
-                    }
                     clock = ModelBuilder.createWallClockModel({ onWall: false, battery, running });
                     clock.position.set(spot.x, 0, spot.z);
                     snapToFloor(clock, 0.01);
@@ -3992,6 +3970,82 @@
                 this.scene.add(clock);
                 this.clocks.push(clock);
             }
+        }
+
+        // Punto para un reloj TIRADO EN EL SUELO: prefiere rincones y celdas
+        // pegadas a una pared y EMPUJA el reloj hacia esa pared (antes caia en
+        // medio del pasillo estorbando). Determinista con el rng del chunk.
+        pickFloorClockSpot(ch) {
+            const N = CHUNK_SIZE;
+            const C = CELL_SIZE;
+            const r = ch.rng;
+            const g = ch.grid;
+            const cands = [];
+            for (let x = 1; x < N - 1; x++) {
+                for (let z = 1; z < N - 1; z++) {
+                    if (g[x][z] !== 0 && g[x][z] !== 2) continue;
+                    let walls = 0, nearX = 0, nearZ = 0, firstX = 0, firstZ = 0;
+                    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+                    for (const [dx, dz] of dirs) {
+                        const vx = x + dx, vz = z + dz;
+                        if (vx < 0 || vx >= N || vz < 0 || vz >= N) continue;
+                        if (g[vx][vz] === 1 || g[vx][vz] === 3) {
+                            walls++;
+                            if (!firstX && !firstZ) { firstX = dx; firstZ = dz; }
+                            nearX += dx;
+                            nearZ += dz;
+                        }
+                    }
+                    if (walls > 0) cands.push([x, z, walls, nearX, nearZ, firstX, firstZ]);
+                }
+            }
+            if (!cands.length) return null;
+            cands.sort((a, b) => b[2] - a[2]);   // rincones primero
+            const pool = cands.slice(0, Math.min(12, cands.length));
+            for (const c of pool) {
+                const wx = (ch.cx * N + c[0] + 0.5) * C;
+                const wz = (ch.cz * N + c[1] + 0.5) * C;
+                // Direccion hacia la pared: la media de las paredes vecinas;
+                // si se anula (pasillo con paredes opuestas) se elige una.
+                let nx = c[3], nz = c[4];
+                if (Math.hypot(nx, nz) < 0.01) { nx = c[5]; nz = c[6]; }
+                const len = Math.hypot(nx, nz) || 1;
+                const push = 0.55 + r() * 0.35;
+                const px = wx + (nx / len) * push;
+                const pz = wz + (nz / len) * push;
+                // El cuerpo del reloj (radio ~0.19) nunca puede quedar dentro
+                // de un pilar/post (cajas gruesas): antes solo se comprobaban
+                // celdas, y un reloj empujado hacia una celda tipo 3 acababa
+                // enterrado en el pilar con las agujas y la pila asomando.
+                let ok = true;
+                for (const w of ch.wallBoxes) {
+                    const thin = Math.min(w.maxX - w.minX, w.maxZ - w.minZ) < 0.3;
+                    if (thin) continue;
+                    const nx2 = Math.max(w.minX, Math.min(px, w.maxX));
+                    const nz2 = Math.max(w.minZ, Math.min(pz, w.maxZ));
+                    if (Math.hypot(px - nx2, pz - nz2) < 0.24) { ok = false; break; }
+                }
+                // Separacion de otros relojes y muebles del propio chunk
+                if (!ok) continue;
+                for (const clk of this.clocks) {
+                    if (Math.hypot(clk.position.x - px, clk.position.z - pz) < 2.2) { ok = false; break; }
+                }
+                if (ok) {
+                    for (const occ of ch.occ) {
+                        if (Math.hypot(occ.x - px, occ.z - pz) < occ.radius + 0.7) { ok = false; break; }
+                    }
+                }
+                if (!ok) continue;
+                // Nunca dentro de la cabina de seguridad
+                const sr = ch.securityRoom;
+                if (sr) {
+                    const lx = Math.floor(px / C) - ch.cx * N;
+                    const lz = Math.floor(pz / C) - ch.cz * N;
+                    if (lx >= sr.rx && lx < sr.rx + sr.w && lz >= sr.rz && lz < sr.rz + sr.h) continue;
+                }
+                return { x: px, z: pz };
+            }
+            return null;
         }
 
         // Punto de un reloj COLGADO: reaprovecha la seleccion de caras de
@@ -4017,9 +4071,17 @@
                 else if (spot.dir === 'E') { x = spot.box.maxX + off; ry = Math.PI / 2; }
                 else if (spot.dir === 'S') { z = spot.box.minZ - off; ry = Math.PI; }
                 else { z = spot.box.maxZ + off; ry = 0; }
+                // El CUERPO del reloj (radio ~0.19) no puede quedar dentro de
+                // pilares/postes: solo se permite la lamina fina de la pared
+                // contra la que cuelga (los pilares y postes son cajas gruesas
+                // y el reloj quedaria enterrado con las agujas asomando).
                 let ok = true;
                 for (const w of ch.wallBoxes) {
-                    if (x > w.minX + 0.03 && x < w.maxX - 0.03 && z > w.minZ + 0.03 && z < w.maxZ - 0.03) { ok = false; break; }
+                    const thin = Math.min(w.maxX - w.minX, w.maxZ - w.minZ) < 0.3;
+                    if (thin) continue;
+                    const nx = Math.max(w.minX, Math.min(x, w.maxX));
+                    const nz = Math.max(w.minZ, Math.min(z, w.maxZ));
+                    if (Math.hypot(x - nx, z - nz) < 0.24) { ok = false; break; }
                 }
                 if (!ok) continue;
                 return { x, z, y: 1.5 + ch.rng() * 0.35, ry };
@@ -4047,7 +4109,7 @@
             return { pose, doorState, filled };
         }
 
-        scatterDebris(debris, cx, cz, yaw) {
+        scatterDebris(debris, cx, cz, yaw, ch) {
             const cosY = Math.cos(yaw);
             const sinY = Math.sin(yaw);
             const added = [];
@@ -4061,6 +4123,24 @@
                 if (cell !== 0 && cell !== 2) continue;
                 d.position.set(wx, 0, wz);
                 d.rotation.y = yaw + (o.rot || 0);
+                // La pieza (hoja de puerta caida, ropa) tampoco puede quedar
+                // dentro de un muro/pilar del chunk: antes podia asomar por
+                // la pared contra la que apoya el armario. Se comprueba con
+                // la caja REAL ya rotada (una hoja caida mide ~1 m de largo
+                // y su centro puede quedar lejos del muro aunque la punta lo
+                // atraviese).
+                let ok = true;
+                if (ch) {
+                    d.updateMatrixWorld(true);
+                    const db = new THREE.Box3().setFromObject(d);
+                    for (const w of ch.wallBoxes) {
+                        const thin = Math.min(w.maxX - w.minX, w.maxZ - w.minZ) < 0.3;
+                        if (thin) continue;
+                        if (db.max.x > w.minX + 0.02 && db.min.x < w.maxX - 0.02 &&
+                            db.max.z > w.minZ + 0.02 && db.min.z < w.maxZ - 0.02) { ok = false; break; }
+                    }
+                }
+                if (!ok) continue;
                 this.scene.add(d);
                 added.push(d);
             }
@@ -4134,7 +4214,7 @@
                 minX: bb.min.x - 0.04, maxX: bb.max.x + 0.04,
                 minZ: bb.min.z - 0.04, maxZ: bb.max.z + 0.04
             });
-            const debris = this.scatterDebris(built.debris, bx, bz, yaw);
+            const debris = this.scatterDebris(built.debris, bx, bz, yaw, ch);
             this.furnitureMeshes.push(...debris);
             group.userData.cabinet = Object.assign({}, style, { x: bx, z: bz, yaw });
             return group;
@@ -4169,7 +4249,11 @@
                 } else if (style.pose === 'lean') {
                     const leanA = 0.13 + Math.random() * 0.07;
                     style.lean = leanA;
-                    const need = this._CABDIM.h * Math.sin(leanA) + (this._CABDIM.d / 2) * Math.cos(leanA) + 0.02;
+                    // El cuerpo inclinado se apoya en la pared con la cara
+                    // trasera: la caja real del modelo, ya rotado, sobresale
+                    // ~8 cm mas hacia el muro que la formula geometrica (los
+                    // postes y el zocalo del modelo) -> margen extra.
+                    const need = this._CABDIM.h * Math.sin(leanA) + (this._CABDIM.d / 2) * Math.cos(leanA) + 0.11;
                     cx = (tanAxis === 'x' ? tan : face) + d[0] * need;
                     cz = (tanAxis === 'x' ? face : tan) + d[1] * need;
                     yaw = Math.atan2(d[0], d[1]);

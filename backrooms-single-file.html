@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>The Backrooms: Nivel 0 - Las Oficinas Infinitas</title>
     <!-- Three.js CDN + Paho MQTT (multijugador).
-         El ?v=1.13.0 fuerza al navegador a recargar los js/css al actualizar
+         El ?v=1.13.1 fuerza al navegador a recargar los js/css al actualizar
          (sube CURRENT_VERSION en js/game.js y el ?v= aqui al mismo numero). -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
@@ -635,6 +635,7 @@
         #btn-touch-note    { right: 88px; bottom: 160px; }
         #btn-touch-interact{ right: 22px;  bottom: 96px; font-size: 16px; }
         #btn-touch-stats   { right: 154px; bottom: 224px; }
+        #btn-touch-score   { right: 154px; bottom: 270px; }
         .touch-btn.off {
             opacity: 0.4;
             border-color: #3d3521;
@@ -1017,6 +1018,21 @@
         .stats-note { margin-top: 13px; color: #6e674f; font-size: 10px; }
         .game-over-stats { max-height: 250px; overflow: auto; border: 1px solid #302b1e; margin: 0 0 15px; text-align: left; }
 
+        /* ================= TABLA DE JUGADORES ================= */
+        .score-table-wrap { overflow: auto; max-height: 52vh; }
+        .score-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .score-table th {
+            text-align: left; color: #9be34a; font-size: 10px; letter-spacing: 2px;
+            padding: 6px 10px; border-bottom: 1px solid #403a25; font-weight: normal;
+        }
+        .score-table td {
+            padding: 7px 10px; border-bottom: 1px dotted #35301f; color: #d8c89d;
+        }
+        .score-table td:nth-child(2), .score-table td:nth-child(3) { color: #a39879; white-space: nowrap; }
+        .score-table tr.score-local td { color: #e8d58d; }
+        .score-table tr.score-local td em { color: #9be34a; font-style: normal; font-size: 10px; }
+        .score-table td:first-child { white-space: nowrap; }
+
         /* ================= LISTADO DE SALAS ================= */
         .rooms-box { max-width: 720px; max-height: 90vh; overflow: auto; text-align: left; }
         .rooms-title-row, .room-access-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
@@ -1109,6 +1125,7 @@
         <button id="btn-touch-chat" class="touch-btn" title="Chat">💬</button>
         <button id="btn-touch-map" class="touch-btn" title="Mapa compartido">🗺️</button>
         <button id="btn-touch-stats" class="touch-btn" title="Estadísticas">📊</button>
+        <button id="btn-touch-score" class="touch-btn" title="Jugadores de la sala">👥</button>
         <button id="btn-touch-interact" class="touch-btn" title="Interactuar">E</button>
     </div>
 
@@ -1117,7 +1134,7 @@
         <div class="hud-header">
             <div>
                 <div class="rec-tag"><div class="rec-dot"></div> REC [TAPE-00]</div>
-                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS <span id="hud-version" style="color: #4f4833;">v1.13.0 Opt</span></div>
+                <div id="sector-label" style="font-size: 10px; margin-top: 5px; color: #756a47;">NIVEL 0: LAS OFICINAS INFINITAS <span id="hud-version" style="color: #4f4833;">v1.13.1 Opt</span></div>
             </div>
             <div class="sanity-container">
                 <div id="coords-label" class="coords-label">POS X:+0000.0 Y:+0001.6 Z:+0000.0</div>
@@ -1232,16 +1249,18 @@
                 🛰 <b style="color:#a39879;">MULTIJUGADOR · HASTA 6 EXPLORADORES:</b> quienes escriban la <b style="color:#a39879;">MISMA SEMILLA</b> caen en la misma sala (números o <b style="color:#a39879;">letras</b>: da igual mayúsculas o tildes). El código del HUD (SEMILLA) es el que hay que compartir. Si la sala está llena jugarás en solitario.
             </p>
             <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
-            <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.13.0 Opt</div>
+            <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.13.1 Opt</div>
             <div class="version-picker-row">
                 <label for="version-selector">VERSIÓN:</label>
                 <!-- El selector se rellena SOLO desde VERSION_HISTORY (js/game.js):
                      cada version publicada incluye su variante normal + su Opt.
                      Estas opciones son solo la reserva antes de que cargue el juego. -->
                 <select id="version-selector" aria-label="Seleccionar versión">
-                    <option value="1.13.0-opt">Version 1.13.0 Opt</option>
-                    <option value="1.13.0">Version 1.13.0 normal</option>
+                    <option value="1.13.1-opt">Version 1.13.1 Opt</option>
+                    <option value="1.13.1">Version 1.13.1 normal</option>
                     <optgroup label="Historial almacenado · jugable">
+                        <option value="1.13.0-opt">Version 1.13.0 Opt</option>
+                        <option value="1.13.0">Version 1.13.0 normal</option>
                         <option value="1.12.0-opt">Version 1.12.0 Opt</option>
                         <option value="1.12.0">Version 1.12.0 normal</option>
                         <option value="1.11.0-opt">Version 1.11.0 Opt</option>
@@ -1341,6 +1360,20 @@
                 <button id="btn-close-stats" class="btn" type="button">✕</button>
             </div>
             <div id="stats-content" class="stats-content"></div>
+        </div>
+    </div>
+
+    <!-- TABLA DE JUGADORES DE LA SALA: se abre con [TAB] o el botón 👥 -->
+    <div id="scoreboard-modal" class="stats-modal" aria-hidden="true">
+        <div class="stats-box">
+            <div class="stats-head">
+                <div>
+                    <h2>JUGADORES EN LA SALA</h2>
+                    <p>SE ACTUALIZA EN TIEMPO REAL · [TAB]</p>
+                </div>
+                <button id="btn-close-scoreboard" class="btn" type="button">✕</button>
+            </div>
+            <div id="scoreboard-content" class="stats-content"></div>
         </div>
     </div>
 
@@ -2042,12 +2075,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 rod.position.set(0, 1.86, -0.05);
                 body.add(rod);
 
-                // Colgador + prenda
+                // Colgador + prenda. La tela cuelga DENTRO del cuerpo del
+                // armario (profundidad util ~0.44 m entre el fondo y las
+                // puertas): antes media 0.6-0.9 m y con el giro X se salia
+                // por DETRAS del panel trasero hasta 0.22 m, asomando por la
+                // pared contra la que apoya el armario ("ropa atravesando el
+                // muro"). Ahora nunca sobresale del armario.
                 const addHangerGarment = (seed) => {
                     const g = new THREE.Group();
                     const mat = clothMats[seed % clothMats.length];
                     const isLong = Math.random() < 0.45;
-                    const ch = isLong ? 0.9 : 0.6;
+                    const ch = isLong ? 0.36 : 0.26;
+                    // Rango en Z de la tela (tras el giro X): -0.05 +- ch/2,
+                    // siempre dentro del interior (-0.26..0.26) del armario
                     const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.3, ch, 1, 6), mat);
                     cloth.rotation.x = -Math.PI / 2;
                     cloth.position.y = -ch / 2 - 0.02;
@@ -2426,9 +2466,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             }
 
             if (onWall) {
-                // Colgado: torcido y a veces descolgado de la pared
-                group.rotation.z = (Math.random() - 0.5) * 0.5;
-                group.rotation.x = (Math.random() - 0.5) * 0.25;
+                // Colgado: solo un pelin torcido (antes se descolgaba hasta
+                // 14 grados de la pared y parecia flotando en el aire)
+                group.rotation.z = (Math.random() - 0.5) * 0.3;
+                group.rotation.x = (Math.random() - 0.5) * 0.08;
             } else {
                 // Tirado en el suelo: boca arriba (esfera) o boca abajo (pila)
                 group.rotation.y = Math.random() * Math.PI * 2;
@@ -3806,9 +3847,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const g = ch.grid;
             const r = ch.rng;
             // Las salas pequenas se cuelan en casi cualquier bolsillo de
-            // pared: con el 25% de antes salian ~1 de cada 4 chunks (demasiado
-            // comunes para un refugio raro). Con 0.15 vuelven a ~1 de cada 7.
-            if (r() >= 0.15) return;
+            // pared: antes salian ~1 de cada 7 chunks (demasiado comunes para
+            // un refugio raro). Con 0.08 vuelven a ~1 de cada 12: encontrarlas
+            // vuelve a ser un evento.
+            if (r() >= 0.08) return;
             // Cabina PEQUENA y ESTRECHA a proposito: 1x2, 2x1 o 1x3
             // celdas (2,8x5,6 m como maximo). Antes eran 2x2/2x3/3x2 y,
             // al no tener una carcasa propia, parecian una sala abierta con
@@ -5346,7 +5388,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const outsideBooth = (wx, wz) => !sr || wx < sr.shellMinX - 0.05 || wx > sr.shellMaxX + 0.05 ||
                 wz < sr.shellMinZ - 0.05 || wz > sr.shellMaxZ + 0.05;
             const insideRoom = (x, z) => !!sr && x >= sr.rx && x < sr.rx + sr.w && z >= sr.rz && z < sr.rz + sr.h;
-            if (!sr && rng() >= 0.45) return;
+            // Camaras de pared mas raras (antes 45% de los chunks): ahora
+            // ~28%, asi ver una camara sigue siendo un hallazgo.
+            if (!sr && rng() >= 0.28) return;
             const g = ch.grid;
             const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
             const cands = [];
@@ -6551,29 +6595,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         // ================================================================
         //  MUEBLES (permanecen en el mundo aunque el chunk se descargue)
         // ================================================================
-        // Comprueba si cabe un mueble usando SOLO datos de SU chunk (cajas de
-        // muros y ocupacion propia): el resultado no depende de que chunks
-        // vecinos esten cargados, asi todos los jugadores colocan los muebles
-        // exactamente en los mismos sitios (requisito del multijugador).
-        canPlaceFurniture(ch, x, z, radius) {
-            for (let box of ch.wallBoxes) {
-                if (x + radius > box.minX && x - radius < box.maxX && z + radius > box.minZ && z - radius < box.maxZ) {
-                    return false;
-                }
-            }
-            for (let occ of ch.occ) {
-                if (Math.hypot(x - occ.x, z - occ.z) < radius + occ.radius + 0.45) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
         // Comprueba si un mueble YA ROTADO cabe en el hueco usando su caja
         // envolvente REAL (Box3 en el suelo): las mesas caidas o en diagonal
-        // ocupan mas que el circulo de canPlaceFurniture y se clavaban en
-        // pilares y paredes ("las mesas atraviesan el pilar"). Solo muros y
-        // pilares del PROPIO chunk: determinista para todos los clientes.
+        // ocupan mas que un circulo y se clavaban en pilares y paredes
+        // ("las mesas atraviesan el pilar"). Solo muros y pilares del PROPIO
+        // chunk: determinista para todos los clientes.
         furnitureFits(ch, mesh, x, z, margin = 0.05) {
             mesh.position.set(x, 0, z);
             mesh.updateMatrixWorld(true);
@@ -6812,15 +6838,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     }
                 }
                 if (!clock) {
-                    const spot = this.pickupSpot(ch);
+                    const spot = this.pickFloorClockSpot(ch);
                     if (!spot) continue;
-                    // Nunca dentro de la cabina de seguridad
-                    const sr = ch.securityRoom;
-                    if (sr) {
-                        const lx = Math.floor(spot.x / CELL_SIZE) - ch.cx * CHUNK_SIZE;
-                        const lz = Math.floor(spot.z / CELL_SIZE) - ch.cz * CHUNK_SIZE;
-                        if (lx >= sr.rx && lx < sr.rx + sr.w && lz >= sr.rz && lz < sr.rz + sr.h) continue;
-                    }
                     clock = ModelBuilder.createWallClockModel({ onWall: false, battery, running });
                     clock.position.set(spot.x, 0, spot.z);
                     snapToFloor(clock, 0.01);
@@ -6829,6 +6848,82 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 this.scene.add(clock);
                 this.clocks.push(clock);
             }
+        }
+
+        // Punto para un reloj TIRADO EN EL SUELO: prefiere rincones y celdas
+        // pegadas a una pared y EMPUJA el reloj hacia esa pared (antes caia en
+        // medio del pasillo estorbando). Determinista con el rng del chunk.
+        pickFloorClockSpot(ch) {
+            const N = CHUNK_SIZE;
+            const C = CELL_SIZE;
+            const r = ch.rng;
+            const g = ch.grid;
+            const cands = [];
+            for (let x = 1; x < N - 1; x++) {
+                for (let z = 1; z < N - 1; z++) {
+                    if (g[x][z] !== 0 && g[x][z] !== 2) continue;
+                    let walls = 0, nearX = 0, nearZ = 0, firstX = 0, firstZ = 0;
+                    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+                    for (const [dx, dz] of dirs) {
+                        const vx = x + dx, vz = z + dz;
+                        if (vx < 0 || vx >= N || vz < 0 || vz >= N) continue;
+                        if (g[vx][vz] === 1 || g[vx][vz] === 3) {
+                            walls++;
+                            if (!firstX && !firstZ) { firstX = dx; firstZ = dz; }
+                            nearX += dx;
+                            nearZ += dz;
+                        }
+                    }
+                    if (walls > 0) cands.push([x, z, walls, nearX, nearZ, firstX, firstZ]);
+                }
+            }
+            if (!cands.length) return null;
+            cands.sort((a, b) => b[2] - a[2]);   // rincones primero
+            const pool = cands.slice(0, Math.min(12, cands.length));
+            for (const c of pool) {
+                const wx = (ch.cx * N + c[0] + 0.5) * C;
+                const wz = (ch.cz * N + c[1] + 0.5) * C;
+                // Direccion hacia la pared: la media de las paredes vecinas;
+                // si se anula (pasillo con paredes opuestas) se elige una.
+                let nx = c[3], nz = c[4];
+                if (Math.hypot(nx, nz) < 0.01) { nx = c[5]; nz = c[6]; }
+                const len = Math.hypot(nx, nz) || 1;
+                const push = 0.55 + r() * 0.35;
+                const px = wx + (nx / len) * push;
+                const pz = wz + (nz / len) * push;
+                // El cuerpo del reloj (radio ~0.19) nunca puede quedar dentro
+                // de un pilar/post (cajas gruesas): antes solo se comprobaban
+                // celdas, y un reloj empujado hacia una celda tipo 3 acababa
+                // enterrado en el pilar con las agujas y la pila asomando.
+                let ok = true;
+                for (const w of ch.wallBoxes) {
+                    const thin = Math.min(w.maxX - w.minX, w.maxZ - w.minZ) < 0.3;
+                    if (thin) continue;
+                    const nx2 = Math.max(w.minX, Math.min(px, w.maxX));
+                    const nz2 = Math.max(w.minZ, Math.min(pz, w.maxZ));
+                    if (Math.hypot(px - nx2, pz - nz2) < 0.24) { ok = false; break; }
+                }
+                // Separacion de otros relojes y muebles del propio chunk
+                if (!ok) continue;
+                for (const clk of this.clocks) {
+                    if (Math.hypot(clk.position.x - px, clk.position.z - pz) < 2.2) { ok = false; break; }
+                }
+                if (ok) {
+                    for (const occ of ch.occ) {
+                        if (Math.hypot(occ.x - px, occ.z - pz) < occ.radius + 0.7) { ok = false; break; }
+                    }
+                }
+                if (!ok) continue;
+                // Nunca dentro de la cabina de seguridad
+                const sr = ch.securityRoom;
+                if (sr) {
+                    const lx = Math.floor(px / C) - ch.cx * N;
+                    const lz = Math.floor(pz / C) - ch.cz * N;
+                    if (lx >= sr.rx && lx < sr.rx + sr.w && lz >= sr.rz && lz < sr.rz + sr.h) continue;
+                }
+                return { x: px, z: pz };
+            }
+            return null;
         }
 
         // Punto de un reloj COLGADO: reaprovecha la seleccion de caras de
@@ -6854,9 +6949,17 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 else if (spot.dir === 'E') { x = spot.box.maxX + off; ry = Math.PI / 2; }
                 else if (spot.dir === 'S') { z = spot.box.minZ - off; ry = Math.PI; }
                 else { z = spot.box.maxZ + off; ry = 0; }
+                // El CUERPO del reloj (radio ~0.19) no puede quedar dentro de
+                // pilares/postes: solo se permite la lamina fina de la pared
+                // contra la que cuelga (los pilares y postes son cajas gruesas
+                // y el reloj quedaria enterrado con las agujas asomando).
                 let ok = true;
                 for (const w of ch.wallBoxes) {
-                    if (x > w.minX + 0.03 && x < w.maxX - 0.03 && z > w.minZ + 0.03 && z < w.maxZ - 0.03) { ok = false; break; }
+                    const thin = Math.min(w.maxX - w.minX, w.maxZ - w.minZ) < 0.3;
+                    if (thin) continue;
+                    const nx = Math.max(w.minX, Math.min(x, w.maxX));
+                    const nz = Math.max(w.minZ, Math.min(z, w.maxZ));
+                    if (Math.hypot(x - nx, z - nz) < 0.24) { ok = false; break; }
                 }
                 if (!ok) continue;
                 return { x, z, y: 1.5 + ch.rng() * 0.35, ry };
@@ -6884,7 +6987,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             return { pose, doorState, filled };
         }
 
-        scatterDebris(debris, cx, cz, yaw) {
+        scatterDebris(debris, cx, cz, yaw, ch) {
             const cosY = Math.cos(yaw);
             const sinY = Math.sin(yaw);
             const added = [];
@@ -6898,6 +7001,24 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (cell !== 0 && cell !== 2) continue;
                 d.position.set(wx, 0, wz);
                 d.rotation.y = yaw + (o.rot || 0);
+                // La pieza (hoja de puerta caida, ropa) tampoco puede quedar
+                // dentro de un muro/pilar del chunk: antes podia asomar por
+                // la pared contra la que apoya el armario. Se comprueba con
+                // la caja REAL ya rotada (una hoja caida mide ~1 m de largo
+                // y su centro puede quedar lejos del muro aunque la punta lo
+                // atraviese).
+                let ok = true;
+                if (ch) {
+                    d.updateMatrixWorld(true);
+                    const db = new THREE.Box3().setFromObject(d);
+                    for (const w of ch.wallBoxes) {
+                        const thin = Math.min(w.maxX - w.minX, w.maxZ - w.minZ) < 0.3;
+                        if (thin) continue;
+                        if (db.max.x > w.minX + 0.02 && db.min.x < w.maxX - 0.02 &&
+                            db.max.z > w.minZ + 0.02 && db.min.z < w.maxZ - 0.02) { ok = false; break; }
+                    }
+                }
+                if (!ok) continue;
                 this.scene.add(d);
                 added.push(d);
             }
@@ -6971,7 +7092,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 minX: bb.min.x - 0.04, maxX: bb.max.x + 0.04,
                 minZ: bb.min.z - 0.04, maxZ: bb.max.z + 0.04
             });
-            const debris = this.scatterDebris(built.debris, bx, bz, yaw);
+            const debris = this.scatterDebris(built.debris, bx, bz, yaw, ch);
             this.furnitureMeshes.push(...debris);
             group.userData.cabinet = Object.assign({}, style, { x: bx, z: bz, yaw });
             return group;
@@ -7006,7 +7127,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 } else if (style.pose === 'lean') {
                     const leanA = 0.13 + Math.random() * 0.07;
                     style.lean = leanA;
-                    const need = this._CABDIM.h * Math.sin(leanA) + (this._CABDIM.d / 2) * Math.cos(leanA) + 0.02;
+                    // El cuerpo inclinado se apoya en la pared con la cara
+                    // trasera: la caja real del modelo, ya rotado, sobresale
+                    // ~8 cm mas hacia el muro que la formula geometrica (los
+                    // postes y el zocalo del modelo) -> margen extra.
+                    const need = this._CABDIM.h * Math.sin(leanA) + (this._CABDIM.d / 2) * Math.cos(leanA) + 0.11;
                     cx = (tanAxis === 'x' ? tan : face) + d[0] * need;
                     cz = (tanAxis === 'x' ? face : tan) + d[1] * need;
                     yaw = Math.atan2(d[0], d[1]);
@@ -8002,8 +8127,18 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         const nz = this.pos.z + (dz / d) * step;
                         this.yaw = Math.atan2(dx, dz);
                         let moved = false;
-                        if (!this.hitsWall(nx, this.pos.z)) { this.pos.x = nx; moved = true; }
-                        if (!this.hitsWall(this.pos.x, nz)) { this.pos.z = nz; moved = true; }
+                        // Movimiento DIAGONAL real: antes se avanzaba primero X
+                        // y luego Z por separado ("el monstruo solo se mueve
+                        // recto"); ahora se mueve directo hacia el punto y solo
+                        // se desliza por un eje si la diagonal esta bloqueada.
+                        if (!this.hitsWall(nx, nz)) {
+                            this.pos.x = nx;
+                            this.pos.z = nz;
+                            moved = true;
+                        } else {
+                            if (!this.hitsWall(nx, this.pos.z)) { this.pos.x = nx; moved = true; }
+                            if (!this.hitsWall(this.pos.x, nz)) { this.pos.z = nz; moved = true; }
+                        }
                         if (moved) this._blocked = 0;
                         else {
                             this._blocked += dt;
@@ -8043,8 +8178,15 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const nz = this.pos.z + (dz / d) * step;
             this.yaw = Math.atan2(dx, dz);
             let moved = false;
-            if (!this.hitsWall(nx, this.pos.z)) { this.pos.x = nx; moved = true; }
-            if (!this.hitsWall(this.pos.x, nz)) { this.pos.z = nz; moved = true; }
+            // Diagonal real, con deslizamiento por eje solo si choca
+            if (!this.hitsWall(nx, nz)) {
+                this.pos.x = nx;
+                this.pos.z = nz;
+                moved = true;
+            } else {
+                if (!this.hitsWall(nx, this.pos.z)) { this.pos.x = nx; moved = true; }
+                if (!this.hitsWall(this.pos.x, nz)) { this.pos.z = nz; moved = true; }
+            }
             if (moved) this._blocked = 0;
             else {
                 this._blocked += dt;
@@ -8428,6 +8570,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.onKill = opts.onKill || (() => {});
             this.onRoomListings = opts.onRoomListings || (() => {});
             this.MAX_PLAYERS = 6;
+            // Etiqueta de version (p. ej. "v1.13.1 Opt"): se publica en la
+            // presencia y en el listado de salas para que cada sala diga que
+            // version esta jugando cada explorador.
+            this.versionLabel = opts.versionLabel || 'v?';
 
             // Identidad unica de esta sesion (solo [0-9a-zA-Z], requisito MQTT)
             this.pid = 'p' + Math.random().toString(36).slice(2, 8);
@@ -8464,6 +8610,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.entityTentacles = [];
             this.entityActive = false;
             this.entityLastMsg = 0;
+            // Destino interpolado del espectro: el host publica a ~10 Hz y el
+            // resto lo movia a saltos ("el monstruo se ve a trompicones");
+            // ahora se interpola suavemente hacia la ultima posicion recibida.
+            this.entityTgt = null;
+            this.fpsSource = null;   // () => fps local; game.js lo engancha
             this.entity = null;       // entidad local (solo la usa el host)
 
             this.pubTimer = 0;
@@ -8593,7 +8744,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     count: list.length,
                     names,
                     max: this.MAX_PLAYERS,
-                    visibility: 'public'
+                    visibility: 'public',
+                    version: first.ver || 'v?'
                 });
             }
             out.sort((a, b) => (b.count || 0) - (a.count || 0));
@@ -8684,7 +8836,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 this.client.send(this.directoryTopic(this.roomKey, this.pid), JSON.stringify({
                     v: 'public', p: this.pid, n: this.playerName,
                     seed: this.roomSeed, roomName: this.roomName,
-                    t: Date.now()
+                    ver: this.versionLabel, t: Date.now()
                 }), 0, true);
                 this._directoryAdvertised = true;
             } catch (e) { /* noop */ }
@@ -8805,6 +8957,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             }
             this.snapshotDone = true;
             this.joined = true;
+            // La sala se entera por el chat de que este explorador ha entrado
+            this.publishChat('ha entrado en la sala');
             this.updateHost();
             this.publishDirectoryPresence();
             this.emitRoomListings();
@@ -8821,6 +8975,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
         // Desconexion limpia: se borra la presencia retenida y se sale
         leave() {
+            // La sala se entera por el chat de que este explorador se va
+            if (this.joined && this.connected) {
+                try { this.publishChat('ha salido de la sala'); } catch (e) { /* noop */ }
+            }
             this.clearDirectoryPresence();
             this.snapshotDone = false;
             this.joined = false;
@@ -8870,7 +9028,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         publishPresence() {
             if (!this.client || !this.connected) return;
             try {
-                this.client.send(this.presenceTopic(this.pid), JSON.stringify({ n: this.playerName, j: Date.now() }), 0, true);
+                this.client.send(this.presenceTopic(this.pid), JSON.stringify({ n: this.playerName, j: Date.now(), v: this.versionLabel }), 0, true);
             } catch (e) { /* noop */ }
         }
 
@@ -8879,10 +9037,13 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             try {
                 // Se envia la posicion de los PIES (y = ojos - 1.55) para que el
                 // modelo remoto apoye en el suelo; la camara local esta a 1.55 m
+                // El fps local viaja con el estado: la tabla de jugadores
+                // muestra el rendimiento de cada explorador.
                 this.client.send(this.stateTopic(this.pid), JSON.stringify({
                     x: pos.x, y: pos.y - 1.55, z: pos.z,
                     yaw: yaw, pitch: pitch,
-                    f: flashlightOn ? 1 : 0, t: Date.now()
+                    f: flashlightOn ? 1 : 0, t: Date.now(),
+                    fps: this.fpsSource ? Math.round(this.fpsSource()) : 0
                 }), 0, false);
             } catch (e) { /* noop */ }
         }
@@ -9107,22 +9268,30 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     // primer estado, ya en su posicion real
                     this.peers.set(pid, {
                         name: String(data.n),
+                        version: data.v || 'v?',
                         lastSeen: Date.now(),
                         x: 0, y: 0, z: 0, yaw: 0,
                         tx: 0, ty: 0, tz: 0, tyaw: 0,
                         f: false,
                         hasState: false,
                         hist: [],
-                        timeBase: undefined
+                        timeBase: undefined,
+                        ping: undefined
                     });
                     if (this.snapshotDone && this.joined && !this.roomFull) {
                         this.onToast('👤 ' + this.peers.get(pid).name + ' entró en la sala');
+                        // Versiones distintas en la misma sala: se avisa (cada
+                        // uno puede ver cosas distintas, pero se juega junto)
+                        if (data.v && data.v !== this.versionLabel) {
+                            this.onToast('🔄 ' + this.peers.get(pid).name + ' juega ' + data.v + ' (tú: ' + this.versionLabel + ') · el mundo puede variar');
+                        }
                         this.updateHost();
                     }
                 } else {
                     const p = this.peers.get(pid);
                     p.lastSeen = Date.now();
                     p.name = String(data.n);
+                    if (data.v) p.version = data.v;
                 }
                 return;
             }
@@ -9144,6 +9313,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 p.tz = d.z || 0;
                 p.tyaw = d.yaw || 0;
                 p.f = !!d.f;
+                p.fps = (typeof d.fps === 'number' && d.fps > 0) ? d.fps : p.fps;
                 p.lastSeen = Date.now();
                 p.lastStateAt = Date.now();
                 // Historial con marcas de tiempo para interpolar con retraso
@@ -9153,6 +9323,13 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 // de llegada.
                 if (p.timeBase === undefined) {
                     p.timeBase = (typeof d.t === 'number' && isFinite(d.t)) ? Date.now() - d.t : 0;
+                }
+                // Latencia aproximada por jugador: el emisor marca cada estado
+                // con su reloj; timeBase cancela la desviacion entre relojes,
+                // asi el resto es el retardo real de red, suavizado.
+                if (typeof d.t === 'number' && isFinite(d.t)) {
+                    const rtt = Math.max(0, Math.min(999, Date.now() - (d.t + p.timeBase)));
+                    p.ping = p.ping === undefined ? rtt : p.ping * 0.8 + rtt * 0.2;
                 }
                 const tLocal = (typeof d.t === 'number' && isFinite(d.t)) ? d.t + p.timeBase : Date.now();
                 p.hist = p.hist || [];
@@ -9204,9 +9381,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             if (!this.entityGhost) this.buildEntityGhost();
             this.entityActive = !!d.a;
             if (this.entityGhost) this.entityGhost.visible = this.entityActive;
-            if (this.entityActive && this.entityGhost) {
-                this.entityGhost.position.set(d.x || 0, 0, d.z || 0);
-                this.entityGhost.rotation.y = d.yaw || 0;
+            if (this.entityActive) {
+                this.entityTgt = { x: d.x || 0, z: d.z || 0, yaw: d.yaw || 0 };
+                if (this.entityGhost) {
+                    // Primera muestra: colocar en su sitio; despues, interpolar
+                    if (!this.entityGhost.userData._entInit) {
+                        this.entityGhost.userData._entInit = true;
+                        this.entityGhost.position.set(this.entityTgt.x, 0, this.entityTgt.z);
+                        this.entityGhost.rotation.y = this.entityTgt.yaw;
+                    }
+                }
                 this.entityLastMsg = Date.now();
             }
             if (d.spawned) audio.playMonsterRoar();
@@ -9400,6 +9584,18 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         update(dt, playerPos, yaw, pitch, flashlightOn, wallBoxes, entity, furnitureBodies) {
             this.entity = entity;
             this._lastState = { x: playerPos.x, y: playerPos.y, z: playerPos.z, yaw, pitch, flashlightOn };
+            // Interpolacion suave del espectro hacia la ultima posicion del
+            // host (a ~10 Hz): movimiento continuo, sin trompicones.
+            if (!this.isHost && this.entityGhost && this.entityActive && this.entityTgt) {
+                const g = this.entityGhost;
+                const k = Math.min(1, dt * 9);
+                g.position.x += (this.entityTgt.x - g.position.x) * k;
+                g.position.z += (this.entityTgt.z - g.position.z) * k;
+                let dy = this.entityTgt.yaw - g.rotation.y;
+                while (dy > Math.PI) dy -= Math.PI * 2;
+                while (dy < -Math.PI) dy += Math.PI * 2;
+                g.rotation.y += dy * Math.min(1, dt * 8);
+            }
             // Cajas ACTUALES de los muebles (no las de su spawn): el fantasma
             // X-RAY se bloquea tambien con el mobiliario movido
             const furnitureBoxes = furnitureBodies ? furnitureBodies.map(b => b.aabb).filter(Boolean) : null;
@@ -9651,25 +9847,28 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
     // El selector del menu se rellena SOLO desde VERSION_HISTORY: nunca se
     // publica una version sin su Opt, ni se elimina una anterior (queda
     // almacenada y jugable en el historial).
-    const CURRENT_VERSION = '1.13.0';   // <-- UNICA constante que subir al publicar
+    const CURRENT_VERSION = '1.13.1';   // <-- UNICA constante que subir al publicar
     // NIVEL DE OPTIMIZACION de la variante Opt de la version actual. REGLA
     // AUTORECORDADA: cada version nueva llega con MAS contenido, asi que su
     // Opt debe optimizar MAS que la anterior. Al publicar se sube
     // CURRENT_OPT_LEVEL junto a CURRENT_VERSION y se anade una fila mas
     // agresiva a OPT_TABLE.
-    const CURRENT_OPT_LEVEL = 2;
+    const CURRENT_OPT_LEVEL = 3;
     // Parametros de rendimiento de la variante Opt por nivel, en orden:
     // [pixelRatio, luces, intervaloLuces(s), intervaloRuido(s),
-    //  intervaloFeed(s), readbackFeed, distanciaCaptura(m), aniso]
+    //  intervaloFeed(s), readbackFeed, distanciaCaptura(m), aniso,
+    //  renderSkip (render principal cada N frames)]
     const OPT_TABLE = Object.freeze([
-        [0.78, 20, 0.12, 0.12, 0.30, 4, 36, 8],   // nivel 1: 1.12.0 Opt
-        [0.62, 12, 0.20, 0.20, 0.45, 6, 30, 2]    // nivel 2: 1.13.0 Opt (mas contenido -> mas optimizado)
+        [0.78, 20, 0.12, 0.12, 0.30, 4, 36, 8, 2],   // nivel 1: 1.12.0 Opt
+        [0.62, 12, 0.20, 0.20, 0.45, 6, 30, 2, 2],   // nivel 2: 1.13.0 Opt
+        [0.55, 8, 0.25, 0.25, 0.60, 8, 26, 1, 2]     // nivel 3: 1.13.1 Opt (30 fps visuales: 20fps hacia el monstruo a trompicones)
     ]);
     function optParams(level) {
         const row = OPT_TABLE[Math.max(0, Math.min(OPT_TABLE.length - 1, (level || 1) - 1))];
-        return { pixelRatio: row[0], lights: row[1], lightInterval: row[2], noiseInterval: row[3], feedInterval: row[4], feedReadback: row[5], feedDistance: row[6], aniso: row[7] };
+        return { pixelRatio: row[0], lights: row[1], lightInterval: row[2], noiseInterval: row[3], feedInterval: row[4], feedReadback: row[5], feedDistance: row[6], aniso: row[7], renderSkip: row[8] };
     }
     const RELEASED_VERSIONS = [
+        { version: '1.13.0', optLevel: 2, note: 'Relojes locos · mesas arregladas · salones más pequeños' },
         { version: '1.12.0', optLevel: 1, note: 'Sala CCTV · estadísticas · salas privadas' },
         { version: '1.11.0', optLevel: 1, note: 'Sala CCTV original' },
         { version: '1.10.0', optLevel: 1, note: 'Base anterior' }
@@ -9856,6 +10055,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this._entityEncounterActive = false;
             this._lastEntityActive = false;
             this.statsOpen = false;
+            this.scoreboardOpen = false;
+            this._scoreAcc = 0;
+            // FPS locales para la tabla de jugadores (contador por segundo)
+            this._fpsFrames = 0;
+            this._fpsTime = 0;
+            this._fps = 60;
             this._noiseTimer = 0;
             this._interactionTimer = 0;
             // El bot debe aparecer pronto y de forma comprobable, sin esperar
@@ -9908,11 +10113,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 onRoomListings: (rooms) => {
                     this.roomListings = rooms || [];
                     if (this.roomsModalOpen) this.renderRoomList(this.roomListings);
-                }
+                },
+                versionLabel: GAME_VERSION_LABEL
             });
             // El mundo y la tiza se sincronizan por red: objetos reclamados y
-            // dibujos visibles para toda la sala
-            this.net.worldSync = this.worldSystem;
+            // dibujos visibles para toda la sala                this.net.worldSync = this.worldSystem;
+            this.net.fpsSource = () => this._fps;
             this.net.onChalkDot = (pt, n, c) => this.chalkSystem.addDot(pt, n, c);
             // Mapa compartido: publico lo que exploro y fusiono lo de los demas.
             // OJO: mapChunksRef se enlaza DESPUES de crear exploredChunks (si
@@ -10168,6 +10374,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 this.keys[e.code] = true;
                 if (!this.gameActive) return;
 
+                // Tabla de jugadores de la sala: [TAB]
+                if (e.code === 'Tab') {
+                    e.preventDefault();
+                    this.toggleScoreboard();
+                }
                 if (e.code === 'KeyF') this.toggleFlashlight();
                 if (e.code === 'Digit1') this.selectSlot(1);
                 if (e.code === 'Digit2') this.selectSlot(2);
@@ -10194,6 +10405,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (e.code === 'KeyT' && !this.chatOpen) this.toggleChat(true);
                 if (e.code === 'Escape') {
                     if (this.cameraFeedView.open) this.closeCameraFeed();
+                    else if (this.scoreboardOpen) this.toggleScoreboard(false);
                     else if (this.chatOpen) this.toggleChat(false);
                 }
             });
@@ -10381,6 +10593,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             bindTap('btn-touch-chat', () => this.toggleChat());
             bindTap('btn-touch-map', () => this.toggleMap());
             bindTap('btn-touch-stats', () => this.toggleStats());
+            bindTap('btn-touch-score', () => this.toggleScoreboard());
             bindTap('btn-touch-interact', () => this.handleInteraction());
             // Cerrar cuaderno/mapa tambien por toque directo (el click sintetico
             // puede quedar bloqueado en algunos navegadores moviles)
@@ -10412,7 +10625,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
         updateSeedLabel() {
             const el = document.getElementById('seed-label');
-            if (el) el.textContent = 'SEMILLA: ' + (this.roomCode !== null ? this.roomCode : this.worldSeed);
+            if (!el) return;
+            // La sala dice tambien QUE VERSION esta jugando cada explorador
+            el.textContent = 'SALA ' + (this.roomCode !== null ? this.roomCode : this.worldSeed) + ' · ' + GAME_VERSION_LABEL;
         }
 
         initUI() {
@@ -10640,6 +10855,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // Stats: se pueden abrir durante la partida y se conservan en muerte.
             const closeStats = document.getElementById('btn-close-stats');
             if (closeStats) closeStats.onclick = () => this.toggleStats(false);
+            const closeScore = document.getElementById('btn-close-scoreboard');
+            if (closeScore) closeScore.onclick = () => this.toggleScoreboard(false);
             const showDeathStats = document.getElementById('btn-show-stats');
             if (showDeathStats) showDeathStats.onclick = () => this.toggleStats(true);
             // Chat: Enter envia, Escape cierra, boton ENVIAR tambien
@@ -10721,7 +10938,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 title.textContent = room.name || ('SALA ' + (room.seed || room.key));
                 const meta = document.createElement('div');
                 meta.className = 'room-item-meta';
-                meta.textContent = 'CÓDIGO: ' + String(room.seed || room.key) + ' · ' + (room.count || 0) + '/6 · ' + (room.names || []).join(', ');
+                meta.textContent = 'CÓDIGO: ' + String(room.seed || room.key) + ' · ' + (room.count || 0) + '/6 · VERSIÓN: ' + String(room.version || 'v?') + ' · ' + (room.names || []).join(', ');
                 info.append(title, meta);
                 const state = document.createElement('span');
                 state.className = 'room-item-meta';
@@ -10765,6 +10982,66 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     if (lock && lock.catch) lock.catch(() => {});
                 } catch (err) { /* noop */ }
             }
+        }
+
+        // ---- TABLA DE JUGADORES DE LA SALA -------------------------------
+        // Se abre con [TAB] (o el boton movil 👥): lista al explorador local
+        // y a los companeros con su VERSION, ping aproximado y posicion.
+        toggleScoreboard(force) {
+            const modal = document.getElementById('scoreboard-modal');
+            if (!modal) return;
+            const open = force === undefined ? !this.scoreboardOpen : !!force;
+            this.scoreboardOpen = open;
+            modal.classList.toggle('open', open);
+            modal.setAttribute('aria-hidden', open ? 'false' : 'true');
+            if (open) {
+                this.renderScoreboard();
+                if (!IS_TOUCH && document.exitPointerLock && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (err) { /* noop */ }
+                }
+            } else if (!IS_TOUCH && this.gameActive && document.body.requestPointerLock) {
+                try {
+                    const lock = document.body.requestPointerLock();
+                    if (lock && lock.catch) lock.catch(() => {});
+                } catch (err) { /* noop */ }
+            }
+        }
+
+        renderScoreboard() {
+            const box = document.getElementById('scoreboard-content');
+            if (!box) return;
+            const esc = (v) => this.escapeStatText(v);
+            const net = this.net;
+            const peers = net && net.peers ? [...net.peers.values()] : [];
+            const rows = [];
+            rows.push(`<tr class="score-local">
+                <td>${esc(net ? net.playerName : 'EXPLORADOR')} <em>(tú)</em></td>
+                <td>${esc(GAME_VERSION_LABEL)}</td>
+                <td>—</td>
+                <td>${this._fps} fps</td>
+                <td>${this.player.pos.x.toFixed(1)} , ${this.player.pos.z.toFixed(1)}</td>
+            </tr>`);
+            for (const p of peers) {
+                if (!p || !p.name) continue;
+                const ping = p.ping === undefined ? '—' : Math.round(p.ping) + ' ms';
+                const fps = p.fps ? Math.round(p.fps) + ' fps' : '—';
+                const pos = p.hasState ? (p.tx.toFixed(1) + ' , ' + p.tz.toFixed(1)) : 'CONECTANDO…';
+                rows.push(`<tr>
+                    <td>${esc(p.name)}</td>
+                    <td>${esc(p.version || 'v?')}</td>
+                    <td>${ping}</td>
+                    <td>${fps}</td>
+                    <td>${pos}</td>
+                </tr>`);
+            }
+            box.innerHTML = `
+                <div class="score-table-wrap">
+                    <table class="score-table">
+                        <thead><tr><th>JUGADOR</th><th>VERSIÓN</th><th>PING</th><th>FPS</th><th>POSICIÓN</th></tr></thead>
+                        <tbody>${rows.join('')}</tbody>
+                    </table>
+                </div>
+                ${peers.length ? '' : '<div class="stats-note">SIN OTROS EXPLORADORES · COMPARTE EL CÓDIGO ' + esc(this.roomCode !== null ? this.roomCode : (this.worldSeed || '--')) + ' PARA QUE ENTREN</div>'}`;
         }
 
         formatPlayTime() {
@@ -10979,12 +11256,15 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                                 audio.playDrink();
                                 this.notify('🥤 AGUA DE ALMENDRAS (+1)');
                             } else if (p.type === 'battery') {
-                                if (this.inventory.flashBattery < 100) {
-                                    this.inventory.flashBattery = 100;
-                                    this.notify('🔋 LINTERNA RECARGADA AL 100%');
+                                // SIEMPRE suma una pila de repuesto visible en el
+                                // inventario (antes, con la linterna casi llena,
+                                // solo recargaba y parecia que no se sumaba nada)
+                                this.inventory.batteries = Math.min(9, this.inventory.batteries + 1);
+                                if (this.inventory.flashBattery < 40) {
+                                    this.inventory.flashBattery = Math.min(100, this.inventory.flashBattery + 60);
+                                    this.notify(`🔋 PILA +1 · LINTERNA +60% (${this.inventory.batteries})`);
                                 } else {
-                                    this.inventory.batteries = Math.min(9, this.inventory.batteries + 1);
-                                    this.notify(`🔋 PILA DE REPUESTO (${this.inventory.batteries})`);
+                                    this.notify(`🔋 PILA DE REPUESTO +1 (${this.inventory.batteries})`);
                                 }
                                 audio.playSwitchClick();
                                 this.updateFlashlightHUD();
@@ -12250,6 +12530,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
         triggerGameOver(reason) {
             if (!this.gameActive) return;
+            // La sala se entera por el chat de la muerte de este explorador
+            if (this.net && this.net.publishChat) {
+                this.net.publishChat('ha muerto: ' + (reason || 'SEÑAL PERDIDA'));
+            }
             // Captura el ultimo desplazamiento/tiempo y el encuentro que
             // provoco la muerte antes de apagar el bucle de partida.
             this.updateStats(0);
@@ -12592,30 +12876,38 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 Math.hypot(r.centerX - px, r.centerZ - pz) <= this._feedCaptureDistance
             );
             if (!activeRooms.length || !cams.length) return;
-            // Un solo render target por frame: el índice se elige UNA vez por
-            // actualización, no dentro del bucle de monitores. Antes se
-            // incrementaba dentro del bucle y, por coincidencia, cada CRT
-            // obtenía su propio turno en el mismo frame (tres renders completos
-            // por frame y una caída de FPS justo al acercarse a la cabina).
-            const totalSlots = activeRooms.reduce((n, room) => n + room.monitors.length, 0);
-            const refreshSlot = this._feedRoundRobin++ % Math.max(1, totalSlots);
-            let slotIndex = 0;
+            // Sistema de captura ROBUSTO: antes el reparto de turnos contaba
+            // en el total monitores "sin señal" que luego no consumian turno
+            // (slotIndex saltaba los invalidos pero refreshSlot los contaba) y
+            // algunas pantallas podian quedarse en "INICIALIZANDO" para
+            // siempre. Ahora: 1) el primer frame de cada monitor se captura YA
+            // (timer arranca vencido); 2) cada frame se captura UNO de los
+            // feeds cuyo temporizador ha vencido, elegido en rotacion entre
+            // los listos; 3) las camaras se normalizan siempre, asi con una
+            // sola camara TODAS las pantallas muestran senal en vez de quedarse
+            // sin señal o inicializando.
+            const ready = [];
             for (const r of activeRooms) {
-                r._monPicks = r._monPicks || [0, 1, 2];
+                r._monPicks = r._monPicks || r.monitors.map((_, n) => n);
                 // Cámaras ordenadas por cercanía a la SALA, igual que en el
                 // visor: así la imagen del monitor y la ampliada siempre son
                 // exactamente la misma señal.
                 const near = this.getRoomFeedCameras(r);
                 for (let i = 0; i < r.monitors.length; i++) {
                     const mon = r.monitors[i];
-                    const pick = r._monPicks[i];
+                    const pick = near.length
+                        ? ((((Number.isFinite(r._monPicks[i]) ? r._monPicks[i] : i) % near.length) + near.length) % near.length)
+                        : -1;
+                    r._monPicks[i] = pick;
                     const key = r.id + ':' + i;
                     let feed = this._monFeeds.get(key);
                     if (!feed) {
                         feed = {
                             rt: new THREE.WebGLRenderTarget(256, 192),
                             cam: new THREE.PerspectiveCamera(60, 256 / 192, 0.1, 80),
-                            timer: i * 0.2,
+                            // Arranca VENCIDO: la primera captura ocurre en la
+                            // primera pasada, nada de "INICIALIZANDO" eterno.
+                            timer: this._feedMinInterval,
                             lastPick: -1,
                             // Vision nocturna verde (FNAF): el feed en crudo
                             // salia casi negro (los pasillos estan oscuros) y
@@ -12660,24 +12952,30 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         }
                     }
                     const mat = mon.userData.screenMat;
-                    if (r.state.battery <= 0 || pick >= near.length) {
+                    if (r.state.battery <= 0 || pick < 0) {
                         if (mat.uniforms) mat.uniforms.map.value = this._noSignalTex;
                         else { mat.map = this._noSignalTex; mat.needsUpdate = true; }
                         continue;
                     }
                     feed.timer += dt;
-                    // Un solo CRT se actualiza por frame de juego (round-robin)
-                    // y no tres render targets completos a la vez. La señal
-                    // sigue siendo fluida y el coste baja mucho en salas con
-                    // varias pantallas.
-                    const thisSlot = slotIndex++;
-                    if (feed.timer < this._feedMinInterval || thisSlot !== refreshSlot) {
-                        if (mat.uniforms) mat.uniforms.map.value = feed.tex || feed.rt.texture;
-                        else { mat.map = feed.tex || feed.rt.texture; mat.needsUpdate = true; }
-                        continue;
+                    if (feed.timer >= this._feedMinInterval) {
+                        ready.push({ feed, mon, r, near, pick, i });
                     }
-                    feed.timer = 0;
-                    const camObj = near[pick];
+                    // Textura actual: la primera captura la sustituye al instante
+                    if (mat.uniforms) mat.uniforms.map.value = feed.tex || feed.rt.texture;
+                    else { mat.map = feed.tex || feed.rt.texture; mat.needsUpdate = true; }
+                }
+            }
+            if (!ready.length) return;
+            // UNA captura por frame, en rotacion entre los feeds listos
+            const slot = ready[this._feedRoundRobin++ % ready.length];
+            const feed = slot.feed;
+            const mon = slot.mon;
+            const near = slot.near;
+            const pick = slot.pick;
+            const i = slot.i;
+            feed.timer = 0;
+            const camObj = near[pick];
                     camObj.group.updateMatrixWorld(true);
                     const pos = new THREE.Vector3();
                     camObj.group.getWorldPosition(pos);
@@ -12745,8 +13043,6 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         mat.map = feed.tex || feed.rt.texture;
                         mat.needsUpdate = true;
                     }
-                }
-            }
         }
 
         updateNetHUD() {
@@ -12770,6 +13066,15 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             requestAnimationFrame(() => this.animate());
 
             const dt = Math.min(this.clock.getDelta(), 0.1);
+            // FPS locales: contador por segundo (para la tabla de jugadores y
+            // para que la sala vea el rendimiento de cada uno)
+            this._fpsFrames++;
+            this._fpsTime += dt;
+            if (this._fpsTime >= 1) {
+                this._fps = Math.round(this._fpsFrames / this._fpsTime);
+                this._fpsFrames = 0;
+                this._fpsTime = 0;
+            }
 
             if (this.gameActive) {
                 // Boton de dibujo visible solo con la tiza equipada (movil)
@@ -12791,6 +13096,14 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (!this.optimizedMode || this._optTick === 1) this.updateFurniturePhysics(dt);
                 this.updateLights(dt);
                 this.updateCoordsHUD();
+                // Tabla de jugadores abierta: refresco periodico (ping, posiciones)
+                if (this.scoreboardOpen) {
+                    this._scoreAcc += dt;
+                    if (this._scoreAcc >= 0.5) {
+                        this._scoreAcc = 0;
+                        this.renderScoreboard();
+                    }
+                }
                 this.updateFlashlightBattery(dt);
                 // Mantener [I] pulsado recarga la linterna con las pilas de
                 // repuesto almacenadas (1 pila ~ 0,9 s de recarga)
@@ -12905,7 +13218,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // una imagen cada dos frames (30 fps visuales con movimiento
             // suave de física y red). La variante normal renderiza todos.
             this._renderFrame++;
-            if (!this.optimizedMode || (this._renderFrame & 1) === 0) {
+            // Opt: la simulacion sigue a la frecuencia completa pero el
+            // rasterizado principal se reduce segun el nivel de la version
+            // (nivel 1-2: cada 2 frames = 30 fps visuales; nivel 3: cada 3
+            // frames = 20 fps visuales con movimiento de fisica/red suave).
+            if (!this.optimizedMode || (this._renderFrame % this.optParams.renderSkip) === 0) {
                 this.renderer.render(this.scene, this.camera);
             }
         }

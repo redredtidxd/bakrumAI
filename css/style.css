@@ -623,6 +623,7 @@
         #btn-touch-note    { right: 88px; bottom: 160px; }
         #btn-touch-interact{ right: 22px;  bottom: 96px; font-size: 16px; }
         #btn-touch-stats   { right: 154px; bottom: 224px; }
+        #btn-touch-score   { right: 154px; bottom: 270px; }
         .touch-btn.off {
             opacity: 0.4;
             border-color: #3d3521;
@@ -1004,6 +1005,21 @@
         .stats-section { color: #9be34a; font-size: 10px; letter-spacing: 2px; margin: 7px 0 4px; }
         .stats-note { margin-top: 13px; color: #6e674f; font-size: 10px; }
         .game-over-stats { max-height: 250px; overflow: auto; border: 1px solid #302b1e; margin: 0 0 15px; text-align: left; }
+
+        /* ================= TABLA DE JUGADORES ================= */
+        .score-table-wrap { overflow: auto; max-height: 52vh; }
+        .score-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .score-table th {
+            text-align: left; color: #9be34a; font-size: 10px; letter-spacing: 2px;
+            padding: 6px 10px; border-bottom: 1px solid #403a25; font-weight: normal;
+        }
+        .score-table td {
+            padding: 7px 10px; border-bottom: 1px dotted #35301f; color: #d8c89d;
+        }
+        .score-table td:nth-child(2), .score-table td:nth-child(3) { color: #a39879; white-space: nowrap; }
+        .score-table tr.score-local td { color: #e8d58d; }
+        .score-table tr.score-local td em { color: #9be34a; font-style: normal; font-size: 10px; }
+        .score-table td:first-child { white-space: nowrap; }
 
         /* ================= LISTADO DE SALAS ================= */
         .rooms-box { max-width: 720px; max-height: 90vh; overflow: auto; text-align: left; }
