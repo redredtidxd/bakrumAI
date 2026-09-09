@@ -31,7 +31,7 @@ Juego de terror procedural estilo Backrooms en el navegador (Three.js).
 
 ## Versión
 
-La versión actual (`v1.13.1`) se muestra en el menú principal y en el HUD, con un selector de versiones jugables en el menú. La sala también dice su versión: en el HUD (`SALA <código> · vX.Y.Z Opt`), en la tabla de jugadores (columna VERSIÓN de cada explorador) y en el listado de salas públicas (VER SALAS).
+La versión actual (`v1.13.2`) se muestra en el menú principal y en el HUD, con un selector de versiones jugables en el menú. La sala también dice su versión: en el HUD (`SALA <código> · vX.Y.Z Opt`), en la tabla de jugadores (columna VERSIÓN de cada explorador) y en el listado de salas públicas (VER SALAS). El selector cambia de versión EN CALIENTE (normal ↔ Opt ↔ historial) sin recargar la página.
 
 **Convención (autorecordada):** cada versión publicada — sea una versión `1.X.0` o una subversión `1.X.Y` — se añade a la lista de versiones jugables **siempre con sus dos variantes**: la normal y la muy optimizada **"Opt"**. Ninguna versión anterior se elimina: queda almacenada en el historial y sigue siendo jugable.
 
@@ -45,7 +45,21 @@ Para publicar una versión nueva:
 
 El selector del menú se rellena **solo** desde `VERSION_HISTORY` (que se construye automáticamente a partir de `CURRENT_VERSION` + `RELEASED_VERSIONS`): no hay que tocar el HTML. Si una versión publicada se quedara sin su variante Opt, el juego avisa en la consola del navegador.
 
-**Niveles Opt publicados:** `1.12.0` Opt = nivel 1 (pixel ratio 0.78, 20 luces, CCTV 0.30 s); `1.13.0` Opt = nivel 2 (pixel ratio 0.62, 12 luces, CCTV 0.45 s, aniso 2, física e interacción a 30 Hz); `1.13.1` Opt = nivel 3 (pixel ratio 0.55, 8 luces, CCTV 0.60 s, aniso 1, render principal cada 3 frames).
+**Niveles Opt publicados:** `1.12.0` Opt = nivel 1 (pixel ratio 0.78, 20 luces, CCTV 0.30 s); `1.13.0` Opt = nivel 2 (pixel ratio 0.62, 12 luces, CCTV 0.45 s, aniso 2, física e interacción a 30 Hz); `1.13.1` Opt = nivel 3 (pixel ratio 0.55, 8 luces, CCTV 0.60 s, aniso 1, render principal cada 3 frames); `1.13.2` Opt = nivel 4 (pixel ratio 0.48, 6 luces, CCTV 0.80 s, aniso 1, chunks cargados por turnos, fantasma X-RAY a 15 Hz).
+
+## Novedades de v1.13.2
+
+- **Cambio de versión al instante**: el selector del menú cambia entre normal, Opt e historial sin recargar la página (antes había que esperar la recarga completa).
+- **Ping real en la tabla de jugadores**: cada jugador mide su RTT de verdad con un eco MQTT y lo informa a la sala; el guion "-" del propio jugador desaparece y los 850-999 ms falsos (relojes desviados / subida móvil) dejan de aparecer.
+- **Multijugador mucho más fluido**: interpolación ADAPTATIVA (el retraso de render crece con la latencia real, sin tirones ni congelaciones con pings altos), latido en reposo cada 200 ms (un jugador quieto dibujando no "camina solo" en tu pantalla), umbral de congelación adaptado al ping y tanteo del fantasma X-RAY espaciado en Opt.
+- **Conexión más rápida**: los dos brokers se intentan EN PARALELO (antes en secuencia: hasta 16 s de "sin conexión"), el HUD dice CONECTANDO… mientras se intenta, y el directorio de salas públicas se precarga al abrir la página (VER SALAS aparece al instante).
+- **Sin congelaciones al cruzar bordes**: los chunks se cargan de 2 en 2 por frame en vez de todos a la vez (antes el juego se congelaba medio segundo al cambiar de chunk).
+- **Tiza solo en paredes**: ya no se puede dibujar en el suelo (antes el tapete contaba como pared y las marcas flotaban sobre la moqueta).
+- **Paredes curvas y salas de seguridad**: una pared curva ya no puede atravesar el refugio (los tramos curvos se prohiben cerca de la sala de seguridad).
+- **Paredes diagonales y luces**: los tabiques inclinados ya no atraviesan las luminarias de techo (la lámpara de la celda atravesada se suprime).
+- **Papel pintado continuo**: las UVs de las paredes usan la fase de MUNDO: el estampado ya no salta ~1,4 m en cada junta de chunk ("las paredes no se conectan del todo") y las franjas verticales continúan de una pared a la siguiente.
+- **Modelos mejorados**: el explorador remoto tiene cara, pelo, hombros, botas y ANIMACIÓN DE CAMINAR (piernas y brazos oscilan con su velocidad real); la Entidad tiene columna retorcida, mandíbula, brazos articulados y ojos rojos que brillan en la oscuridad.
+- **Menú responsive**: el menú principal cabe en pantallas pequeñas (scroll interno y tipografía compacta en ventanas bajas).
 
 ## Cómo jugar
 

@@ -7,32 +7,56 @@
     function createEntityModel() {
         const group = new THREE.Group();
         const tentacles = [];
-        const blackMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.1, metalness: 0.95 });
+        // Negro humedo: muy rugoso en la sombra, con brillos metalicos solo
+        // cuando la linterna lo roza (mas corporeo que el negro mate plano)
+        const blackMat = new THREE.MeshStandardMaterial({ color: 0x060606, roughness: 0.35, metalness: 0.85 });
 
-        for (let i = 0; i < 6; i++) {
-            const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, 0.35, 6), blackMat);
-            seg.position.y = 0.2 + i * 0.28;
+        // Columna vertebral de segmentos afilados (cuerpo de lombriz): cada
+        // segmento es un cono invertido; la silueta se estrecha hacia abajo
+        for (let i = 0; i < 7; i++) {
+            const rTop = 0.15 - i * 0.012;
+            const seg = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rTop * 0.7, 0.26, 7), blackMat);
+            seg.position.y = 0.22 + i * 0.25;
+            // Giro aleatorio por segmento: el cuerpo se ve retorcido, no un
+            // tubo perfecto
+            seg.rotation.y = i * 1.7;
             group.add(seg);
             tentacles.push(seg);
         }
 
-        const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), blackMat);
-        head.position.y = 1.9;
+        // Cabeza: craneo alargado (elipse) con mandibula
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), blackMat);
+        head.scale.set(0.92, 1.12, 1.15);
+        head.position.y = 1.92;
         group.add(head);
+        const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), blackMat);
+        jaw.scale.set(0.8, 0.55, 1.1);
+        jaw.position.set(0, 1.78, 0.12);
+        group.add(jaw);
 
-        const redEyeMat = new THREE.MeshBasicMaterial({ color: 0xff1111 });
-        const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), redEyeMat);
-        eye1.position.set(0.06, 1.93, 0.14);
-        const eye2 = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), redEyeMat);
-        eye2.position.set(-0.06, 1.93, 0.14);
+        // Ojos ROJOS que brillan de verdad: material aditivo, se ven a traves
+        // de la oscuridad aunque no les de la linterna
+        const redEyeMat = new THREE.MeshBasicMaterial({ color: 0xff1515, blending: THREE.AdditiveBlending, depthWrite: false });
+        const eyeGeo = new THREE.SphereGeometry(0.028, 6, 6);
+        const eye1 = new THREE.Mesh(eyeGeo, redEyeMat);
+        eye1.position.set(0.065, 1.95, 0.15);
+        const eye2 = new THREE.Mesh(eyeGeo, redEyeMat);
+        eye2.position.set(-0.065, 1.95, 0.15);
         group.add(eye1, eye2);
 
+        // Brazos largos articulados (dos segmentos cada uno, codo en medio):
+        // se balancean como tentaculos al moverse
         for (let i = 0; i < 4; i++) {
-            const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.05, 1.4, 5), blackMat);
-            arm.position.set((i % 2 === 0 ? 0.3 : -0.3), 1.2, 0);
-            arm.rotation.z = (i % 2 === 0 ? 0.4 : -0.4);
-            group.add(arm);
-            tentacles.push(arm);
+            const side = (i % 2 === 0 ? 1 : -1);
+            const up = (i < 2 ? 1 : -1);
+            const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.75, 5), blackMat);
+            upper.position.set(side * 0.3, 1.35 + up * 0.2, (i % 3 === 0 ? 0.12 : -0.08));
+            upper.rotation.z = side * (0.5 + up * 0.25);
+            const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.035, 0.7, 5), blackMat);
+            forearm.position.set(side * 0.62, 1.0 + up * 0.1, (i % 3 === 0 ? 0.2 : -0.14));
+            forearm.rotation.z = side * 0.35;
+            group.add(upper, forearm);
+            tentacles.push(upper, forearm);
         }
 
         return { group, tentacles };

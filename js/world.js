@@ -70,7 +70,20 @@
                 length(vec3(instanceMatrix[0].y, instanceMatrix[1].y, instanceMatrix[2].y)),
                 length(vec3(instanceMatrix[0].z, instanceMatrix[1].z, instanceMatrix[2].z))
             );
-            vUv = uv * vec2(_instScale.x / 2.8, _instScale.y / 2.66);
+            // UVs en FASE DE MUNDO: el papel pintado se repite cada 2,8 m y su
+            // fase continua de una pared a la siguiente y a traves de los
+            // bordes de chunk (antes las UVs arrancaban en 0 en el origen de
+            // cada caja: en cada junta de chunk el estampado saltaba ~1,4 m y
+            // las franjas verticales de dos paredes contiguas NO CONECTABAN).
+            // En las caras frontales/traseras (uv.x corre a lo largo del eje
+            // X local) el patron en el mundo es exactamente posicion/2,8 m;
+            // en vertical se conserva el zocalo en la base de TODAS las
+            // paredes, sea cual sea su altura.
+            vec3 _instPos = vec3(instanceMatrix[3].x, instanceMatrix[3].y, instanceMatrix[3].z);
+            vUv = vec2(
+                (uv.x * _instScale.x + (_instPos.x - _instScale.x * 0.5)) / 2.8,
+                (uv.y * _instScale.y + (_instPos.y - _instScale.y * 0.5)) / 2.66
+            );
             #endif`
         );
     };
@@ -574,6 +587,7 @@
             this._lcx = undefined;
             this._lcz = undefined;
             this._playerPos = new THREE.Vector3(0, 0, 0);
+            this._pendingLoads = [];
 
             this.update(new THREE.Vector3(0, 0, 0));
         }
@@ -581,26 +595,46 @@
         // ================================================================
         //  CARGA / DESCARGA DE CHUNKS (mundo infinito)
         // ================================================================
+        // La construccion de un chunk (muros, muebles, objetos, mallas) es la
+        // operacion mas cara del juego. Antes se cargaban TODOS los chunks del
+        // anillo en el mismo frame en que cruzabas un borde: el juego se
+        // congelaba medio segundo. Ahora los chunk pendientes se encolan y se
+        // cargan de 2 en 2 por frame (los mas cercanos primero): cruzar un
+        // borde ya no congela.
         update(playerPos) {
             const ccx = Math.floor(playerPos.x / (CHUNK_SIZE * CELL_SIZE));
             const ccz = Math.floor(playerPos.z / (CHUNK_SIZE * CELL_SIZE));
-            if (ccx === this._lcx && ccz === this._lcz && this._lcx !== undefined) return;
-            this._lcx = ccx;
-            this._lcz = ccz;
             this._playerPos.copy(playerPos);
+            if (ccx !== this._lcx || ccz !== this._lcz || this._lcx === undefined) {
+                this._lcx = ccx;
+                this._lcz = ccz;
 
-            // Descargar los chunks que quedaron fuera del radio
-            for (const [key, ch] of [...this.chunks]) {
-                if (ch.loaded && (Math.abs(ch.cx - ccx) > LOAD_RADIUS || Math.abs(ch.cz - ccz) > LOAD_RADIUS)) {
-                    this.unloadChunk(ch);
+                // Descargar los chunks que quedaron fuera del radio
+                for (const [key, ch] of [...this.chunks]) {
+                    if (ch.loaded && (Math.abs(ch.cx - ccx) > LOAD_RADIUS || Math.abs(ch.cz - ccz) > LOAD_RADIUS)) {
+                        this.unloadChunk(ch);
+                    }
                 }
+                // Encolar los chunks del anillo por cercania
+                const want = [];
+                for (let dx = -LOAD_RADIUS; dx <= LOAD_RADIUS; dx++) {
+                    for (let dz = -LOAD_RADIUS; dz <= LOAD_RADIUS; dz++) {
+                        const key = (ccx + dx) + ',' + (ccz + dz);
+                        const ch = this.chunks.get(key);
+                        if (!ch || !ch.loaded) want.push([ccx + dx, ccz + dz, dx * dx + dz * dz]);
+                    }
+                }
+                want.sort((a, b) => a[2] - b[2]);
+                this._pendingLoads = want.map(w => [w[0], w[1]]);
             }
-            // Cargar (o recargar) los chunks del anillo
-            for (let dx = -LOAD_RADIUS; dx <= LOAD_RADIUS; dx++) {
-                for (let dz = -LOAD_RADIUS; dz <= LOAD_RADIUS; dz++) {
-                    const key = (ccx + dx) + ',' + (ccz + dz);
-                    const ch = this.chunks.get(key);
-                    if (!ch || !ch.loaded) this.loadChunk(ccx + dx, ccz + dz);
+            // Drenar la cola poco a poco (2 chunks por frame)
+            let budget = 2;
+            while (budget > 0 && this._pendingLoads.length) {
+                const [cx, cz] = this._pendingLoads.shift();
+                const ch = this.chunks.get(cx + ',' + cz);
+                if (!ch || !ch.loaded) {
+                    this.loadChunk(cx, cz);
+                    budget--;
                 }
             }
         }
@@ -1644,6 +1678,9 @@
 
             const wallT = [], cylT = [];
             const frameT = [], capT = [], offB = [], flickB = [], litB = [];   // lamparas: carcasa + casquillos + tubo por estado
+            // Luminarias por celda: se construyen DESPUES de los tabiques
+            // inclinados (si un tabique atraviesa la celda, se suprimen).
+            const lampRecs = [];
             const dummy = new THREE.Object3D();
 
             // ---- Paredes finas (0,4-1,2 m) en lugar de celdas macizas ----
@@ -2026,40 +2063,15 @@
                     }
 
                     if (type === 0 || type === 2) {
-                        // LAMPARA DE TECHO REHECHA: luminaria fluorescente de
+                        // LAMPARA DE TECHO: luminaria fluorescente de
                         // superficie. La carcasa metalica queda PEGADA al
                         // techo (sin hueco) y el tubo va HORIZONTAL dentro de
                         // ella, asomando un poco por abajo, con casquillos en
-                        // los extremos. Antes era una caja flotando a 7 cm del
-                        // techo con un cilindro vertical debajo que no parecia
-                        // una bombilla. Las fundidas dejan el tubo colgando.
-                        const frameM = new THREE.Matrix4();
-                        frameM.makeScale(1.6, 0.12, 0.55);
-                        frameM.setPosition(posX, WALL_HEIGHT - 0.06, posZ);   // tope superior a ras del techo
-                        frameT.push(frameM);
-
-                        // Casquillos de los extremos (donde se monta el tubo)
-                        const capM = new THREE.Matrix4();
-                        capM.makeScale(0.14, 0.16, 0.56);
-                        capM.setPosition(posX - 0.575, WALL_HEIGHT - 0.13, posZ);
-                        capT.push(capM);
-                        const capM2 = capM.clone();
-                        capM2.setPosition(posX + 0.575, WALL_HEIGHT - 0.13, posZ);
-                        capT.push(capM2);
-
-                        // Tubo fluorescente HORIZONTAL a lo largo de la
-                        // carcasa (antes era un cilindro corto vertical)
-                        const bulbM = new THREE.Matrix4();
-                        bulbM.makeRotationZ(Math.PI / 2);
-                        bulbM.setPosition(posX, WALL_HEIGHT - 0.14, posZ);
-                        // Zona de luz del chunk (campo suave, como el tipo de
-                        // chunk): hay sitios con TODOS los focos fundidos donde
-                        // solo alumbra la linterna, zonas tenues, lo normal y
-                        // raramente zonas casi todo encendido. El campo suave
-                        // hace que la oscuridad sea por zonas contiguas.
-                        // La luz de una zona vecina encendida no debe colarse a
-                        // traves de las paredes finas: los focos pegados al
-                        // borde de una zona oscura se funden tambien.
+                        // los extremos. Las fundidas dejan el tubo colgando.
+                        // La malla NO se construye aqui: primero se colocan
+                        // los tabiques inclinados y, si la celda queda
+                        // atravesada por una pared diagonal, la luminaria se
+                        // suprime (antes el tabique la atravesaba).
                         const nearDark = (x, z) => {
                             const dark = (cx2, cz2) => this.lightField(cx2, cz2) < 0.38;
                             if (x <= 1 && dark(ch.cx - 1, ch.cz)) return true;
@@ -2079,29 +2091,20 @@
                         else if (lz < 0.86) { /* normal */ }
                         else { offP = 0.16; flickP = 0.3; }               // casi todo encendido (rara)
                         const lr = ch.rng();
+                        let state = 1, twist = 0, flickerTimer = 0;
                         if (nearDark(x, z) || lr < offP) {
                             // Fundida: el tubo cuelga torcido (aspecto roto);
                             // un extremo se hunde en la carcasa y el otro
                             // queda colgando hacia abajo
-                            const broken = bulbM.clone();
-                            broken.makeRotationZ(Math.PI / 2 + (ch.rng() - 0.5) * 0.6);
-                            broken.setPosition(posX, WALL_HEIGHT - 0.14, posZ);
-                            offB.push(broken);
+                            state = 0;
+                            twist = (ch.rng() - 0.5) * 0.6;
                         } else if (lr < offP + flickP) {
-                            flickB.push(bulbM);
-                            ch.lamps.push({
-                                pos: new THREE.Vector3(posX, WALL_HEIGHT - 0.14, posZ),
-                                state: 2,
-                                flickerTimer: ch.rng() * 2,
-                                isLitNow: true
-                            });
+                            state = 2;
+                            flickerTimer = ch.rng() * 2;
                         } else {
-                            litB.push(bulbM);
-                            ch.lamps.push({
-                                pos: new THREE.Vector3(posX, WALL_HEIGHT - 0.14, posZ),
-                                state: 1
-                            });
+                            state = 1;
                         }
+                        lampRecs.push({ x, z, state, twist, flickerTimer });
                     }
                 }
             }
@@ -2118,15 +2121,6 @@
             };
             addInst(wallT, Materials.wall);
             addInst(cylT, Materials.wall, cylGeo);
-            // Luminaria: carcasa + casquillos de metal para TODAS, y el tubo
-            // horizontal por estado (fundido oscuro; encendido/parpadeante
-            // emisivo, que brilla a traves de la niebla)
-            const tubeGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.15, 10);
-            addInst(frameT, Materials.lampFrame);
-            addInst(capT, Materials.lampFrame);
-            addInst(offB, Materials.lampOff, tubeGeo);
-            addInst(flickB, Materials.lampFlicker, tubeGeo);
-            addInst(litB, Materials.lampLit, tubeGeo);
 
             // ---- GRAFITI en las paredes (100 variantes, blanco/negro/rojo) ----
             // RNG propio del chunk: no altera la generacion del mundo y, con la
@@ -2157,6 +2151,73 @@
             // integradas en la generacion: esquinas recortadas de salas,
             // contrafuertes en pasillos y tabiques sueltos en campo abierto ----
             this.placeChunkSlantedWalls(ch, wallKind, key, curvedCells);
+
+            // ---- LUMINARIAS DE TECHO (construidas AHORA, ya colocados los
+            // tabiques inclinados). Si una pared diagonal atraviesa la celda
+            // de la luminaria, la lampara quedaba clavada en el tabique
+            // ("las paredes diagonales atraviesan las luces del suelo"): se
+            // suprime esa luminaria. Las demas se montan como siempre:
+            // carcasa + casquillos de metal para TODAS y tubo horizontal por
+            // estado (fundido oscuro; encendido/parpadeante emisivo). ----
+            const tubeGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.15, 10);
+            for (const rec of lampRecs) {
+                const lpx = ox + (rec.x + 0.5) * C;
+                const lpz = oz + (rec.z + 0.5) * C;
+                // AABB de los tabiques ampliada ~0,8 m (su medio grosor max
+                // es ~0,6 m y la luminaria mide 0,8 m de ancho)
+                let blocked = false;
+                for (const s of ch.slantedAABBs) {
+                    if (lpx > s.minX - 0.8 && lpx < s.maxX + 0.8 &&
+                        lpz > s.minZ - 0.8 && lpz < s.maxZ + 0.8) { blocked = true; break; }
+                }
+                if (blocked) continue;
+
+                const frameM = new THREE.Matrix4();
+                frameM.makeScale(1.6, 0.12, 0.55);
+                frameM.setPosition(lpx, WALL_HEIGHT - 0.06, lpz);   // tope superior a ras del techo
+                frameT.push(frameM);
+
+                // Casquillos de los extremos (donde se monta el tubo)
+                const capM = new THREE.Matrix4();
+                capM.makeScale(0.14, 0.16, 0.56);
+                capM.setPosition(lpx - 0.575, WALL_HEIGHT - 0.13, lpz);
+                capT.push(capM);
+                const capM2 = capM.clone();
+                capM2.setPosition(lpx + 0.575, WALL_HEIGHT - 0.13, lpz);
+                capT.push(capM2);
+
+                // Tubo fluorescente HORIZONTAL a lo largo de la carcasa
+                const bulbM = new THREE.Matrix4();
+                bulbM.makeRotationZ(Math.PI / 2);
+                bulbM.setPosition(lpx, WALL_HEIGHT - 0.14, lpz);
+                if (rec.state === 0) {
+                    // Fundida: el tubo cuelga torcido; un extremo se hunde en
+                    // la carcasa y el otro queda colgando hacia abajo
+                    const broken = bulbM.clone();
+                    broken.makeRotationZ(Math.PI / 2 + rec.twist);
+                    broken.setPosition(lpx, WALL_HEIGHT - 0.14, lpz);
+                    offB.push(broken);
+                } else if (rec.state === 2) {
+                    flickB.push(bulbM);
+                    ch.lamps.push({
+                        pos: new THREE.Vector3(lpx, WALL_HEIGHT - 0.14, lpz),
+                        state: 2,
+                        flickerTimer: rec.flickerTimer,
+                        isLitNow: true
+                    });
+                } else {
+                    litB.push(bulbM);
+                    ch.lamps.push({
+                        pos: new THREE.Vector3(lpx, WALL_HEIGHT - 0.14, lpz),
+                        state: 1
+                    });
+                }
+            }
+            addInst(frameT, Materials.lampFrame);
+            addInst(capT, Materials.lampFrame);
+            addInst(offB, Materials.lampOff, tubeGeo);
+            addInst(flickB, Materials.lampFlicker, tubeGeo);
+            addInst(litB, Materials.lampLit, tubeGeo);
 
             // Flechas de las PUERTAS FALSAS de los chunks vecinos (hasta 2
             // chunks: el radio de colocacion de las flechas): al reconstruir
@@ -3019,6 +3080,26 @@
             // "De vez en cuando": ~1 de cada 5 chunks tiene una pared curva
             if (r() >= 0.2) return [];
 
+            // SALA DE SEGURIDAD: el arco de una pared curva se abre hasta
+            // ~2 m hacia el lado abierto. Si ese lado es el interior del
+            // refugio (o la celda de su puerta), la curva lo ATRAVESABA. Se
+            // prohibe curvar cualquier tramo a menos de 1 celda del refugio
+            // (incluida la boca de la puerta).
+            const sr = ch.securityRoom;
+            const noCurve = new Set();
+            if (sr) {
+                for (let dx = -1; dx <= sr.w; dx++) {
+                    for (let dz = -1; dz <= sr.h; dz++) {
+                        for (let ex = -1; ex <= 1; ex++) {
+                            for (let ez = -1; ez <= 1; ez++) {
+                                noCurve.add(key(sr.rx + dx + ex, sr.rz + dz + ez));
+                            }
+                        }
+                    }
+                }
+                noCurve.add(key(sr.doorX, sr.doorZ));
+            }
+
             const runs = [];
             const visited = new Set();
             for (let x = 2; x < N - 2; x++) {
@@ -3042,6 +3123,8 @@
                         }
                     }
                     if (cells.length < 3) continue;
+                    // Ninguna celda del tramo cerca del refugio
+                    if (cells.some(([cx2, cz2]) => noCurve.has(key(cx2, cz2)))) continue;
                     // Lados abiertos consistentes en todo el tramo
                     let wAll = true, wAny = false, eAll = true, eAny = false;
                     for (const [cx, cz] of cells) {

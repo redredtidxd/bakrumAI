@@ -17,13 +17,13 @@
     // El selector del menu se rellena SOLO desde VERSION_HISTORY: nunca se
     // publica una version sin su Opt, ni se elimina una anterior (queda
     // almacenada y jugable en el historial).
-    const CURRENT_VERSION = '1.13.1';   // <-- UNICA constante que subir al publicar
+    const CURRENT_VERSION = '1.13.2';   // <-- UNICA constante que subir al publicar
     // NIVEL DE OPTIMIZACION de la variante Opt de la version actual. REGLA
     // AUTORECORDADA: cada version nueva llega con MAS contenido, asi que su
     // Opt debe optimizar MAS que la anterior. Al publicar se sube
     // CURRENT_OPT_LEVEL junto a CURRENT_VERSION y se anade una fila mas
     // agresiva a OPT_TABLE.
-    const CURRENT_OPT_LEVEL = 3;
+    const CURRENT_OPT_LEVEL = 4;
     // Parametros de rendimiento de la variante Opt por nivel, en orden:
     // [pixelRatio, luces, intervaloLuces(s), intervaloRuido(s),
     //  intervaloFeed(s), readbackFeed, distanciaCaptura(m), aniso,
@@ -31,13 +31,15 @@
     const OPT_TABLE = Object.freeze([
         [0.78, 20, 0.12, 0.12, 0.30, 4, 36, 8, 2],   // nivel 1: 1.12.0 Opt
         [0.62, 12, 0.20, 0.20, 0.45, 6, 30, 2, 2],   // nivel 2: 1.13.0 Opt
-        [0.55, 8, 0.25, 0.25, 0.60, 8, 26, 1, 2]     // nivel 3: 1.13.1 Opt (30 fps visuales: 20fps hacia el monstruo a trompicones)
+        [0.55, 8, 0.25, 0.25, 0.60, 8, 26, 1, 2],    // nivel 3: 1.13.1 Opt
+        [0.48, 6, 0.35, 0.35, 0.80, 10, 24, 1, 2]    // nivel 4: 1.13.2 Opt (resolucion recortada, 6 luces, CCTV espaciado, chunks por turnos)
     ]);
     function optParams(level) {
         const row = OPT_TABLE[Math.max(0, Math.min(OPT_TABLE.length - 1, (level || 1) - 1))];
         return { pixelRatio: row[0], lights: row[1], lightInterval: row[2], noiseInterval: row[3], feedInterval: row[4], feedReadback: row[5], feedDistance: row[6], aniso: row[7], renderSkip: row[8] };
     }
     const RELEASED_VERSIONS = [
+        { version: '1.13.1', optLevel: 3, note: 'Multijugador afinado · interpolación adaptativa · ping real por eco' },
         { version: '1.13.0', optLevel: 2, note: 'Relojes locos · mesas arregladas · salones más pequeños' },
         { version: '1.12.0', optLevel: 1, note: 'Sala CCTV · estadísticas · salas privadas' },
         { version: '1.11.0', optLevel: 1, note: 'Sala CCTV original' },
@@ -119,6 +121,11 @@
             // mas espaciados. La variante normal conserva la resolucion alta.
             this.optimizedMode = GAME_OPTIMIZED;
             this.activeVersion = ACTIVE_VERSION;
+            // Etiqueta de version mostrada en HUD/menu/tabla de jugadores y
+            // publicada a la sala. Es una propiedad INSTANCIA (no una
+            // constante) porque el selector del menu cambia de version en
+            // caliente, sin recargar la pagina.
+            this.versionLabel = GAME_VERSION_LABEL;
             this._renderFrame = 0;
             this._optTick = 0;
             // Parametros de rendimiento de la variante Opt SEGUN EL NIVEL de
@@ -284,8 +291,15 @@
                     this.roomListings = rooms || [];
                     if (this.roomsModalOpen) this.renderRoomList(this.roomListings);
                 },
-                versionLabel: GAME_VERSION_LABEL
+                versionLabel: this.versionLabel,
+                // La variante Opt no recalcula el fantasma X-RAY cada frame
+                lowFreqMode: GAME_OPTIMIZED
             });
+            // Directorio de salas publicas CALIENTE desde el arranque: el
+            // listado se suscribe y descarga en segundo plano mientras el
+            // jugador lee el menu; al abrir VER SALAS ya esta (antes habia
+            // que esperar la conexion del directorio dentro del modal).
+            this.net.requestRoomListings();
             // El mundo y la tiza se sincronizan por red: objetos reclamados y
             // dibujos visibles para toda la sala                this.net.worldSync = this.worldSystem;
             this.net.fpsSource = () => this._fps;
@@ -793,19 +807,66 @@
             this.noiseCtx.putImageData(imgData, 0, 0);
         }
 
+        // Cambia de version (normal/Opt o historial) EN CALIENTE, sin
+        // recargar la pagina: se reconfigura el renderer (resolucion,
+        // anisotropia, piscina de luces, intervalos del perfil Opt) y se
+        // actualizan todas las etiquetas. El mundo es deterministico por
+        // semilla, no por version: no hace falta regenerarlo.
+        applyVersion(id) {
+            const next = VERSION_HISTORY.find(v => v.id === id && v.selectable);
+            if (!next) return;
+            this.activeVersion = next;
+            this.optimizedMode = !!next.optimized;
+            this.optParams = this.optimizedMode ? optParams(next.optLevel) : null;
+            this.versionLabel = 'v' + next.version + (this.optimizedMode ? ' Opt' : '');
+            // Resolucion y anisotropia del perfil elegido
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,
+                this.optimizedMode ? this.optParams.pixelRatio : (IS_TOUCH ? 1.15 : 1.5)));
+            const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
+            const aniso = this.optimizedMode ? Math.min(this.optParams.aniso, maxAniso) : Math.min(8, maxAniso);
+            [Materials.floor.map, Materials.wall.map, Materials.ceiling.map].forEach(t => {
+                if (t) t.anisotropy = aniso;
+            });
+            // Piscina de luces: se redimensiona al numero del perfil
+            const target = this.optimizedMode ? this.optParams.lights : 64;
+            while (this.lightPool.length > target) {
+                const l = this.lightPool.pop();
+                this.scene.remove(l);
+            }
+            while (this.lightPool.length < target) {
+                const pl = new THREE.PointLight(0xffd878, 0, 18, 2.0);
+                this.scene.add(pl);
+                this.lightPool.push(pl);
+            }
+            // Params del perfil Opt (CCTV y capturas)
+            this._feedReadbackEvery = this.optimizedMode ? this.optParams.feedReadback : 2;
+            this._feedCaptureDistance = this.optimizedMode ? this.optParams.feedDistance : 42;
+            this._feedMinInterval = this.optimizedMode ? this.optParams.feedInterval : 0.16;
+            // Etiquetas visibles
+            const mv = document.getElementById('menu-version');
+            if (mv) mv.textContent = 'THE BACKROOMS ' + this.versionLabel;
+            const hv = document.getElementById('hud-version');
+            if (hv) hv.textContent = this.versionLabel;
+            const versionNote = document.getElementById('version-note');
+            if (versionNote) versionNote.textContent = next.note + ' · aplicado al instante';
+            if (this.net) this.net.versionLabel = this.versionLabel;
+            this.updateSeedLabel();
+            try { localStorage.setItem('backrooms-version-id', next.id); } catch (err) { /* noop */ }
+        }
+
         updateSeedLabel() {
             const el = document.getElementById('seed-label');
             if (!el) return;
             // La sala dice tambien QUE VERSION esta jugando cada explorador
-            el.textContent = 'SALA ' + (this.roomCode !== null ? this.roomCode : this.worldSeed) + ' · ' + GAME_VERSION_LABEL;
+            el.textContent = 'SALA ' + (this.roomCode !== null ? this.roomCode : this.worldSeed) + ' · ' + this.versionLabel;
         }
 
         initUI() {
             // Version en el menu principal y en el HUD (unica fuente: GAME_VERSION)
             const mv = document.getElementById('menu-version');
-            if (mv) mv.textContent = 'THE BACKROOMS ' + GAME_VERSION_LABEL;
+            if (mv) mv.textContent = 'THE BACKROOMS ' + this.versionLabel;
             const hv = document.getElementById('hud-version');
-            if (hv) hv.textContent = GAME_VERSION_LABEL;
+            if (hv) hv.textContent = this.versionLabel;
             const versionSelect = document.getElementById('version-selector');
             const versionNote = document.getElementById('version-note');
             if (versionSelect) {
@@ -838,13 +899,14 @@
                         e.target.value = ACTIVE_VERSION_ID;
                         return;
                     }
-                    try { localStorage.setItem('backrooms-version-id', next.id); } catch (err) { /* noop */ }
-                    // El perfil se decide al crear el renderer; recargar evita
-                    // mezclar luces/render targets de dos perfiles.
-                    location.reload();
+                    // Cambio de version EN CALIENTE: se reconfigura el perfil
+                    // de rendimiento al instante, sin recargar la pagina (la
+                    // recarga anterior tardaba y cortaba el multijugador).
+                    this.applyVersion(next.id);
+                    e.target.value = next.id;
                 };
             }
-            if (versionNote) versionNote.textContent = ACTIVE_VERSION.note + ' · se aplica al recargar';
+            if (versionNote) versionNote.textContent = ACTIVE_VERSION.note + ' · aplicado al instante';
 
             // Recuerda el nombre entre partidas
             const nameInput = document.getElementById('name-input');
@@ -1095,7 +1157,13 @@
             if (!list.length) {
                 const empty = document.createElement('div');
                 empty.className = 'room-empty';
-                empty.textContent = 'NO HAY SALAS PÚBLICAS ACTIVAS · CREA UNA O COMPARTE UN CÓDIGO';
+                // Mientras el directorio se esta conectando no se dice que no
+                // hay salas: se sigue mostrando el estado de busqueda
+                if (this.net && (this.net.directoryConnecting || (!this.net.directoryFailed && !this.net.directoryConnected && !this.net.connected))) {
+                    empty.textContent = 'BUSCANDO SALAS PÚBLICAS…';
+                } else {
+                    empty.textContent = 'NO HAY SALAS PÚBLICAS ACTIVAS · CREA UNA O COMPARTE UN CÓDIGO';
+                }
                 box.appendChild(empty);
                 return;
             }
@@ -1184,16 +1252,22 @@
             const net = this.net;
             const peers = net && net.peers ? [...net.peers.values()] : [];
             const rows = [];
+            // El ping propio es el RTT real al broker (medido por eco); antes
+            // salia un guion porque no habia forma de medirlo desde el cliente
+            const myPing = (net && net.myRtt !== undefined) ? Math.round(net.myRtt) + ' ms' : '—';
             rows.push(`<tr class="score-local">
                 <td>${esc(net ? net.playerName : 'EXPLORADOR')} <em>(tú)</em></td>
-                <td>${esc(GAME_VERSION_LABEL)}</td>
-                <td>—</td>
+                <td>${esc(this.versionLabel)}</td>
+                <td>${myPing}</td>
                 <td>${this._fps} fps</td>
                 <td>${this.player.pos.x.toFixed(1)} , ${this.player.pos.z.toFixed(1)}</td>
             </tr>`);
             for (const p of peers) {
                 if (!p || !p.name) continue;
-                const ping = p.ping === undefined ? '—' : Math.round(p.ping) + ' ms';
+                // Preferir el RTT que el propio jugador informa (medido por
+                // eco en su maquina); si aun no ha llegado, la estimacion
+                // por relojes como respaldo
+                const ping = (p.rtt && p.rtt > 0) ? Math.round(p.rtt) + ' ms' : (p.ping === undefined ? '—' : Math.round(p.ping) + ' ms');
                 const fps = p.fps ? Math.round(p.fps) + ' fps' : '—';
                 const pos = p.hasState ? (p.tx.toFixed(1) + ' , ' + p.tz.toFixed(1)) : 'CONECTANDO…';
                 rows.push(`<tr>
@@ -2113,7 +2187,12 @@
                     // fallaba y la tiza no pintaba en las paredes inclinadas.
                     // Se comparan las TEXTURAS compartidas, que si lo son.
                     const m = hit.object.material;
-                    const wallish = m.map && (m.map === Materials.wall.map || m.map === Materials.floor.map);
+                    // Solo paredes (papel pintado compartido por las paredes
+                    // rectas, curvas e inclinadas). El suelo usa su propia
+                    // moqueta y YA NO pinta con tiza (antes el tapete se
+                    // comparaba como "pared" y se podia dibujar en el suelo,
+                    // quedando manchas flotando sobre la moqueta).
+                    const wallish = m.map && m.map === Materials.wall.map;
                     if (!wallish) continue;
                     // Normal de la cara: en las paredes de doble cara la normal
                     // de la geometria puede apuntar al lado contrario de la
@@ -2121,6 +2200,10 @@
                     // por dentro). Se voltea si apunta en el sentido del rayo.
                     const n = hit.face.normal.clone();
                     if (n.dot(raycaster.ray.direction) > 0) n.negate();
+                    // Y solo en caras VERTICALES: las tapas superiores de los
+                    // tabiques inclinados comparten la textura de papel, pero
+                    // pintar encima (mirando al techo) queda mal.
+                    if (Math.abs(n.y) > 0.3) continue;
                     if (!this.chalkSystem.lastDrawPoint || this.chalkSystem.lastDrawPoint.distanceTo(hit.point) > 0.05) {
                         this.chalkSystem.addDot(hit.point, n, this.inventory.chalkColor);
                         // Los dibujos de tiza se comparten con toda la sala
@@ -3399,5 +3482,7 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-        new BackroomsGame();
+        // Manejador de depuracion (consola del navegador): inspeccionar el
+        // estado interno sin tocar la partida
+        window.__game = new BackroomsGame();
     });

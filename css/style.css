@@ -440,6 +440,13 @@
         .menu-box {
             max-width: 600px;
             width: 90%;
+            /* El menu puede ser MAS ALTO que la ventana en pantallas pequenas:
+               antes se salia por abajo sin poder desplazarse ("el menu es muy
+               grande para las pantallas de otros usuarios"). Ahora cabe
+               siempre y se desplaza si hace falta. */
+            max-height: 94vh;
+            overflow-y: auto;
+            overscroll-behavior: contain;
             border: 1px solid #4a4028;
             background: #14120c;
             padding: 35px;
@@ -768,6 +775,35 @@
         }
         body.touch-mode .menu-title {
             font-size: 24px;
+        }
+
+        /* Pantallas bajas (portatiles con la barra del navegador, ventanas
+           pequenas): el menu compacta su tipografia y margenes en vez de
+           desbordar. El texto largo del menu se reduce para que quepa. */
+        @media (max-height: 760px) {
+            .menu-box { padding: 20px 26px; }
+            .menu-title { font-size: 24px; margin-bottom: 4px; }
+            .menu-subtitle { margin-bottom: 12px; }
+            .menu-box p[style*="font-size: 12px"] {
+                font-size: 10.5px !important;
+                line-height: 1.55 !important;
+                margin-bottom: 12px !important;
+            }
+            .menu-box > div { margin-bottom: 10px !important; }
+            #menu-version { margin-top: 8px !important; }
+        }
+        @media (max-height: 600px) {
+            .menu-box { padding: 12px 18px; }
+            .menu-title { font-size: 20px; }
+            .menu-box p[style*="font-size: 12px"] {
+                max-height: 110px;
+                overflow: hidden;
+            }
+        }
+        /* Muy estrechas: el selector de version y el volumen no se salen */
+        @media (max-width: 430px) {
+            .version-picker-row { flex-direction: column; align-items: center; }
+            .version-picker-row select { width: 100%; flex: 1 1 auto; }
         }
 
         /* ================= MAPA COMPARTIDO ================= */

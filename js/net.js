@@ -37,25 +37,37 @@
             this.roomSeed = '';
 
             // Brokers publicos probados (WebSocket seguro + MQTT anonimo);
-            // si el primero no responde se prueba el siguiente.
+            // se intentan TODOS EN PARALELO y gana el primero que conecte
+            // (antes eran secuenciales: 2 x 8 s de timeout y el juego podia
+            // quedarse "sin conexion" hasta 16 s).
             this.brokers = [
                 { host: 'broker.hivemq.com', port: 8884, path: '/mqtt' },
                 { host: 'broker.emqx.io', port: 8084, path: '/mqtt' }
             ];
-            this.brokerIdx = 0;
+            this._connectingBrokers = false;
             this.directoryBrokerIdx = 0;
             this.directoryClient = null;
             this.directoryConnected = false;
+            this.directoryFailed = false;
+            this.directoryConnecting = false;
             this.roomDirectory = new Map(); // roomKey -> Map<pid, anuncio publico>
             this._directoryAdvertised = false;
             this._directoryTimer = 0;
 
             this.client = null;
             this.connected = false;   // socket MQTT arriba
+            this.connectionFailed = false; // todos los brokers fallaron
             this.joined = false;      // presencia publicada y sala confirmada
             this.snapshotDone = false;
             this.roomFull = false;
             this.isHost = true;       // quien simula la entidad (pid mas bajo)
+
+            // PING PROPIO real: eco por MQTT (publico en mi topico de ping y
+            // mido el RTT al broker). Va en el estado y en la tabla de
+            // jugadores; tambien adapta la interpolacion de los demas.
+            this.myRtt = undefined;
+            this.pingTimer = 0;
+            this._pingInFlight = 0;
 
             this.peers = new Map();   // pid -> { name, lastSeen, x,y,z,yaw, tx,ty,tz,tyaw, f }
             this.remotePlayers = new Map(); // pid -> { group, spot, tgt }
@@ -69,6 +81,10 @@
             this.entityTgt = null;
             this.fpsSource = null;   // () => fps local; game.js lo engancha
             this.entity = null;       // entidad local (solo la usa el host)
+            // Modo de bajo coste (variante Opt): la visibilidad del fantasma
+            // X-RAY no se recalcula cada frame, se espacia.
+            this.lowFreqMode = !!opts.lowFreqMode;
+            this._ghostTick = 0;
 
             this.pubTimer = 0;
             this.entPubTimer = 0;
@@ -155,9 +171,9 @@
             setTimeout(() => {
                 this._reconnecting = false;
                 if (!this.connected && this.roomKey) {
-                    this.brokerIdx = 0;
                     try { if (this.client) this.client.disconnect(); } catch (e) { /* noop */ }
                     this.client = null;
+                    this.connectionFailed = false;
                     this.connectNextBroker();
                 }
             }, 2500);
@@ -239,12 +255,22 @@
                 return;
             }
             if (this.directoryConnected && this.directoryClient) return;
-            this.directoryBrokerIdx = 0;
+            if (this.directoryConnecting) return;
+            // Reintentar si el intento anterior fallo
+            if (this.directoryFailed) this.directoryBrokerIdx = 0;
+            this.directoryFailed = false;
             this.connectDirectoryNext();
         }
 
         connectDirectoryNext() {
-            if (this.directoryBrokerIdx >= this.brokers.length || this.directoryConnected) return;
+            if (this.directoryConnected || this.directoryConnecting) return;
+            this.directoryConnecting = true;
+            this.directoryFailed = false;
+            if (this.directoryBrokerIdx >= this.brokers.length) {
+                this.directoryConnecting = false;
+                this.directoryFailed = true;
+                return;
+            }
             const b = this.brokers[this.directoryBrokerIdx++];
             const cid = 'fbd' + Math.random().toString(36).slice(2, 10);
             const PahoClient = (Paho.MQTT && Paho.MQTT.Client) || Paho.Client;
@@ -259,18 +285,24 @@
                 };
                 client.connect({
                     useSSL: true,
-                    timeout: 8,
+                    timeout: 5,
                     keepAliveInterval: 20,
                     cleanSession: true,
                     onSuccess: () => {
                         this.directoryClient = client;
                         this.directoryConnected = true;
+                        this.directoryConnecting = false;
+                        this.directoryFailed = false;
                         try { client.subscribe(this.directoryWildcard(), { qos: 0 }); } catch (e) { /* noop */ }
                         this.emitRoomListings();
                     },
-                    onFailure: () => this.connectDirectoryNext()
+                    onFailure: () => {
+                        this.directoryConnecting = false;
+                        this.connectDirectoryNext();
+                    }
                 });
             } catch (e) {
+                this.directoryConnecting = false;
                 this.connectDirectoryNext();
             }
         }
@@ -321,6 +353,9 @@
             this.roomSeed = roomOpts.seed == null ? this.roomKey : roomOpts.seed;
             this._directoryAdvertised = false;
             this.isHost = true;
+            // Nueva sala -> nueva medida de ping (otro canal/broker)
+            this.myRtt = undefined;
+            this._pingInFlight = 0;
 
             // PID PERSISTENTE por sala+nombre: al recargar o reiniciar la
             // pagina se reutiliza la misma identidad (mismo topico RETAINED),
@@ -341,24 +376,34 @@
                 this.onToast('⚠ MULTIJUGADOR NO DISPONIBLE · modo solitario');
                 return;
             }
-            this.brokerIdx = 0;
+            this.connectionFailed = false;
             this.connectNextBroker();
         }
 
+        // Conexion a la sala: se lanzan TODOS los brokers en paralelo y gana
+        // el primero que conecte (los perdedores se desconectan solos). Con
+        // timeout 5 s, el peor caso baja de ~16 s a ~5 s, y lo normal es
+        // entrar en 1-2 s.
         connectNextBroker() {
-            if (this.brokerIdx >= this.brokers.length) {
-                this.connected = false;
-                this.onToast('⚠ MULTIJUGADOR SIN CONEXIÓN · sigues en solitario');
-                return;
-            }
-            const b = this.brokers[this.brokerIdx++];
-            const cid = 'fb' + Math.random().toString(36).slice(2, 10);
-            // Paho 1.0.x expone Paho.MQTT.Client; 1.1.x (cdnjs) expone Paho.Client
+            if (this._connectingBrokers) return;
+            this._connectingBrokers = true;
+            this.connectionFailed = false;
+            this.connected = false;
             const PahoClient = (Paho.MQTT && Paho.MQTT.Client) || Paho.Client;
-            try {
-                this.client = new PahoClient(b.host, b.port, b.path, cid);
-                this.client.onMessageArrived = (m) => this.handleMessage(m);
-                this.client.onConnectionLost = (r) => {
+            const attempts = [];
+            for (let i = 0; i < this.brokers.length; i++) {
+                const b = this.brokers[i];
+                let client = null;
+                try {
+                    client = new PahoClient(b.host, b.port, b.path, 'fb' + Math.random().toString(36).slice(2, 10));
+                } catch (e) { /* broker inutilizable */ }
+                if (!client) continue;
+                const attempt = { client, done: false };
+                attempts.push(attempt);
+                client.onMessageArrived = (m) => this.handleMessage(m);
+                client.onConnectionLost = (r) => {
+                    // Solo reacciona el cliente que estaba en uso
+                    if (this.client !== client) return;
                     if (r.errorCode !== 0 && this.joined) {
                         this.connected = false;
                         this.joined = false;
@@ -366,16 +411,45 @@
                         this.scheduleReconnect();
                     }
                 };
-                this.client.connect({
-                    useSSL: true,
-                    timeout: 8,
-                    keepAliveInterval: 20,
-                    cleanSession: true,
-                    onSuccess: () => this.onConnect(),
-                    onFailure: () => this.connectNextBroker()
-                });
-            } catch (e) {
-                this.connectNextBroker();
+                const finish = (ok) => {
+                    if (attempt.done) return;
+                    attempt.done = true;
+                    if (ok && !this.connected) {
+                        this.connected = true;
+                        this.client = client;
+                        // Desconectar a los perdedores
+                        for (const a of attempts) {
+                            if (a !== attempt && !a.done) {
+                                a.done = true;
+                                try { a.client.disconnect(); } catch (e) { /* noop */ }
+                            }
+                        }
+                        this._connectingBrokers = false;
+                        this.onConnect();
+                    } else if (!ok && attempts.every(a => a.done)) {
+                        this._connectingBrokers = false;
+                        this.connectionFailed = true;
+                        this.connected = false;
+                        this.onToast('⚠ MULTIJUGADOR SIN CONEXIÓN · sigues en solitario');
+                    }
+                };
+                try {
+                    client.connect({
+                        useSSL: true,
+                        timeout: 5,
+                        keepAliveInterval: 20,
+                        cleanSession: true,
+                        onSuccess: () => finish(true),
+                        onFailure: () => finish(false)
+                    });
+                } catch (e) {
+                    finish(false);
+                }
+            }
+            if (!attempts.length) {
+                this._connectingBrokers = false;
+                this.connectionFailed = true;
+                this.onToast('⚠ MULTIJUGADOR SIN CONEXIÓN · sigues en solitario');
             }
         }
 
@@ -384,6 +458,7 @@
             const sub = (t) => this.client.subscribe(t, { qos: 0 });
             sub(this.presenceTopic('+'));
             sub(this.stateTopic('+'));
+            sub(this.pingTopic('+'));
             sub(this.entTopic());
             sub(this.claimTopic('+'));
             sub(this.chalkTopic());
@@ -396,7 +471,7 @@
             this.onToast('🛰 CONECTADO · sala ' + this.roomKey);
             // Pequena espera para recibir las presencias retenidas de los que
             // ya estaban, y asi saber cuantos somos antes de entrar de verdad
-            setTimeout(() => this.snapshot(), 1300);
+            setTimeout(() => this.snapshot(), 900);
         }
 
         snapshot() {
@@ -470,6 +545,7 @@
         // ----------------------------------------------------------------
         presenceTopic(pid) { return 'br0/' + this.roomKey + '/presence/' + pid; }
         stateTopic(pid) { return 'br0/' + this.roomKey + '/state/' + pid; }
+        pingTopic(pid) { return 'br0/' + this.roomKey + '/ping/' + pid; }
         entTopic() { return 'br0/' + this.roomKey + '/ent'; }
         claimTopic(pid) { return 'br0/' + this.roomKey + '/claims/' + pid; }
         chalkTopic() { return 'br0/' + this.roomKey + '/chalk'; }
@@ -491,14 +567,49 @@
                 // Se envia la posicion de los PIES (y = ojos - 1.55) para que el
                 // modelo remoto apoye en el suelo; la camara local esta a 1.55 m
                 // El fps local viaja con el estado: la tabla de jugadores
-                // muestra el rendimiento de cada explorador.
+                // muestra el rendimiento de cada explorador. Tambien viaja el
+                // RTT propio medido por eco: cada jugador informa de su ping
+                // REAL al broker (la tabla y la interpolacion lo usan).
                 this.client.send(this.stateTopic(this.pid), JSON.stringify({
                     x: pos.x, y: pos.y - 1.55, z: pos.z,
                     yaw: yaw, pitch: pitch,
                     f: flashlightOn ? 1 : 0, t: Date.now(),
-                    fps: this.fpsSource ? Math.round(this.fpsSource()) : 0
+                    fps: this.fpsSource ? Math.round(this.fpsSource()) : 0,
+                    r: typeof this.myRtt === 'number' ? Math.round(this.myRtt) : 0
                 }), 0, false);
             } catch (e) { /* noop */ }
+        }
+
+        // Mide el PING PROPIO de verdad: publica un eco en SU topico de ping
+        // (el broker lo devuelve a quien este suscrito, tambien a si mismo) y
+        // cronometra la vuelta. Antes la tabla mostraba un guion para el
+        // jugador local y los demas veian la estimacion por relojes (que con
+        // relojes desviados o subida movil marcaba 850-999 ms falsos).
+        publishPingEcho() {
+            if (!this.client || !this.connected || !this.joined) return;
+            // Si el eco anterior se perdio, se deja pasar tras 3 s
+            if (this._pingInFlight && Date.now() - this._pingInFlight > 3000) this._pingInFlight = 0;
+            if (Date.now() - this._pingInFlight < 1200) return;
+            this._pingInFlight = Date.now();
+            try {
+                this.client.send(this.pingTopic(this.pid), JSON.stringify({ p: this.pid, t: Date.now() }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
+        handlePingMessage(m) {
+            let d = {};
+            try { d = JSON.parse(m.payloadString); } catch (e) { return; }
+            if (!d || !d.t) return;
+            if (d.p === this.pid) {
+                // Eco de MI propio ping
+                const rtt = Date.now() - d.t;
+                if (rtt > 0 && rtt < 60000) {
+                    this.myRtt = this.myRtt === undefined ? rtt : this.myRtt * 0.7 + rtt * 0.3;
+                }
+                this._pingInFlight = 0;
+            } else {
+                // Ping de OTRO jugador: se ignora (su estado ya trae su rtt)
+            }
         }
 
         // Reclama un objeto recogido: solo el primero que lo coge se lo queda;
@@ -640,6 +751,12 @@
                 return;
             }
 
+            // Eco de ping (br0/sala/ping/<pid>): mide el RTT real al broker
+            if (kind === 'ping') {
+                this.handlePingMessage(m);
+                return;
+            }
+
             // Dibujos de tiza compartidos (br0/sala/chalk): sin pid, 3 segmentos
             if (kind === 'chalk') {
                 this.handleChalkMessage(m);
@@ -729,7 +846,8 @@
                         hasState: false,
                         hist: [],
                         timeBase: undefined,
-                        ping: undefined
+                        ping: undefined,
+                        rtt: undefined
                     });
                     if (this.snapshotDone && this.joined && !this.roomFull) {
                         this.onToast('👤 ' + this.peers.get(pid).name + ' entró en la sala');
@@ -767,6 +885,11 @@
                 p.tyaw = d.yaw || 0;
                 p.f = !!d.f;
                 p.fps = (typeof d.fps === 'number' && d.fps > 0) ? d.fps : p.fps;
+                // RTT REAL informado por el propio jugador (medido por eco en
+                // su maquina): la tabla y la interpolacion lo prefieren a la
+                // estimacion por relojes (que se disparaba a 850-999 ms con
+                // relojes desviados o subida movil).
+                if (typeof d.r === 'number' && d.r > 0 && d.r < 60000) p.rtt = d.r;
                 p.lastSeen = Date.now();
                 p.lastStateAt = Date.now();
                 // Historial con marcas de tiempo para interpolar con retraso
@@ -907,7 +1030,7 @@
 
             group.visible = false;
             this.scene.add(group);
-            this.remotePlayers.set(pid, { group, spot, tgt, sprite, ghost });
+            this.remotePlayers.set(pid, { group, spot, tgt, sprite, ghost, limbs: model.limbs || null, _phase: 0, _prevX: null, _prevZ: null });
         }
 
         makeNameSprite(name) {
@@ -1000,11 +1123,17 @@
         }
 
         // Linea de vision 2D para el contacto con el espectro (mismos muros
-        // en todos los clientes: el mundo es deterministico)
+        // en todos los clientes: el mundo es deterministico). Prefiltro por
+        // caja envolvente del segmento: las cajas que no tocan el rectangulo
+        // entre origen y destino no pueden tapar la vision y se saltan (el
+        // mundo tiene cientos de cajas, el segmento mide pocos metros).
         hasLOS(x0, z0, x1, z1, wallBoxes) {
             const dx = x1 - x0;
             const dz = z1 - z0;
+            const minX = Math.min(x0, x1) - 0.01, maxX = Math.max(x0, x1) + 0.01;
+            const minZ = Math.min(z0, z1) - 0.01, maxZ = Math.max(z0, z1) + 0.01;
             for (let box of wallBoxes) {
+                if (box.maxX < minX || box.minX > maxX || box.maxZ < minZ || box.minZ > maxZ) continue;
                 let tmin = 0, tmax = 1;
                 if (Math.abs(dx) < 0.0001) {
                     if (x0 < box.minX || x0 > box.maxX) continue;
@@ -1067,7 +1196,11 @@
                         Math.hypot(playerPos.x - this._lastPubPos.x, playerPos.z - this._lastPubPos.z) > 0.05 ||
                         Math.abs(yaw - this._lastPubYaw) > 0.02 ||
                         Math.abs(pitch - this._lastPubPitch) > 0.08;
-                    const idleBeat = Date.now() - (this._lastPubAt || 0) > 500;
+                    // Latido en reposo cada 200 ms (antes 500): un jugador
+                    // quieto (p. ej. dibujando con tiza) seguita mandando
+                    // posicion, y con conexiones lentas los demas no se
+                    // quedan sin datos ni extrapolan a la deriva.
+                    const idleBeat = Date.now() - (this._lastPubAt || 0) > 200;
                     if (moved || idleBeat) {
                         this._lastPubPos = playerPos.clone();
                         this._lastPubYaw = yaw;
@@ -1075,6 +1208,12 @@
                         this._lastPubAt = Date.now();
                         this.publishState(playerPos, yaw, pitch, flashlightOn);
                     }
+                }
+                // Eco de ping propio (~cada 3 s) para medir el RTT real
+                this.pingTimer += dt;
+                if (this.pingTimer > 3) {
+                    this.pingTimer = 0;
+                    this.publishPingEcho();
                 }
                 // Posicion de la entidad (solo el host la simula y publica)
                 this.entPubTimer += dt;
@@ -1094,9 +1233,15 @@
                 }
                 this._directoryTimer += dt;
                 if (this._directoryTimer > 7) {
-                    this._directoryTimer = 0;
-                    this.publishDirectoryPresence();
-                }
+            this._directoryTimer = 0;
+            this.publishDirectoryPresence();
+            // Si el directorio se cayo, se reintenta (el listado de salas
+            // publicas debe volver a funcionar solo)
+            if (!this.directoryConnected && !this.directoryConnecting && !this.connected) {
+                this.directoryBrokerIdx = 0;
+                this.connectDirectoryNext();
+            }
+        }
                 // Mapa compartido: snapshot periodico (~5 s) para que quien
                 // entre tarde reciba todo lo explorado por la sala
                 this.mapTimer += dt;
@@ -1149,11 +1294,22 @@
 
             // Interpolacion y render de los jugadores remotos. Se interpola
             // entre dos muestras RECIBIDAS (historial con marcas de tiempo)
-            // con un retraso de render fijo (~120 ms): el movimiento queda
-            // fluido y con mucho menos "arrastre" que la suavizacion
-            // exponencial (antes el modelo remoto iba 300-500 ms por detras
-            // del jugador real: "hay mucho ping y delay entre jugadores").
+            // con un retraso de render ADAPTATIVO: ~120 ms con red buena,
+            // mas si el otro jugador o el broker van lentos (con retraso fijo
+            // y latencias de 500-900 ms el modelo se congelaba y pegaba
+            // tirones: "veo a los jugadores moviendose con tirones").
             const nowMs = Date.now();
+            // Retraso de render comun: el peor RTT entre el mio y el del
+            // companero marca cuanto hay que esperar para no quedarse sin
+            // muestras (unos ~55% del RTT + 70 ms de colchon)
+            let maxPeerRtt = 0;
+            for (const p of this.peers.values()) {
+                if (p.rtt && p.rtt > maxPeerRtt) maxPeerRtt = p.rtt;
+            }
+            this._maxPeerRtt = maxPeerRtt;
+            const renderDelay = Math.max(120, Math.min(450,
+                Math.max(this.myRtt || 0, maxPeerRtt) * 0.55 + 70));
+            this._ghostTick++;
             for (const [pid, p] of this.peers) {
                 const r = this.remotePlayers.get(pid);
                 if (!r) continue;
@@ -1167,7 +1323,7 @@
                 } else {
                     const hist = p.hist;
                     if (hist && hist.length >= 2) {
-                        const target = nowMs - 120;
+                        const target = nowMs - renderDelay;
                         let a = hist[0], b = hist[hist.length - 1];
                         for (let i = 0; i < hist.length - 1; i++) {
                             if (hist[i].t <= target && hist[i + 1].t >= target) { a = hist[i]; b = hist[i + 1]; break; }
@@ -1175,12 +1331,15 @@
                         let f = (b.t - a.t) > 0.001 ? (target - a.t) / (b.t - a.t) : 1;
                         if (target > b.t) {
                             // Sin datos mas alla de la ultima muestra: si el
-                            // ultimo mensaje es viejo (micro-corte del broker)
-                            // nos quedamos en la ultima posicion conocida;
-                            // si no, extrapolamos un tramo corto para que el
-                            // movimiento no se congele entre mensajes.
-                            const stale = nowMs - (p.lastStateAt || 0) > 350;
-                            f = stale ? 1 : Math.min(1 + (target - b.t) / Math.max(0.001, b.t - a.t), 1.4);
+                            // ultimo mensaje es viejo (micro-corte del broker
+                            // o latencia alta) nos quedamos en la ultima
+                            // posicion conocida; si no, extrapolamos un tramo
+                            // corto para que el movimiento no se congele.
+                            // El umbral se adapta a la latencia real: con
+                            // 500-900 ms de ping, 350 ms fijos lo dejaban
+                            // congelado casi siempre.
+                            const stale = nowMs - (p.lastStateAt || 0) > Math.max(450, (p.rtt || 0) + 300);
+                            f = stale ? 1 : Math.min(1 + (target - b.t) / Math.max(0.001, b.t - a.t), 1.3);
                         } else if (target < a.t) {
                             f = 0;
                         }
@@ -1196,6 +1355,19 @@
                 if (p.y < 0 || p.y > 0.1) p.y = Math.max(0, Math.min(0.1, p.y));
                 // p.y es la altura de los pies: el modelo se ancla al suelo
                 r.group.position.set(p.x, p.y, p.z);
+                // Animacion de caminar: la velocidad sale de la distancia
+                // entre frames (el modelo camina de verdad, no es un maniqui
+                // que se desliza). Sin movimiento, vuelve al reposo.
+                if (r.limbs) {
+                    const dx = p.x - (r._prevX === null ? p.x : r._prevX);
+                    const dz = p.z - (r._prevZ === null ? p.z : r._prevZ);
+                    const spd = Math.min(1, Math.hypot(dx, dz) / Math.max(0.001, dt * 1.6));
+                    if (spd < 0.03) r._phase = 0;
+                    else r._phase += Math.hypot(dx, dz) * 4.0;
+                    animateExplorerWalk(r, r._phase, spd);
+                    r._prevX = p.x;
+                    r._prevZ = p.z;
+                }
                 // El modelo mira hacia +Z local (la linterna y la cara estan
                 // en +Z) y el forward del jugador es (-sin, -cos): sin el
                 // giro de 180° los demas veian tu ESPALDA (y la linterna
@@ -1223,17 +1395,23 @@
                     if (r.ghost) {
                         r.ghost.position.copy(r.group.position);
                         r.ghost.rotation.y = r.group.rotation.y;
-                        let blocked = !this.hasLOS(
-                            this.camera.position.x, this.camera.position.z,
-                            p.x, p.z, wallBoxes
-                        );
-                        if (!blocked && furnitureBoxes) {
-                            blocked = !this.hasLOS(
+                        // En la variante Opt el tanteo de linea de vision no
+                        // se repite cada frame (cuesta un barrido de cajas por
+                        // jugador remoto): se recalcula 1 de cada 4 frames.
+                        if (!this.lowFreqMode || (this._ghostTick & 3) === 0) {
+                            let blocked = !this.hasLOS(
                                 this.camera.position.x, this.camera.position.z,
-                                p.x, p.z, furnitureBoxes
+                                p.x, p.z, wallBoxes
                             );
+                            if (!blocked && furnitureBoxes) {
+                                blocked = !this.hasLOS(
+                                    this.camera.position.x, this.camera.position.z,
+                                    p.x, p.z, furnitureBoxes
+                                );
+                            }
+                            r._ghostBlocked = blocked;
                         }
-                        r.ghost.visible = blocked;
+                        r.ghost.visible = !!r._ghostBlocked;
                     }
                 } else if (r.ghost) {
                     r.ghost.visible = false;
@@ -1260,15 +1438,20 @@
             return this.emitRoomListings();
         }
 
-        // Texto para el HUD: sala, ocupacion y rol
+        // Texto para el HUD: sala, ocupacion y rol. Mientras se intenta
+        // conectar se dice CONECTANDO (antes se leia "SIN CONEXIÓN" durante
+        // los primeros segundos, aunque la conexion estuviera en marcha).
         hudText() {
             if (!this.connected && !this.joined) {
-                return this.roomKey ? ('SALA ' + this.roomKey + ' · SOLO (SIN CONEXIÓN)') : 'MULTIJUGADOR: SOLO';
+                if (this.connectionFailed) {
+                    return this.roomKey ? ('SALA ' + this.roomKey + ' · SOLO (SIN CONEXIÓN)') : 'MULTIJUGADOR: SOLO';
+                }
+                return this.roomKey ? ('SALA ' + this.roomKey + ' · CONECTANDO…') : 'MULTIJUGADOR: SOLO';
             }
             if (this.roomFull) return 'SALA LLENA (' + this.MAX_PLAYERS + '/' + this.MAX_PLAYERS + ') · SOLO';
             const count = this.peers.size + 1;
             return 'SALA ' + this.roomKey + ' · ' + count + '/' + this.MAX_PLAYERS +
-                (this.isHost ? ' · ANFITRIÓN' : '');
+                (this.isHost ? ' · ANFITRIÓN' : '') + (this.myRtt !== undefined ? ' · ' + Math.round(this.myRtt) + ' ms' : '');
         }
     }
 
