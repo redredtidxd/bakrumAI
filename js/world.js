@@ -29,6 +29,13 @@
         // Moqueta textil exterior (assets/floor-texture.png): mate, sin brillo
         floor: new THREE.MeshStandardMaterial({ map: FloorCarpetTexture, roughness: 0.95 }),
         ceiling: new THREE.MeshStandardMaterial({ map: ceilingTex, roughness: 0.95, metalness: 0.0 }),
+        // Materiales de la cabina de seguridad: no son papel pintado suelto,
+        // sino paneles metalicos oscuros con remates visibles. La estructura
+        // se monta dentro del bolsillo y sus cajas se anaden a la colision.
+        securityWall: new THREE.MeshStandardMaterial({ color: 0x55585a, metalness: 0.48, roughness: 0.68 }),
+        securityTrim: new THREE.MeshStandardMaterial({ color: 0x24282b, metalness: 0.78, roughness: 0.38 }),
+        securityFloor: new THREE.MeshStandardMaterial({ color: 0x242927, metalness: 0.22, roughness: 0.86 }),
+        securityCeiling: new THREE.MeshStandardMaterial({ color: 0x303437, metalness: 0.4, roughness: 0.72 }),
         // Tulipas emisivas: los paneles lejanos brillan siempre a traves de la niebla,
         // sin necesidad de cientos de PointLights dinamicos
         lampLit: new THREE.MeshStandardMaterial({
@@ -962,10 +969,11 @@
             // pared: con el 25% de antes salian ~1 de cada 4 chunks (demasiado
             // comunes para un refugio raro). Con 0.15 vuelven a ~1 de cada 7.
             if (r() >= 0.15) return;
-            // Sala PEQUEÑA a proposito (como la oficina de FNAF): 2x2, 2x3 o
-            // 3x2 celdas (5,6-8,4 m). Antes eran de 3x3 a 4x4 celdas
-            // (8,4-11,2 m) y no parecia un refugio, sino una sala mas.
-            const sizes = [[2, 2], [2, 3], [3, 2]];
+            // Cabina PEQUENA y ESTRECHA a proposito: 1x2, 2x1 o 1x3
+            // celdas (2,8x5,6 m como maximo). Antes eran 2x2/2x3/3x2 y,
+            // al no tener una carcasa propia, parecian una sala abierta con
+            // tres pantallas flotando.
+            const sizes = [[1, 2], [2, 1], [1, 3]];
             const order = [0, 1, 2];
             for (let i = order.length - 1; i > 0; i--) {
                 const j = Math.floor(r() * (i + 1));
@@ -975,8 +983,8 @@
                 const [w, h] = sizes[oi];
                 const spots = [];    // bolsillos con 1 boca (FNAF perfecto)
                 const sealed = [];   // bolsillos sellados con boca tallable
-                for (let rx = 2; rx <= N - 2 - w; rx++) {
-                    for (let rz = 2; rz <= N - 2 - h; rz++) {
+                for (let rx = 3; rx <= N - 3 - w; rx++) {
+                    for (let rz = 3; rz <= N - 3 - h; rz++) {
                         let interiorWall = true;
                         for (let dx = 0; dx < w && interiorWall; dx++) {
                             for (let dz = 0; dz < h && interiorWall; dz++) {
@@ -2171,26 +2179,148 @@
             const C = CELL_SIZE;
             const ox = ch.cx * N * C;
             const oz = ch.cz * N * C;
-            const dc = sr.doorX, dz = sr.doorZ;
-            const dcx0 = ox + dc * C, dcz0 = oz + dz * C;
-            // Plano de la puerta: entre la celda de la boca y el interior
-            let plane = 'x', doorX = 0, doorZ = 0;
-            if (dc === sr.rx - 1) { plane = 'x'; doorX = ox + sr.rx * C; doorZ = dcz0 + C / 2; }
-            else if (dc === sr.rx + sr.w) { plane = 'x'; doorX = ox + (sr.rx + sr.w) * C; doorZ = dcz0 + C / 2; }
-            else if (dz === sr.rz - 1) { plane = 'z'; doorX = dcx0 + C / 2; doorZ = oz + sr.rz * C; }
-            else { plane = 'z'; doorX = dcx0 + C / 2; doorZ = oz + (sr.rz + sr.h) * C; }
+            const dc = sr.doorX, doorCellZ = sr.doorZ;
+            const dcx0 = ox + dc * C, dcz0 = oz + doorCellZ * C;
+            // Limites del bolsillo en el mundo. La cabina se construye dentro
+            // de este rectangulo: ya no depende de que las paredes aleatorias
+            // del laberinto parezcan cerrar la sala.
+            const rmMinX = ox + sr.rx * C, rmMaxX = ox + (sr.rx + sr.w) * C;
+            const rmMinZ = oz + sr.rz * C, rmMaxZ = oz + (sr.rz + sr.h) * C;
+            const rmCX = (rmMinX + rmMaxX) / 2, rmCZ = (rmMinZ + rmMaxZ) / 2;
+            const shellT = 0.16;
+            const shellInset = 0.08;
+            const shellX0 = rmMinX + shellInset, shellX1 = rmMaxX - shellInset;
+            const shellZ0 = rmMinZ + shellInset, shellZ1 = rmMaxZ - shellInset;
+            const shellH = WALL_HEIGHT - 0.02;
+            // La cabina es deliberadamente estrecha: la puerta no puede
+            // ocupar casi toda la pared ni dejar una falsa sensacion de sala
+            // abierta. El ancho util de 1,18 m deja jambas y paneles visibles.
+            const doorWidth = 1.18;
+            const doorHeight = 2.46;
+            const hasWideWall = sr.w >= 2 || sr.h >= 2;
 
-            const doorModel = createMetalDoorModel();
+            let doorSide = 'W', plane = 'x', doorX = 0, doorZ = 0;
+            if (dc === sr.rx - 1) doorSide = 'W';
+            else if (dc === sr.rx + sr.w) doorSide = 'E';
+            else if (doorCellZ === sr.rz - 1) doorSide = 'N';
+            else doorSide = 'S';
+            plane = doorSide === 'W' || doorSide === 'E' ? 'x' : 'z';
+
+            // La celda de la boca puede quedar pegada a una esquina. Se
+            // centra dentro de la pared de la cabina y se limita para que las
+            // jambas nunca tapen la entrada estrecha.
+            const tangent0 = plane === 'x' ? shellZ0 : shellX0;
+            const tangent1 = plane === 'x' ? shellZ1 : shellX1;
+            const rawDoorT = plane === 'x' ? dcz0 + C / 2 : dcx0 + C / 2;
+            const doorT = Math.max(tangent0 + doorWidth / 2 + 0.08,
+                Math.min(tangent1 - doorWidth / 2 - 0.08, rawDoorT));
+            if (plane === 'x') {
+                doorX = doorSide === 'W' ? shellX0 : shellX1;
+                doorZ = doorT;
+            } else {
+                doorX = doorT;
+                doorZ = doorSide === 'N' ? shellZ0 : shellZ1;
+            }
+
+            const doorModel = createMetalDoorModel(doorWidth, doorHeight);
             doorModel.position.set(doorX, 0, doorZ);
             if (plane === 'z') doorModel.rotation.y = Math.PI / 2;
             this.scene.add(doorModel);
             ch.meshes.push(doorModel);
 
-            // Limites de la sala en el mundo (se usan para colocar los
-            // monitores ANTES de rellenar sr):
-            const rmMinX = ox + sr.rx * C, rmMaxX = ox + (sr.rx + sr.w) * C;
-            const rmMinZ = oz + sr.rz * C, rmMaxZ = oz + (sr.rz + sr.h) * C;
-            const rmCX = (rmMinX + rmMaxX) / 2, rmCZ = (rmMinZ + rmMaxZ) / 2;
+            // ------------------------------------------------------------
+            // ESTRUCTURA REAL DE LA SALA: suelo, techo y cuatro paredes de
+            // panel metalico. La pared de la puerta se parte en dos; el vano
+            // queda verdaderamente vacio cuando la hoja sube al techo.
+            // ------------------------------------------------------------
+            const addShellPanel = (minX, maxX, minZ, maxZ, mat = Materials.securityWall) => {
+                if (maxX - minX < 0.03 || maxZ - minZ < 0.03) return;
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(maxX - minX, shellH, maxZ - minZ), mat);
+                mesh.position.set((minX + maxX) / 2, shellH / 2, (minZ + maxZ) / 2);
+                mesh.userData.isSecurityStructure = true;
+                this.scene.add(mesh);
+                ch.meshes.push(mesh);
+                ch.wallBoxes.push({ minX, maxX, minZ, maxZ, securityStructure: true });
+            };
+            const addXWall = (x0, x1, z0, z1) => addShellPanel(x0, x1, z0, z1);
+            const addZWall = (x0, x1, z0, z1) => addShellPanel(x0, x1, z0, z1);
+            const addSplitXWall = (x0, x1) => {
+                addXWall(x0, x1, shellZ0, doorT - doorWidth / 2);
+                addXWall(x0, x1, doorT + doorWidth / 2, shellZ1);
+            };
+            const addSplitZWall = (z0, z1) => {
+                addZWall(shellX0, doorT - doorWidth / 2, z0, z1);
+                addZWall(doorT + doorWidth / 2, shellX1, z0, z1);
+            };
+            if (doorSide === 'W') addSplitXWall(shellX0, shellX0 + shellT);
+            else addXWall(shellX0, shellX0 + shellT, shellZ0, shellZ1);
+            if (doorSide === 'E') addSplitXWall(shellX1 - shellT, shellX1);
+            else addXWall(shellX1 - shellT, shellX1, shellZ0, shellZ1);
+            if (doorSide === 'N') addSplitZWall(shellZ0, shellZ0 + shellT);
+            else addZWall(shellX0, shellX1, shellZ0, shellZ0 + shellT);
+            if (doorSide === 'S') addSplitZWall(shellZ1 - shellT, shellZ1);
+            else addZWall(shellX0, shellX1, shellZ1 - shellT, shellZ1);
+
+            // Suelo tecnico elevado y techo bajo: hacen evidente que es una
+            // cabina cerrada, no una coleccion de pantallas en mitad del mapa.
+            const innerW = Math.max(0.6, shellX1 - shellX0 - shellT * 2);
+            const innerD = Math.max(0.6, shellZ1 - shellZ0 - shellT * 2);
+            const floorPanel = new THREE.Mesh(new THREE.BoxGeometry(innerW, 0.035, innerD), Materials.securityFloor);
+            floorPanel.position.set((shellX0 + shellX1) / 2, 0.018, (shellZ0 + shellZ1) / 2);
+            floorPanel.userData.isSecurityStructure = true;
+            this.scene.add(floorPanel);
+            ch.meshes.push(floorPanel);
+            const ceilingPanel = new THREE.Mesh(new THREE.BoxGeometry(innerW + 0.04, 0.09, innerD + 0.04), Materials.securityCeiling);
+            ceilingPanel.position.set((shellX0 + shellX1) / 2, WALL_HEIGHT - 0.045, (shellZ0 + shellZ1) / 2);
+            ceilingPanel.userData.isSecurityStructure = true;
+            this.scene.add(ceilingPanel);
+            ch.meshes.push(ceilingPanel);
+
+            // Remates horizontales y esquineros: la estructura se lee incluso
+            // con la linterna apagada y las juntas no parecen paredes sueltas.
+            const addTrim = (w, h, d, x, y, z) => {
+                const trim = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), Materials.securityTrim);
+                trim.position.set(x, y, z);
+                trim.userData.isSecurityStructure = true;
+                this.scene.add(trim);
+                ch.meshes.push(trim);
+            };
+            addTrim(innerW + shellT * 2, 0.07, 0.07, rmCX, 0.22, shellZ0 + shellT + 0.01);
+            addTrim(innerW + shellT * 2, 0.07, 0.07, rmCX, 0.22, shellZ1 - shellT - 0.01);
+            addTrim(0.07, 0.07, innerD + shellT * 2, shellX0 + shellT + 0.01, 0.22, rmCZ);
+            addTrim(0.07, 0.07, innerD + shellT * 2, shellX1 - shellT - 0.01, 0.22, rmCZ);
+            addTrim(innerW + shellT * 2, 0.08, 0.08, rmCX, shellH - 0.16, shellZ0 + shellT + 0.01);
+            addTrim(innerW + shellT * 2, 0.08, 0.08, rmCX, shellH - 0.16, shellZ1 - shellT - 0.01);
+            addTrim(0.08, 0.08, innerD + shellT * 2, shellX0 + shellT + 0.01, shellH - 0.16, rmCZ);
+            addTrim(0.08, 0.08, innerD + shellT * 2, shellX1 - shellT - 0.01, shellH - 0.16, rmCZ);
+
+            // Marcos de la puerta: sus jambas tambien son solidas; el hueco
+            // central solo se bloquea con doorBox mientras la hoja esta abajo.
+            const frameT = 0.17;
+            const addFrameBox = (minX, maxX, minZ, maxZ) => {
+                addTrim(maxX - minX, shellH - 0.14, maxZ - minZ,
+                    (minX + maxX) / 2, (shellH - 0.14) / 2, (minZ + maxZ) / 2);
+                ch.wallBoxes.push({ minX, maxX, minZ, maxZ, securityFrame: true });
+            };
+            if (plane === 'x') {
+                addFrameBox(doorX - 0.09, doorX + 0.09, doorT - doorWidth / 2 - frameT / 2, doorT - doorWidth / 2 + frameT / 2);
+                addFrameBox(doorX - 0.09, doorX + 0.09, doorT + doorWidth / 2 - frameT / 2, doorT + doorWidth / 2 + frameT / 2);
+            } else {
+                addFrameBox(doorT - doorWidth / 2 - frameT / 2, doorT - doorWidth / 2 + frameT / 2, doorZ - 0.09, doorZ + 0.09);
+                addFrameBox(doorT + doorWidth / 2 - frameT / 2, doorT + doorWidth / 2 + frameT / 2, doorZ - 0.09, doorZ + 0.09);
+            }
+            const securityLight = new THREE.PointLight(0xb9c989, 0.42, 8, 2);
+            securityLight.position.set(rmCX, 2.12, rmCZ);
+            this.scene.add(securityLight);
+            ch.meshes.push(securityLight);
+
+            sr.shellMinX = shellX0;
+            sr.shellMaxX = shellX1;
+            sr.shellMinZ = shellZ0;
+            sr.shellMaxZ = shellZ1;
+            sr.doorSide = doorSide;
+            sr.doorWidth = doorWidth;
+            sr.doorHeight = doorHeight;
 
             // Panel de control (pantalla de pila) en la pared interior, junto
             // a la puerta, mirando hacia dentro de la sala
@@ -2216,10 +2346,22 @@
             panelBox.add(panelScreen);
             panelGroup.add(panelBox);
             const py = 1.08;
-            if (dc === sr.rx - 1) { panelGroup.position.set(ox + sr.rx * C + 0.12, py, dcz0 + C / 2); panelGroup.rotation.y = Math.PI / 2; }
-            else if (dc === sr.rx + sr.w) { panelGroup.position.set(ox + (sr.rx + sr.w) * C - 0.12, py, dcz0 + C / 2); panelGroup.rotation.y = -Math.PI / 2; }
-            else if (dz === sr.rz - 1) { panelGroup.position.set(dcx0 + C / 2, py, oz + sr.rz * C + 0.12); panelGroup.rotation.y = Math.PI; }
-            else { panelGroup.position.set(dcx0 + C / 2, py, oz + (sr.rz + sr.h) * C - 0.12); panelGroup.rotation.y = 0; }
+            // Panel de bateria en la pared contigua a la puerta, nunca delante
+            // del vano: queda al alcance de la mano nada mas entrar.
+            if (doorSide === 'W') {
+                panelGroup.position.set(shellX0 + shellT + 0.055, py, shellZ0 + shellT + 0.42);
+                panelGroup.rotation.y = Math.PI / 2;
+            } else if (doorSide === 'E') {
+                panelGroup.position.set(shellX1 - shellT - 0.055, py, shellZ0 + shellT + 0.42);
+                panelGroup.rotation.y = -Math.PI / 2;
+            } else if (doorSide === 'N') {
+                panelGroup.position.set(shellX0 + shellT + 0.42, py, shellZ0 + shellT + 0.055);
+                panelGroup.rotation.y = 0;
+            } else {
+                panelGroup.position.set(shellX0 + shellT + 0.42, py, shellZ1 - shellT - 0.055);
+                panelGroup.rotation.y = Math.PI;
+            }
+            panelGroup.userData.isSecurityPanel = true;
             this.scene.add(panelGroup);
             ch.meshes.push(panelGroup);
 
@@ -2232,44 +2374,62 @@
             // E -> rotY -PI/2. (Antes solo habia uno y, con la puerta al
             // norte, se giraba hacia la pared: se veia el dorso.)
             const monitors = [];
-            const my = 0.75;
-            const monOff = 0.13;
-            const addMonitor = (mx, mz, ry) => {
+            const my = 0.95;
+            // El centro se separa del panel por el grosor de la pared: la caja
+            // queda embutida y la pantalla sobresale, asi no vuelve a flotar.
+            const monitorMount = shellT + 0.155 + 0.012;
+            const west = shellX0 + monitorMount, east = shellX1 - monitorMount;
+            const north = shellZ0 + monitorMount, south = shellZ1 - monitorMount;
+            // En una cabina de una celda no caben tres CRT de 1,5 m: se
+            // montan en paredes opuestas/laterales alternas, centrados y sin
+            // salir de la carcasa. En las cabinas 1x2/1x3 caben tres, pero
+            // nunca se coloca una pantalla sobre la pared del vano.
+            const fitMonitor = (wallName, mx, mz, ry) => {
+                const roomW = shellX1 - shellX0;
+                const roomD = shellZ1 - shellZ0;
+                const tooTight = (wallName === 'N' || wallName === 'S') ? roomW < 2.25 : roomD < 2.25;
+                if (tooTight) return;
+                // En una cabina 1xN solo hay una pared larga util: mas de un
+                // CRT en las paredes cortas invade la carcasa y vuelve a
+                // parecer flotante. En 2xN sí caben tres pantallas grandes.
+                if (!hasWideWall && monitors.length > 0) return;
+                addMonitor(mx, mz, ry, wallName);
+            };
+            const addMonitor = (mx, mz, ry, wallName) => {
                 const m = createMonitorScreenModel(monitors.length + 1);
                 m.position.set(mx, my, mz);
                 m.rotation.y = ry;
+                m.userData.isSecurityMonitor = true;
+                m.userData.securityWall = wallName;
                 this.scene.add(m);
                 ch.meshes.push(m);
                 monitors.push(m);
             };
-            const west = rmMinX + monOff, east = rmMaxX - monOff;
-            const north = rmMinZ + monOff, south = rmMaxZ - monOff;
-            if (dc === sr.rx - 1) {
-                // Puerta al OESTE: opuesto = pared ESTE; laterales = N y S
-                addMonitor(east, rmCZ, -Math.PI / 2);
-                addMonitor(rmCX, north, 0);
-                addMonitor(rmCX, south, Math.PI);
-            } else if (dc === sr.rx + sr.w) {
-                // Puerta al ESTE: opuesto = pared OESTE; laterales = N y S
-                addMonitor(west, rmCZ, Math.PI / 2);
-                addMonitor(rmCX, north, 0);
-                addMonitor(rmCX, south, Math.PI);
-            } else if (dz === sr.rz - 1) {
-                // Puerta al NORTE: opuesto = pared SUR; laterales = E y O
-                addMonitor(rmCX, south, Math.PI);
-                addMonitor(west, rmCZ, Math.PI / 2);
-                addMonitor(east, rmCZ, -Math.PI / 2);
+            if (doorSide === 'W') {
+                // Puerta al OESTE: pantalla opuesta al ESTE y dos laterales.
+                fitMonitor('E', east, rmCZ, -Math.PI / 2);
+                fitMonitor('N', rmCX, north, 0);
+                fitMonitor('S', rmCX, south, Math.PI);
+            } else if (doorSide === 'E') {
+                fitMonitor('W', west, rmCZ, Math.PI / 2);
+                fitMonitor('N', rmCX, north, 0);
+                fitMonitor('S', rmCX, south, Math.PI);
+            } else if (doorSide === 'N') {
+                fitMonitor('S', rmCX, south, Math.PI);
+                fitMonitor('W', west, rmCZ, Math.PI / 2);
+                fitMonitor('E', east, rmCZ, -Math.PI / 2);
             } else {
-                // Puerta al SUR: opuesto = pared NORTE; laterales = E y O
-                addMonitor(rmCX, north, 0);
-                addMonitor(west, rmCZ, Math.PI / 2);
-                addMonitor(east, rmCZ, -Math.PI / 2);
+                fitMonitor('N', rmCX, north, 0);
+                fitMonitor('W', west, rmCZ, Math.PI / 2);
+                fitMonitor('E', east, rmCZ, -Math.PI / 2);
             }
 
-            // Caja de colision de la puerta cerrada (bloquea jugador y entidad)
+            // Caja del vano: solo tapa el hueco de la hoja, no toda la celda.
+            // El marco permanece en las dos jambas; esta caja es la hoja
+            // deslizante y se incluye solo cuando la puerta esta cerrada.
             const doorBox = plane === 'x'
-                ? { minX: doorX - 0.06, maxX: doorX + 0.06, minZ: dcz0 - 0.05, maxZ: dcz0 + C + 0.05 }
-                : { minX: dcx0 - 0.05, maxX: dcx0 + C + 0.05, minZ: doorZ - 0.06, maxZ: doorZ + 0.06 };
+                ? { minX: doorX - 0.09, maxX: doorX + 0.09, minZ: doorT - doorWidth / 2, maxZ: doorT + doorWidth / 2, securityDoor: true }
+                : { minX: doorT - doorWidth / 2, maxX: doorT + doorWidth / 2, minZ: doorZ - 0.09, maxZ: doorZ + 0.09, securityDoor: true };
 
             sr.id = 'sec:' + ch.cx + ':' + ch.cz + ':' + sr.rx + ':' + sr.rz;
             sr.doorModel = doorModel;
@@ -2278,6 +2438,7 @@
             sr.doorBox = doorBox;
             sr.doorWorldX = doorX;
             sr.doorWorldZ = doorZ;
+            sr.doorT = doorT;
             sr.panelCanvas = panelCanvas;
             sr.panelTex = panelTex;
             sr.monitors = monitors;
@@ -2303,16 +2464,20 @@
             const N = CHUNK_SIZE;
             const C = CELL_SIZE;
             const rng = mulberry32(hash2(ch.cx * 9001 + 7, ch.cz * 7001 + 313));
-            // Reset al reconstruir el chunk: sin duplicados al recargar
+            // Reset al reconstruir el chunk: sin duplicados al recargar. Una
+            // cabina de seguridad siempre obtiene cámaras exteriores para sus
+            // monitores; los chunks normales siguen teniendo cámaras raras.
             ch.cameras = [];
-            if (rng() >= 0.45) return;   // ~1 de cada 2,2 chunks: mas comunes
+            const sr = ch.securityRoom;
+            const insideRoom = (x, z) => !!sr && x >= sr.rx && x < sr.rx + sr.w && z >= sr.rz && z < sr.rz + sr.h;
+            if (!sr && rng() >= 0.45) return;
             const g = ch.grid;
             const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
             const cands = [];
             for (let x = 1; x < N - 1; x++) {
                 for (let z = 1; z < N - 1; z++) {
                     const k = key(x, z);
-                    if (g[x][z] !== 1 || curvedCells.has(k)) continue;
+                    if (g[x][z] !== 1 || curvedCells.has(k) || insideRoom(x, z)) continue;
                     const kind = wallKind.get(k);
                     if (kind !== 'x' && kind !== 'z') continue;
                     if (ch.graffitiCells && ch.graffitiCells.has(x + ',' + z)) continue;
@@ -2322,6 +2487,11 @@
                         const nx = x + dx, nz = z + dz;
                         if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
                         if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        // Una cámara cuyo objetivo sería una celda de la cabina
+                        // queda dentro de la sala de seguridad (aunque la pared
+                        // original del laberinto siga debajo de la estructura):
+                        // está prohibida. Las cámaras solo vigilan el exterior.
+                        if (insideRoom(nx, nz)) continue;
                         if ((d === 'W' && x === 0) || (d === 'E' && x === N - 1) ||
                             (d === 'S' && z === 0) || (d === 'N' && z === N - 1)) continue;
                         const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
@@ -2331,22 +2501,29 @@
                 }
             }
             if (!cands.length) return;
-            const c = cands[Math.floor(rng() * cands.length)];
-            const box = ch.wallFaceMap.get(key(c[0], c[1]));
-            if (!box) return;
-            const m = createSecurityCameraModel();
-            const mx = ch.cx * N * C + (c[0] + 0.5) * C;
-            const mz = ch.cz * N * C + (c[1] + 0.5) * C;
-            const off = 0.022 + 0.1;
-            let ry = 0;
-            if (c[2] === 'W') { m.position.set(box.minX - off, 2.28, mz); ry = -Math.PI / 2; }
-            else if (c[2] === 'E') { m.position.set(box.maxX + off, 2.28, mz); ry = Math.PI / 2; }
-            else if (c[2] === 'S') { m.position.set(mx, 2.28, box.minZ - off); ry = Math.PI; }
-            else { m.position.set(mx, 2.28, box.maxZ + off); ry = 0; }
-            m.rotation.y = ry;
-            this.scene.add(m);
-            ch.meshes.push(m);
-            ch.cameras.push({ group: m, x: m.position.x, z: m.position.z, dir: c[2], baseRy: ry });
+            // En una cabina se colocan hasta 3 cámaras EXTERIORES; el resto
+            // del mundo conserva una sola cámara ocasional por chunk.
+            const want = sr ? Math.min(3, cands.length) : 1;
+            for (let n = 0; n < want && cands.length; n++) {
+                const ci = Math.floor(rng() * cands.length);
+                const c = cands.splice(ci, 1)[0];
+                const box = ch.wallFaceMap.get(key(c[0], c[1]));
+                if (!box) continue;
+                const m = createSecurityCameraModel();
+                const mx = ch.cx * N * C + (c[0] + 0.5) * C;
+                const mz = ch.cz * N * C + (c[1] + 0.5) * C;
+                const off = 0.122;
+                let ry = 0;
+                if (c[2] === 'W') { m.position.set(box.minX - off, 2.28, mz); ry = -Math.PI / 2; }
+                else if (c[2] === 'E') { m.position.set(box.maxX + off, 2.28, mz); ry = Math.PI / 2; }
+                else if (c[2] === 'S') { m.position.set(mx, 2.28, box.minZ - off); ry = Math.PI; }
+                else { m.position.set(mx, 2.28, box.maxZ + off); ry = 0; }
+                m.rotation.y = ry;
+                m.userData.isExteriorSecurityCamera = !!sr;
+                this.scene.add(m);
+                ch.meshes.push(m);
+                ch.cameras.push({ group: m, x: m.position.x, z: m.position.z, dir: c[2], baseRy: ry, exterior: !!sr });
+            }
         }
 
         // ---- GRAFITI (100 variantes, blanco/negro/rojo) sobre las paredes ----

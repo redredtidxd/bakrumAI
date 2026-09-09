@@ -801,24 +801,47 @@
     // (con pantalla de pila) lo coloca world.js en la pared interior.
     // userData.door es el grupo de paneles que game.js desliza en Y.
     // ------------------------------------------------------------------
-    function createMetalDoorModel() {
+    function createMetalDoorModel(width = 2.22, height = 2.46) {
         const group = new THREE.Group();
-        const metalMat = new THREE.MeshStandardMaterial({ color: 0x5a616b, metalness: 0.75, roughness: 0.45 });
-        const frameMat = new THREE.MeshStandardMaterial({ color: 0x33363c, metalness: 0.6, roughness: 0.5 });
+        const metalMat = new THREE.MeshStandardMaterial({ color: 0x5a616b, metalness: 0.78, roughness: 0.42 });
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x292d33, metalness: 0.72, roughness: 0.38 });
+        const warningMat = new THREE.MeshStandardMaterial({ color: 0xb38a32, metalness: 0.35, roughness: 0.5 });
 
-        const frame = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.4, 2.88), frameMat);
-        frame.position.y = 1.2;
-        group.add(frame);
+        // Marco REAL: jambas y dintel, nunca una caja maciza delante del vano.
+        // El modelo anterior usaba un BoxGeometry entero como "marco" y por
+        // eso la puerta parecia no tapar/abrir nada: el bloque seguia
+        // cerrando el hueco aunque la hoja subiera al techo.
+        const frameDepth = 0.16;
+        const frameWidth = 0.14;
+        const jambH = height - 0.14;
+        const jamb = new THREE.BoxGeometry(frameDepth, jambH, frameWidth);
+        const leftJamb = new THREE.Mesh(jamb, frameMat);
+        const rightJamb = new THREE.Mesh(jamb, frameMat);
+        leftJamb.position.set(0, jambH / 2, -(width - frameWidth) / 2);
+        rightJamb.position.set(0, jambH / 2, (width - frameWidth) / 2);
+        group.add(leftJamb, rightJamb);
 
+        const header = new THREE.Mesh(new THREE.BoxGeometry(frameDepth, 0.16, width), frameMat);
+        header.position.y = height - 0.08;
+        group.add(header);
+        const track = new THREE.Mesh(new THREE.BoxGeometry(frameDepth + 0.04, 0.05, width - 0.08), warningMat);
+        track.position.y = height - 0.18;
+        group.add(track);
+
+        // Hoja enrollable de lamas horizontales: su ancho queda DENTRO de las
+        // jambas y su altura deja una junta visible con el dintel.
         const door = new THREE.Group();
+        const leafWidth = width - frameWidth * 2 - 0.035;
+        const leafHeight = height - 0.24;
+        const panelH = leafHeight / 7;
         for (let i = 0; i < 7; i++) {
-            const p = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.32, 2.82), metalMat);
-            p.position.y = i * 0.32 + 0.16;
+            const p = new THREE.Mesh(new THREE.BoxGeometry(0.10, panelH - 0.018, leafWidth), metalMat);
+            p.position.y = 0.12 + i * panelH + (panelH - 0.018) / 2;
             door.add(p);
         }
         group.add(door);
 
-        group.userData = { door };
+        group.userData = { door, width, height, frameDepth, leafWidth };
         return group;
     }
 

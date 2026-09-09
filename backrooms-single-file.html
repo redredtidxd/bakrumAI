@@ -120,6 +120,72 @@
             background: #ffcc00;
         }
 
+        /* VISOR DE CCTV DE LA SALA DE SEGURIDAD */
+        #camera-feed-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 75;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(4, 7, 5, 0.78);
+            pointer-events: auto;
+        }
+        #camera-feed-overlay.open {
+            display: flex;
+        }
+        .camera-feed-window {
+            width: min(760px, 88vw);
+            background: #10160f;
+            border: 2px solid #5b7445;
+            box-shadow: 0 0 38px rgba(0, 0, 0, 0.9), inset 0 0 0 1px rgba(164, 210, 92, 0.16);
+            color: #b9dc78;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        .camera-feed-head, .camera-feed-foot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 9px 12px;
+            background: #182218;
+            border-bottom: 1px solid #3e5830;
+            letter-spacing: 1px;
+            font-size: 11px;
+        }
+        .camera-feed-foot {
+            border-top: 1px solid #3e5830;
+            border-bottom: 0;
+            font-size: 10px;
+            flex-wrap: wrap;
+        }
+        .camera-feed-actions {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-left: auto;
+        }
+        .camera-feed-close, .camera-feed-actions button {
+            border: 1px solid #65864e;
+            background: #253622;
+            color: #d2f49a;
+            font: inherit;
+            cursor: pointer;
+            min-width: 28px;
+            min-height: 26px;
+        }
+        .camera-feed-close:hover, .camera-feed-actions button:hover {
+            background: #3d5830;
+        }
+        #camera-feed-canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            min-height: 220px;
+            background: #061007;
+            image-rendering: auto;
+        }
+
         /* PROMPT INTERACCIÓN */
         #interact-prompt {
             position: absolute;
@@ -668,6 +734,21 @@
             font-size: 11px;
             padding: 5px 12px;
         }
+        body.touch-mode .camera-feed-window {
+            width: 94vw;
+        }
+        body.touch-mode .camera-feed-head,
+        body.touch-mode .camera-feed-foot {
+            font-size: 9px;
+            padding: 8px;
+        }
+        body.touch-mode .camera-feed-foot {
+            display: block;
+        }
+        body.touch-mode .camera-feed-actions {
+            margin-top: 7px;
+            margin-left: 0;
+        }
         body.touch-mode #toast-box {
             top: 64px;
         }
@@ -919,6 +1000,25 @@
     <div id="reticle"></div>
     <div id="interact-prompt">PRESIONA [E]</div>
     <div id="toast-box"></div>
+
+    <!-- VISOR DE CCTV: se abre al interactuar con un monitor de la cabina -->
+    <div id="camera-feed-overlay" aria-hidden="true">
+        <div class="camera-feed-window">
+            <div class="camera-feed-head">
+                <span id="camera-feed-title">CCTV // SIN SEÑAL</span>
+                <button id="camera-feed-close" class="camera-feed-close" type="button" aria-label="Cerrar visor">✕</button>
+            </div>
+            <canvas id="camera-feed-canvas" width="768" height="576"></canvas>
+            <div class="camera-feed-foot">
+                <span id="camera-feed-status">INTERACTÚA CON UNA PANTALLA PARA CAMBIAR DE CÁMARA</span>
+                <span class="camera-feed-actions">
+                    <button id="camera-feed-prev" type="button">◀</button>
+                    <button id="camera-feed-next" type="button">▶</button>
+                    <span>[ESC] CERRAR</span>
+                </span>
+            </div>
+        </div>
+    </div>
 
     <!-- CONTROLES TÁCTILES (móvil/tableta) -->
     <div id="touch-ui">
@@ -2337,24 +2437,47 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
     // (con pantalla de pila) lo coloca world.js en la pared interior.
     // userData.door es el grupo de paneles que game.js desliza en Y.
     // ------------------------------------------------------------------
-    function createMetalDoorModel() {
+    function createMetalDoorModel(width = 2.22, height = 2.46) {
         const group = new THREE.Group();
-        const metalMat = new THREE.MeshStandardMaterial({ color: 0x5a616b, metalness: 0.75, roughness: 0.45 });
-        const frameMat = new THREE.MeshStandardMaterial({ color: 0x33363c, metalness: 0.6, roughness: 0.5 });
+        const metalMat = new THREE.MeshStandardMaterial({ color: 0x5a616b, metalness: 0.78, roughness: 0.42 });
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x292d33, metalness: 0.72, roughness: 0.38 });
+        const warningMat = new THREE.MeshStandardMaterial({ color: 0xb38a32, metalness: 0.35, roughness: 0.5 });
 
-        const frame = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.4, 2.88), frameMat);
-        frame.position.y = 1.2;
-        group.add(frame);
+        // Marco REAL: jambas y dintel, nunca una caja maciza delante del vano.
+        // El modelo anterior usaba un BoxGeometry entero como "marco" y por
+        // eso la puerta parecia no tapar/abrir nada: el bloque seguia
+        // cerrando el hueco aunque la hoja subiera al techo.
+        const frameDepth = 0.16;
+        const frameWidth = 0.14;
+        const jambH = height - 0.14;
+        const jamb = new THREE.BoxGeometry(frameDepth, jambH, frameWidth);
+        const leftJamb = new THREE.Mesh(jamb, frameMat);
+        const rightJamb = new THREE.Mesh(jamb, frameMat);
+        leftJamb.position.set(0, jambH / 2, -(width - frameWidth) / 2);
+        rightJamb.position.set(0, jambH / 2, (width - frameWidth) / 2);
+        group.add(leftJamb, rightJamb);
 
+        const header = new THREE.Mesh(new THREE.BoxGeometry(frameDepth, 0.16, width), frameMat);
+        header.position.y = height - 0.08;
+        group.add(header);
+        const track = new THREE.Mesh(new THREE.BoxGeometry(frameDepth + 0.04, 0.05, width - 0.08), warningMat);
+        track.position.y = height - 0.18;
+        group.add(track);
+
+        // Hoja enrollable de lamas horizontales: su ancho queda DENTRO de las
+        // jambas y su altura deja una junta visible con el dintel.
         const door = new THREE.Group();
+        const leafWidth = width - frameWidth * 2 - 0.035;
+        const leafHeight = height - 0.24;
+        const panelH = leafHeight / 7;
         for (let i = 0; i < 7; i++) {
-            const p = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.32, 2.82), metalMat);
-            p.position.y = i * 0.32 + 0.16;
+            const p = new THREE.Mesh(new THREE.BoxGeometry(0.10, panelH - 0.018, leafWidth), metalMat);
+            p.position.y = 0.12 + i * panelH + (panelH - 0.018) / 2;
             door.add(p);
         }
         group.add(door);
 
-        group.userData = { door };
+        group.userData = { door, width, height, frameDepth, leafWidth };
         return group;
     }
 
@@ -2464,6 +2587,13 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         // Moqueta textil exterior (assets/floor-texture.png): mate, sin brillo
         floor: new THREE.MeshStandardMaterial({ map: FloorCarpetTexture, roughness: 0.95 }),
         ceiling: new THREE.MeshStandardMaterial({ map: ceilingTex, roughness: 0.95, metalness: 0.0 }),
+        // Materiales de la cabina de seguridad: no son papel pintado suelto,
+        // sino paneles metalicos oscuros con remates visibles. La estructura
+        // se monta dentro del bolsillo y sus cajas se anaden a la colision.
+        securityWall: new THREE.MeshStandardMaterial({ color: 0x55585a, metalness: 0.48, roughness: 0.68 }),
+        securityTrim: new THREE.MeshStandardMaterial({ color: 0x24282b, metalness: 0.78, roughness: 0.38 }),
+        securityFloor: new THREE.MeshStandardMaterial({ color: 0x242927, metalness: 0.22, roughness: 0.86 }),
+        securityCeiling: new THREE.MeshStandardMaterial({ color: 0x303437, metalness: 0.4, roughness: 0.72 }),
         // Tulipas emisivas: los paneles lejanos brillan siempre a traves de la niebla,
         // sin necesidad de cientos de PointLights dinamicos
         lampLit: new THREE.MeshStandardMaterial({
@@ -3397,10 +3527,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // pared: con el 25% de antes salian ~1 de cada 4 chunks (demasiado
             // comunes para un refugio raro). Con 0.15 vuelven a ~1 de cada 7.
             if (r() >= 0.15) return;
-            // Sala PEQUEÑA a proposito (como la oficina de FNAF): 2x2, 2x3 o
-            // 3x2 celdas (5,6-8,4 m). Antes eran de 3x3 a 4x4 celdas
-            // (8,4-11,2 m) y no parecia un refugio, sino una sala mas.
-            const sizes = [[2, 2], [2, 3], [3, 2]];
+            // Cabina PEQUENA y ESTRECHA a proposito: 1x2, 2x1 o 1x3
+            // celdas (2,8x5,6 m como maximo). Antes eran 2x2/2x3/3x2 y,
+            // al no tener una carcasa propia, parecian una sala abierta con
+            // tres pantallas flotando.
+            const sizes = [[1, 2], [2, 1], [1, 3]];
             const order = [0, 1, 2];
             for (let i = order.length - 1; i > 0; i--) {
                 const j = Math.floor(r() * (i + 1));
@@ -3410,8 +3541,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 const [w, h] = sizes[oi];
                 const spots = [];    // bolsillos con 1 boca (FNAF perfecto)
                 const sealed = [];   // bolsillos sellados con boca tallable
-                for (let rx = 2; rx <= N - 2 - w; rx++) {
-                    for (let rz = 2; rz <= N - 2 - h; rz++) {
+                for (let rx = 3; rx <= N - 3 - w; rx++) {
+                    for (let rz = 3; rz <= N - 3 - h; rz++) {
                         let interiorWall = true;
                         for (let dx = 0; dx < w && interiorWall; dx++) {
                             for (let dz = 0; dz < h && interiorWall; dz++) {
@@ -4606,26 +4737,148 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const C = CELL_SIZE;
             const ox = ch.cx * N * C;
             const oz = ch.cz * N * C;
-            const dc = sr.doorX, dz = sr.doorZ;
-            const dcx0 = ox + dc * C, dcz0 = oz + dz * C;
-            // Plano de la puerta: entre la celda de la boca y el interior
-            let plane = 'x', doorX = 0, doorZ = 0;
-            if (dc === sr.rx - 1) { plane = 'x'; doorX = ox + sr.rx * C; doorZ = dcz0 + C / 2; }
-            else if (dc === sr.rx + sr.w) { plane = 'x'; doorX = ox + (sr.rx + sr.w) * C; doorZ = dcz0 + C / 2; }
-            else if (dz === sr.rz - 1) { plane = 'z'; doorX = dcx0 + C / 2; doorZ = oz + sr.rz * C; }
-            else { plane = 'z'; doorX = dcx0 + C / 2; doorZ = oz + (sr.rz + sr.h) * C; }
+            const dc = sr.doorX, doorCellZ = sr.doorZ;
+            const dcx0 = ox + dc * C, dcz0 = oz + doorCellZ * C;
+            // Limites del bolsillo en el mundo. La cabina se construye dentro
+            // de este rectangulo: ya no depende de que las paredes aleatorias
+            // del laberinto parezcan cerrar la sala.
+            const rmMinX = ox + sr.rx * C, rmMaxX = ox + (sr.rx + sr.w) * C;
+            const rmMinZ = oz + sr.rz * C, rmMaxZ = oz + (sr.rz + sr.h) * C;
+            const rmCX = (rmMinX + rmMaxX) / 2, rmCZ = (rmMinZ + rmMaxZ) / 2;
+            const shellT = 0.16;
+            const shellInset = 0.08;
+            const shellX0 = rmMinX + shellInset, shellX1 = rmMaxX - shellInset;
+            const shellZ0 = rmMinZ + shellInset, shellZ1 = rmMaxZ - shellInset;
+            const shellH = WALL_HEIGHT - 0.02;
+            // La cabina es deliberadamente estrecha: la puerta no puede
+            // ocupar casi toda la pared ni dejar una falsa sensacion de sala
+            // abierta. El ancho util de 1,18 m deja jambas y paneles visibles.
+            const doorWidth = 1.18;
+            const doorHeight = 2.46;
+            const hasWideWall = sr.w >= 2 || sr.h >= 2;
 
-            const doorModel = createMetalDoorModel();
+            let doorSide = 'W', plane = 'x', doorX = 0, doorZ = 0;
+            if (dc === sr.rx - 1) doorSide = 'W';
+            else if (dc === sr.rx + sr.w) doorSide = 'E';
+            else if (doorCellZ === sr.rz - 1) doorSide = 'N';
+            else doorSide = 'S';
+            plane = doorSide === 'W' || doorSide === 'E' ? 'x' : 'z';
+
+            // La celda de la boca puede quedar pegada a una esquina. Se
+            // centra dentro de la pared de la cabina y se limita para que las
+            // jambas nunca tapen la entrada estrecha.
+            const tangent0 = plane === 'x' ? shellZ0 : shellX0;
+            const tangent1 = plane === 'x' ? shellZ1 : shellX1;
+            const rawDoorT = plane === 'x' ? dcz0 + C / 2 : dcx0 + C / 2;
+            const doorT = Math.max(tangent0 + doorWidth / 2 + 0.08,
+                Math.min(tangent1 - doorWidth / 2 - 0.08, rawDoorT));
+            if (plane === 'x') {
+                doorX = doorSide === 'W' ? shellX0 : shellX1;
+                doorZ = doorT;
+            } else {
+                doorX = doorT;
+                doorZ = doorSide === 'N' ? shellZ0 : shellZ1;
+            }
+
+            const doorModel = createMetalDoorModel(doorWidth, doorHeight);
             doorModel.position.set(doorX, 0, doorZ);
             if (plane === 'z') doorModel.rotation.y = Math.PI / 2;
             this.scene.add(doorModel);
             ch.meshes.push(doorModel);
 
-            // Limites de la sala en el mundo (se usan para colocar los
-            // monitores ANTES de rellenar sr):
-            const rmMinX = ox + sr.rx * C, rmMaxX = ox + (sr.rx + sr.w) * C;
-            const rmMinZ = oz + sr.rz * C, rmMaxZ = oz + (sr.rz + sr.h) * C;
-            const rmCX = (rmMinX + rmMaxX) / 2, rmCZ = (rmMinZ + rmMaxZ) / 2;
+            // ------------------------------------------------------------
+            // ESTRUCTURA REAL DE LA SALA: suelo, techo y cuatro paredes de
+            // panel metalico. La pared de la puerta se parte en dos; el vano
+            // queda verdaderamente vacio cuando la hoja sube al techo.
+            // ------------------------------------------------------------
+            const addShellPanel = (minX, maxX, minZ, maxZ, mat = Materials.securityWall) => {
+                if (maxX - minX < 0.03 || maxZ - minZ < 0.03) return;
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(maxX - minX, shellH, maxZ - minZ), mat);
+                mesh.position.set((minX + maxX) / 2, shellH / 2, (minZ + maxZ) / 2);
+                mesh.userData.isSecurityStructure = true;
+                this.scene.add(mesh);
+                ch.meshes.push(mesh);
+                ch.wallBoxes.push({ minX, maxX, minZ, maxZ, securityStructure: true });
+            };
+            const addXWall = (x0, x1, z0, z1) => addShellPanel(x0, x1, z0, z1);
+            const addZWall = (x0, x1, z0, z1) => addShellPanel(x0, x1, z0, z1);
+            const addSplitXWall = (x0, x1) => {
+                addXWall(x0, x1, shellZ0, doorT - doorWidth / 2);
+                addXWall(x0, x1, doorT + doorWidth / 2, shellZ1);
+            };
+            const addSplitZWall = (z0, z1) => {
+                addZWall(shellX0, doorT - doorWidth / 2, z0, z1);
+                addZWall(doorT + doorWidth / 2, shellX1, z0, z1);
+            };
+            if (doorSide === 'W') addSplitXWall(shellX0, shellX0 + shellT);
+            else addXWall(shellX0, shellX0 + shellT, shellZ0, shellZ1);
+            if (doorSide === 'E') addSplitXWall(shellX1 - shellT, shellX1);
+            else addXWall(shellX1 - shellT, shellX1, shellZ0, shellZ1);
+            if (doorSide === 'N') addSplitZWall(shellZ0, shellZ0 + shellT);
+            else addZWall(shellX0, shellX1, shellZ0, shellZ0 + shellT);
+            if (doorSide === 'S') addSplitZWall(shellZ1 - shellT, shellZ1);
+            else addZWall(shellX0, shellX1, shellZ1 - shellT, shellZ1);
+
+            // Suelo tecnico elevado y techo bajo: hacen evidente que es una
+            // cabina cerrada, no una coleccion de pantallas en mitad del mapa.
+            const innerW = Math.max(0.6, shellX1 - shellX0 - shellT * 2);
+            const innerD = Math.max(0.6, shellZ1 - shellZ0 - shellT * 2);
+            const floorPanel = new THREE.Mesh(new THREE.BoxGeometry(innerW, 0.035, innerD), Materials.securityFloor);
+            floorPanel.position.set((shellX0 + shellX1) / 2, 0.018, (shellZ0 + shellZ1) / 2);
+            floorPanel.userData.isSecurityStructure = true;
+            this.scene.add(floorPanel);
+            ch.meshes.push(floorPanel);
+            const ceilingPanel = new THREE.Mesh(new THREE.BoxGeometry(innerW + 0.04, 0.09, innerD + 0.04), Materials.securityCeiling);
+            ceilingPanel.position.set((shellX0 + shellX1) / 2, WALL_HEIGHT - 0.045, (shellZ0 + shellZ1) / 2);
+            ceilingPanel.userData.isSecurityStructure = true;
+            this.scene.add(ceilingPanel);
+            ch.meshes.push(ceilingPanel);
+
+            // Remates horizontales y esquineros: la estructura se lee incluso
+            // con la linterna apagada y las juntas no parecen paredes sueltas.
+            const addTrim = (w, h, d, x, y, z) => {
+                const trim = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), Materials.securityTrim);
+                trim.position.set(x, y, z);
+                trim.userData.isSecurityStructure = true;
+                this.scene.add(trim);
+                ch.meshes.push(trim);
+            };
+            addTrim(innerW + shellT * 2, 0.07, 0.07, rmCX, 0.22, shellZ0 + shellT + 0.01);
+            addTrim(innerW + shellT * 2, 0.07, 0.07, rmCX, 0.22, shellZ1 - shellT - 0.01);
+            addTrim(0.07, 0.07, innerD + shellT * 2, shellX0 + shellT + 0.01, 0.22, rmCZ);
+            addTrim(0.07, 0.07, innerD + shellT * 2, shellX1 - shellT - 0.01, 0.22, rmCZ);
+            addTrim(innerW + shellT * 2, 0.08, 0.08, rmCX, shellH - 0.16, shellZ0 + shellT + 0.01);
+            addTrim(innerW + shellT * 2, 0.08, 0.08, rmCX, shellH - 0.16, shellZ1 - shellT - 0.01);
+            addTrim(0.08, 0.08, innerD + shellT * 2, shellX0 + shellT + 0.01, shellH - 0.16, rmCZ);
+            addTrim(0.08, 0.08, innerD + shellT * 2, shellX1 - shellT - 0.01, shellH - 0.16, rmCZ);
+
+            // Marcos de la puerta: sus jambas tambien son solidas; el hueco
+            // central solo se bloquea con doorBox mientras la hoja esta abajo.
+            const frameT = 0.17;
+            const addFrameBox = (minX, maxX, minZ, maxZ) => {
+                addTrim(maxX - minX, shellH - 0.14, maxZ - minZ,
+                    (minX + maxX) / 2, (shellH - 0.14) / 2, (minZ + maxZ) / 2);
+                ch.wallBoxes.push({ minX, maxX, minZ, maxZ, securityFrame: true });
+            };
+            if (plane === 'x') {
+                addFrameBox(doorX - 0.09, doorX + 0.09, doorT - doorWidth / 2 - frameT / 2, doorT - doorWidth / 2 + frameT / 2);
+                addFrameBox(doorX - 0.09, doorX + 0.09, doorT + doorWidth / 2 - frameT / 2, doorT + doorWidth / 2 + frameT / 2);
+            } else {
+                addFrameBox(doorT - doorWidth / 2 - frameT / 2, doorT - doorWidth / 2 + frameT / 2, doorZ - 0.09, doorZ + 0.09);
+                addFrameBox(doorT + doorWidth / 2 - frameT / 2, doorT + doorWidth / 2 + frameT / 2, doorZ - 0.09, doorZ + 0.09);
+            }
+            const securityLight = new THREE.PointLight(0xb9c989, 0.42, 8, 2);
+            securityLight.position.set(rmCX, 2.12, rmCZ);
+            this.scene.add(securityLight);
+            ch.meshes.push(securityLight);
+
+            sr.shellMinX = shellX0;
+            sr.shellMaxX = shellX1;
+            sr.shellMinZ = shellZ0;
+            sr.shellMaxZ = shellZ1;
+            sr.doorSide = doorSide;
+            sr.doorWidth = doorWidth;
+            sr.doorHeight = doorHeight;
 
             // Panel de control (pantalla de pila) en la pared interior, junto
             // a la puerta, mirando hacia dentro de la sala
@@ -4651,10 +4904,22 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             panelBox.add(panelScreen);
             panelGroup.add(panelBox);
             const py = 1.08;
-            if (dc === sr.rx - 1) { panelGroup.position.set(ox + sr.rx * C + 0.12, py, dcz0 + C / 2); panelGroup.rotation.y = Math.PI / 2; }
-            else if (dc === sr.rx + sr.w) { panelGroup.position.set(ox + (sr.rx + sr.w) * C - 0.12, py, dcz0 + C / 2); panelGroup.rotation.y = -Math.PI / 2; }
-            else if (dz === sr.rz - 1) { panelGroup.position.set(dcx0 + C / 2, py, oz + sr.rz * C + 0.12); panelGroup.rotation.y = Math.PI; }
-            else { panelGroup.position.set(dcx0 + C / 2, py, oz + (sr.rz + sr.h) * C - 0.12); panelGroup.rotation.y = 0; }
+            // Panel de bateria en la pared contigua a la puerta, nunca delante
+            // del vano: queda al alcance de la mano nada mas entrar.
+            if (doorSide === 'W') {
+                panelGroup.position.set(shellX0 + shellT + 0.055, py, shellZ0 + shellT + 0.42);
+                panelGroup.rotation.y = Math.PI / 2;
+            } else if (doorSide === 'E') {
+                panelGroup.position.set(shellX1 - shellT - 0.055, py, shellZ0 + shellT + 0.42);
+                panelGroup.rotation.y = -Math.PI / 2;
+            } else if (doorSide === 'N') {
+                panelGroup.position.set(shellX0 + shellT + 0.42, py, shellZ0 + shellT + 0.055);
+                panelGroup.rotation.y = 0;
+            } else {
+                panelGroup.position.set(shellX0 + shellT + 0.42, py, shellZ1 - shellT - 0.055);
+                panelGroup.rotation.y = Math.PI;
+            }
+            panelGroup.userData.isSecurityPanel = true;
             this.scene.add(panelGroup);
             ch.meshes.push(panelGroup);
 
@@ -4667,44 +4932,62 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // E -> rotY -PI/2. (Antes solo habia uno y, con la puerta al
             // norte, se giraba hacia la pared: se veia el dorso.)
             const monitors = [];
-            const my = 0.75;
-            const monOff = 0.13;
-            const addMonitor = (mx, mz, ry) => {
+            const my = 0.95;
+            // El centro se separa del panel por el grosor de la pared: la caja
+            // queda embutida y la pantalla sobresale, asi no vuelve a flotar.
+            const monitorMount = shellT + 0.155 + 0.012;
+            const west = shellX0 + monitorMount, east = shellX1 - monitorMount;
+            const north = shellZ0 + monitorMount, south = shellZ1 - monitorMount;
+            // En una cabina de una celda no caben tres CRT de 1,5 m: se
+            // montan en paredes opuestas/laterales alternas, centrados y sin
+            // salir de la carcasa. En las cabinas 1x2/1x3 caben tres, pero
+            // nunca se coloca una pantalla sobre la pared del vano.
+            const fitMonitor = (wallName, mx, mz, ry) => {
+                const roomW = shellX1 - shellX0;
+                const roomD = shellZ1 - shellZ0;
+                const tooTight = (wallName === 'N' || wallName === 'S') ? roomW < 2.25 : roomD < 2.25;
+                if (tooTight) return;
+                // En una cabina 1xN solo hay una pared larga util: mas de un
+                // CRT en las paredes cortas invade la carcasa y vuelve a
+                // parecer flotante. En 2xN sí caben tres pantallas grandes.
+                if (!hasWideWall && monitors.length > 0) return;
+                addMonitor(mx, mz, ry, wallName);
+            };
+            const addMonitor = (mx, mz, ry, wallName) => {
                 const m = createMonitorScreenModel(monitors.length + 1);
                 m.position.set(mx, my, mz);
                 m.rotation.y = ry;
+                m.userData.isSecurityMonitor = true;
+                m.userData.securityWall = wallName;
                 this.scene.add(m);
                 ch.meshes.push(m);
                 monitors.push(m);
             };
-            const west = rmMinX + monOff, east = rmMaxX - monOff;
-            const north = rmMinZ + monOff, south = rmMaxZ - monOff;
-            if (dc === sr.rx - 1) {
-                // Puerta al OESTE: opuesto = pared ESTE; laterales = N y S
-                addMonitor(east, rmCZ, -Math.PI / 2);
-                addMonitor(rmCX, north, 0);
-                addMonitor(rmCX, south, Math.PI);
-            } else if (dc === sr.rx + sr.w) {
-                // Puerta al ESTE: opuesto = pared OESTE; laterales = N y S
-                addMonitor(west, rmCZ, Math.PI / 2);
-                addMonitor(rmCX, north, 0);
-                addMonitor(rmCX, south, Math.PI);
-            } else if (dz === sr.rz - 1) {
-                // Puerta al NORTE: opuesto = pared SUR; laterales = E y O
-                addMonitor(rmCX, south, Math.PI);
-                addMonitor(west, rmCZ, Math.PI / 2);
-                addMonitor(east, rmCZ, -Math.PI / 2);
+            if (doorSide === 'W') {
+                // Puerta al OESTE: pantalla opuesta al ESTE y dos laterales.
+                fitMonitor('E', east, rmCZ, -Math.PI / 2);
+                fitMonitor('N', rmCX, north, 0);
+                fitMonitor('S', rmCX, south, Math.PI);
+            } else if (doorSide === 'E') {
+                fitMonitor('W', west, rmCZ, Math.PI / 2);
+                fitMonitor('N', rmCX, north, 0);
+                fitMonitor('S', rmCX, south, Math.PI);
+            } else if (doorSide === 'N') {
+                fitMonitor('S', rmCX, south, Math.PI);
+                fitMonitor('W', west, rmCZ, Math.PI / 2);
+                fitMonitor('E', east, rmCZ, -Math.PI / 2);
             } else {
-                // Puerta al SUR: opuesto = pared NORTE; laterales = E y O
-                addMonitor(rmCX, north, 0);
-                addMonitor(west, rmCZ, Math.PI / 2);
-                addMonitor(east, rmCZ, -Math.PI / 2);
+                fitMonitor('N', rmCX, north, 0);
+                fitMonitor('W', west, rmCZ, Math.PI / 2);
+                fitMonitor('E', east, rmCZ, -Math.PI / 2);
             }
 
-            // Caja de colision de la puerta cerrada (bloquea jugador y entidad)
+            // Caja del vano: solo tapa el hueco de la hoja, no toda la celda.
+            // El marco permanece en las dos jambas; esta caja es la hoja
+            // deslizante y se incluye solo cuando la puerta esta cerrada.
             const doorBox = plane === 'x'
-                ? { minX: doorX - 0.06, maxX: doorX + 0.06, minZ: dcz0 - 0.05, maxZ: dcz0 + C + 0.05 }
-                : { minX: dcx0 - 0.05, maxX: dcx0 + C + 0.05, minZ: doorZ - 0.06, maxZ: doorZ + 0.06 };
+                ? { minX: doorX - 0.09, maxX: doorX + 0.09, minZ: doorT - doorWidth / 2, maxZ: doorT + doorWidth / 2, securityDoor: true }
+                : { minX: doorT - doorWidth / 2, maxX: doorT + doorWidth / 2, minZ: doorZ - 0.09, maxZ: doorZ + 0.09, securityDoor: true };
 
             sr.id = 'sec:' + ch.cx + ':' + ch.cz + ':' + sr.rx + ':' + sr.rz;
             sr.doorModel = doorModel;
@@ -4713,6 +4996,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             sr.doorBox = doorBox;
             sr.doorWorldX = doorX;
             sr.doorWorldZ = doorZ;
+            sr.doorT = doorT;
             sr.panelCanvas = panelCanvas;
             sr.panelTex = panelTex;
             sr.monitors = monitors;
@@ -4738,16 +5022,20 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const N = CHUNK_SIZE;
             const C = CELL_SIZE;
             const rng = mulberry32(hash2(ch.cx * 9001 + 7, ch.cz * 7001 + 313));
-            // Reset al reconstruir el chunk: sin duplicados al recargar
+            // Reset al reconstruir el chunk: sin duplicados al recargar. Una
+            // cabina de seguridad siempre obtiene cámaras exteriores para sus
+            // monitores; los chunks normales siguen teniendo cámaras raras.
             ch.cameras = [];
-            if (rng() >= 0.45) return;   // ~1 de cada 2,2 chunks: mas comunes
+            const sr = ch.securityRoom;
+            const insideRoom = (x, z) => !!sr && x >= sr.rx && x < sr.rx + sr.w && z >= sr.rz && z < sr.rz + sr.h;
+            if (!sr && rng() >= 0.45) return;
             const g = ch.grid;
             const dirs = [[-1, 0, 'W'], [1, 0, 'E'], [0, -1, 'S'], [0, 1, 'N']];
             const cands = [];
             for (let x = 1; x < N - 1; x++) {
                 for (let z = 1; z < N - 1; z++) {
                     const k = key(x, z);
-                    if (g[x][z] !== 1 || curvedCells.has(k)) continue;
+                    if (g[x][z] !== 1 || curvedCells.has(k) || insideRoom(x, z)) continue;
                     const kind = wallKind.get(k);
                     if (kind !== 'x' && kind !== 'z') continue;
                     if (ch.graffitiCells && ch.graffitiCells.has(x + ',' + z)) continue;
@@ -4757,6 +5045,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         const nx = x + dx, nz = z + dz;
                         if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
                         if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        // Una cámara cuyo objetivo sería una celda de la cabina
+                        // queda dentro de la sala de seguridad (aunque la pared
+                        // original del laberinto siga debajo de la estructura):
+                        // está prohibida. Las cámaras solo vigilan el exterior.
+                        if (insideRoom(nx, nz)) continue;
                         if ((d === 'W' && x === 0) || (d === 'E' && x === N - 1) ||
                             (d === 'S' && z === 0) || (d === 'N' && z === N - 1)) continue;
                         const faceLen = (d === 'W' || d === 'E') ? (box.maxZ - box.minZ) : (box.maxX - box.minX);
@@ -4766,22 +5059,29 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 }
             }
             if (!cands.length) return;
-            const c = cands[Math.floor(rng() * cands.length)];
-            const box = ch.wallFaceMap.get(key(c[0], c[1]));
-            if (!box) return;
-            const m = createSecurityCameraModel();
-            const mx = ch.cx * N * C + (c[0] + 0.5) * C;
-            const mz = ch.cz * N * C + (c[1] + 0.5) * C;
-            const off = 0.022 + 0.1;
-            let ry = 0;
-            if (c[2] === 'W') { m.position.set(box.minX - off, 2.28, mz); ry = -Math.PI / 2; }
-            else if (c[2] === 'E') { m.position.set(box.maxX + off, 2.28, mz); ry = Math.PI / 2; }
-            else if (c[2] === 'S') { m.position.set(mx, 2.28, box.minZ - off); ry = Math.PI; }
-            else { m.position.set(mx, 2.28, box.maxZ + off); ry = 0; }
-            m.rotation.y = ry;
-            this.scene.add(m);
-            ch.meshes.push(m);
-            ch.cameras.push({ group: m, x: m.position.x, z: m.position.z, dir: c[2], baseRy: ry });
+            // En una cabina se colocan hasta 3 cámaras EXTERIORES; el resto
+            // del mundo conserva una sola cámara ocasional por chunk.
+            const want = sr ? Math.min(3, cands.length) : 1;
+            for (let n = 0; n < want && cands.length; n++) {
+                const ci = Math.floor(rng() * cands.length);
+                const c = cands.splice(ci, 1)[0];
+                const box = ch.wallFaceMap.get(key(c[0], c[1]));
+                if (!box) continue;
+                const m = createSecurityCameraModel();
+                const mx = ch.cx * N * C + (c[0] + 0.5) * C;
+                const mz = ch.cz * N * C + (c[1] + 0.5) * C;
+                const off = 0.122;
+                let ry = 0;
+                if (c[2] === 'W') { m.position.set(box.minX - off, 2.28, mz); ry = -Math.PI / 2; }
+                else if (c[2] === 'E') { m.position.set(box.maxX + off, 2.28, mz); ry = Math.PI / 2; }
+                else if (c[2] === 'S') { m.position.set(mx, 2.28, box.minZ - off); ry = Math.PI; }
+                else { m.position.set(mx, 2.28, box.maxZ + off); ry = 0; }
+                m.rotation.y = ry;
+                m.userData.isExteriorSecurityCamera = !!sr;
+                this.scene.add(m);
+                ch.meshes.push(m);
+                ch.cameras.push({ group: m, x: m.position.x, z: m.position.z, dir: c[2], baseRy: ry, exterior: !!sr });
+            }
         }
 
         // ---- GRAFITI (100 variantes, blanco/negro/rojo) sobre las paredes ----
@@ -8657,6 +8957,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this._noSignalTex = null;
             this._panelTimer = 0;
             this._iRechargeAcc = 0;
+            this.cameraFeedView = { open: false, room: null, monitorIndex: 0 };
             this._entSpawnNotified = false;
 
             window.addEventListener('beforeunload', () => this.net.leave());
@@ -8872,11 +9173,29 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (e.code === 'Digit1') this.selectSlot(1);
                 if (e.code === 'Digit2') this.selectSlot(2);
                 if (e.code === 'Digit3') this.selectSlot(3);
-                if (e.code === 'KeyE') this.handleInteraction();
+                if (e.code === 'KeyE') {
+                    if (this.cameraFeedView.open) {
+                        e.preventDefault();
+                        this.cycleCameraFeed(1);
+                    } else {
+                        this.handleInteraction();
+                    }
+                }
+                if (e.code === 'ArrowLeft' && this.cameraFeedView.open) {
+                    e.preventDefault();
+                    this.cycleCameraFeed(-1);
+                }
+                if (e.code === 'ArrowRight' && this.cameraFeedView.open) {
+                    e.preventDefault();
+                    this.cycleCameraFeed(1);
+                }
                 if (e.code === 'KeyN') this.toggleNotebook();
                 if (e.code === 'KeyM') this.toggleMap();
                 if (e.code === 'KeyT' && !this.chatOpen) this.toggleChat(true);
-                if (e.code === 'Escape' && this.chatOpen) this.toggleChat(false);
+                if (e.code === 'Escape') {
+                    if (this.cameraFeedView.open) this.closeCameraFeed();
+                    else if (this.chatOpen) this.toggleChat(false);
+                }
             });
 
             document.addEventListener('keyup', (e) => {
@@ -8913,7 +9232,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.renderer.domElement.addEventListener('click', () => {
                 // En movil no hay pointer lock: los controles tactiles ya estan activos
                 if (this.gameActive && !this.isLocked && !IS_TOUCH) {
-                    document.body.requestPointerLock();
+                    try {
+                        if (document.body.ownerDocument === document && document.body.requestPointerLock) {
+                            const lock = document.body.requestPointerLock();
+                            if (lock && lock.catch) lock.catch(() => {});
+                        }
+                    } catch (err) { /* no bloquear el juego en webviews */ }
                 }
             });
 
@@ -9160,7 +9484,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (IS_TOUCH) {
                     this.notify('🕹 IZQ.: mover · DERECHA: mirar · Toque rápido: interactuar');
                 } else {
-                    document.body.requestPointerLock();
+                    // El click del boton de inicio puede venir de un documento
+                    // embebido en Preview; el pointer-lock solo se solicita
+                    // desde el documento que contiene el canvas y nunca debe
+                    // romper el arranque si el navegador lo rechaza.
+                    try {
+                        if (document.body.ownerDocument === document && document.body.requestPointerLock) {
+                            const lock = document.body.requestPointerLock();
+                            if (lock && lock.catch) lock.catch(() => {});
+                        }
+                    } catch (err) { /* algunos webviews no permiten pointer lock */ }
                 }
             };
 
@@ -9192,6 +9525,17 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             document.getElementById('btn-map-zoom-in').onclick = () => this.mapZoom(1.35);
             document.getElementById('btn-map-zoom-out').onclick = () => this.mapZoom(1 / 1.35);
             document.getElementById('btn-map-center').onclick = () => this.mapCenterOnPlayer();
+
+            // Visor CCTV: los botones viven por encima del canvas del juego y
+            // no deben devolver el foco al pointer-lock. El feed se actualiza
+            // en el bucle principal, asi el visor nunca muestra una imagen
+            // estatica o una pantalla negra al abrirlo.
+            const feedClose = document.getElementById('camera-feed-close');
+            const feedPrev = document.getElementById('camera-feed-prev');
+            const feedNext = document.getElementById('camera-feed-next');
+            if (feedClose) feedClose.addEventListener('click', (e) => { e.preventDefault(); this.closeCameraFeed(); });
+            if (feedPrev) feedPrev.addEventListener('click', (e) => { e.preventDefault(); this.cycleCameraFeed(-1); });
+            if (feedNext) feedNext.addEventListener('click', (e) => { e.preventDefault(); this.cycleCameraFeed(1); });
             this.initMapCanvas();
 
             document.getElementById('vol-slider').oninput = (e) => {
@@ -9333,16 +9677,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             o = o.parent;
                         }
                         if (hitMon) {
-                            const cams = this.worldSystem.cameras;
-                            if (cams.length > 1) {
-                                const idx = r.monitors.indexOf(hitMon);
-                                r._monPicks = r._monPicks || [0, 1, 2];
-                                r._monPicks[idx] = (r._monPicks[idx] + 1) % Math.min(cams.length, 3);
-                                this.notify('📹 CAM ' + String(r._monPicks[idx] + 1).padStart(2, '0'));
-                                audio.playSwitchClick();
-                            } else {
-                                this.notify('📹 SOLO HAY UNA CÁMARA EN EL NIVEL');
-                            }
+                            const idx = r.monitors.indexOf(hitMon);
+                            this.openCameraFeed(r, idx);
                             return;
                         }
                         if (!hitDoor) continue;
@@ -9422,8 +9758,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (mapM && mapM.style.display === 'flex') { mapM.style.display = 'none'; this.mapOpen = false; }
             }
             if (IS_TOUCH) return;   // en movil no hay pointer lock que liberar
-            if (!isOpen) document.exitPointerLock();
-            else document.body.requestPointerLock();
+            if (!isOpen) {
+                if (document.exitPointerLock && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (err) { /* noop */ }
+                }
+            } else if (document.body.requestPointerLock) {
+                try {
+                    const lock = document.body.requestPointerLock();
+                    if (lock && lock.catch) lock.catch(() => {});
+                } catch (err) { /* noop */ }
+            }
         }
 
         // ---- MAPA COMPARTIDO --------------------------------------------
@@ -9499,11 +9843,18 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 this.mapView.z = this.player.pos.z;
                 this.renderMap();
                 if (IS_TOUCH) return;
-                document.exitPointerLock();
+                if (document.exitPointerLock && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (err) { /* noop */ }
+                }
             } else {
                 modal.style.display = 'none';
                 this.mapOpen = false;
-                if (!IS_TOUCH) document.body.requestPointerLock();
+                if (!IS_TOUCH && document.body.requestPointerLock) {
+                    try {
+                        const lock = document.body.requestPointerLock();
+                        if (lock && lock.catch) lock.catch(() => {});
+                    } catch (err) { /* noop */ }
+                }
             }
         }
 
@@ -10181,10 +10532,15 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.chatOpen = willOpen;
             const input = document.getElementById('chat-input');
             if (willOpen) {
-                if (!IS_TOUCH) document.exitPointerLock();
+                if (!IS_TOUCH && document.exitPointerLock && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (err) { /* noop */ }
+                }
                 setTimeout(() => { if (input) input.focus(); }, 30);
-            } else if (!IS_TOUCH && this.gameActive) {
-                document.body.requestPointerLock();
+            } else if (!IS_TOUCH && this.gameActive && document.body.requestPointerLock) {
+                try {
+                    const lock = document.body.requestPointerLock();
+                    if (lock && lock.catch) lock.catch(() => {});
+                } catch (err) { /* noop */ }
             }
         }
 
@@ -10265,7 +10621,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         }
                         if (hitMon) {
                             found = true;
-                            prompt.textContent = '[E] CAMBIAR CÁMARA';
+                            prompt.textContent = '[E] VER CÁMARA CCTV';
                             break;
                         }
                         if (!hitDoor) continue;
@@ -10513,11 +10869,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
         triggerGameOver(reason) {
             this.gameActive = false;
-            document.exitPointerLock();
+            if (document.exitPointerLock && document.pointerLockElement) {
+                try { document.exitPointerLock(); } catch (err) { /* noop */ }
+            }
             this.toggleChat(false);
             document.getElementById('hud').style.display = 'none';
             document.getElementById('game-over-reason').textContent = reason;
             document.getElementById('game-over-screen').style.display = 'flex';
+            if (document.exitPointerLock && document.pointerLockElement) {
+                try { document.exitPointerLock(); } catch (err) { /* noop */ }
+            }
             this.net.leave();
         }
 
@@ -10594,6 +10955,107 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             }
         }
 
+        // Visor de una pantalla: se muestra el mismo canvas que alimenta el
+        // CRT del mundo. Separarlo del render 3D es intencionado: incluso si
+        // el monitor queda parcialmente oculto por la carcasa, al interactuar
+        // el jugador siempre ve la señal completa y puede cambiar de cámara.
+        getRoomFeedCameras(room) {
+            const cams = this.worldSystem.cameras || [];
+            return cams.slice().sort((a, b) =>
+                Math.hypot(a.x - room.centerX, a.z - room.centerZ) -
+                Math.hypot(b.x - room.centerX, b.z - room.centerZ));
+        }
+
+        openCameraFeed(room, monitorIndex = 0) {
+            if (!room || !room.monitors || !room.monitors.length) return;
+            room._monPicks = room._monPicks || room.monitors.map((_, i) => i);
+            const idx = Math.max(0, Math.min(room.monitors.length - 1, monitorIndex | 0));
+            const near = this.getRoomFeedCameras(room);
+            if (near.length) {
+                for (let i = 0; i < room.monitors.length; i++) {
+                    const p = Number.isFinite(room._monPicks[i]) ? room._monPicks[i] : i;
+                    room._monPicks[i] = ((p % near.length) + near.length) % near.length;
+                }
+            }
+            this.cameraFeedView = { open: true, room, monitorIndex: idx };
+            const overlay = document.getElementById('camera-feed-overlay');
+            if (overlay) {
+                overlay.classList.add('open');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+            // El visor necesita recibir clicks; salir del pointer-lock solo si
+            // realmente estaba activo evita excepciones en webviews/preview.
+            if (document.pointerLockElement && document.exitPointerLock) {
+                try { document.exitPointerLock(); } catch (err) { /* noop */ }
+            }
+            this.updateCameraFeedOverlay();
+        }
+
+        closeCameraFeed() {
+            const overlay = document.getElementById('camera-feed-overlay');
+            if (overlay) {
+                overlay.classList.remove('open');
+                overlay.setAttribute('aria-hidden', 'true');
+            }
+            this.cameraFeedView = { open: false, room: null, monitorIndex: 0 };
+        }
+
+        cycleCameraFeed(delta) {
+            const view = this.cameraFeedView;
+            if (!view.open || !view.room) return;
+            const room = view.room;
+            const near = this.getRoomFeedCameras(room);
+            if (!near.length) {
+                this.updateCameraFeedOverlay();
+                return;
+            }
+            room._monPicks = room._monPicks || room.monitors.map((_, i) => i);
+            const i = view.monitorIndex;
+            const current = Number.isFinite(room._monPicks[i]) ? room._monPicks[i] : 0;
+            room._monPicks[i] = ((current + delta) % near.length + near.length) % near.length;
+            const feed = this._monFeeds.get(room.id + ':' + i);
+            if (feed) {
+                feed.timer = 0;
+                feed.lastPick = -1;
+            }
+            audio.playSwitchClick();
+            this.updateCameraFeedOverlay();
+        }
+
+        updateCameraFeedOverlay() {
+            const view = this.cameraFeedView;
+            if (!view.open || !view.room) return;
+            const room = view.room;
+            const i = view.monitorIndex;
+            const near = this.getRoomFeedCameras(room);
+            room._monPicks = room._monPicks || room.monitors.map((_, n) => n);
+            const pick = near.length ? (((room._monPicks[i] || 0) % near.length) + near.length) % near.length : -1;
+            const feed = this._monFeeds.get(room.id + ':' + i);
+            const canvas = document.getElementById('camera-feed-canvas');
+            const title = document.getElementById('camera-feed-title');
+            const status = document.getElementById('camera-feed-status');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#061007';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            if (feed && feed.canvas && feed.canvas.width && room.state.battery > 0 && pick >= 0) {
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(feed.canvas, 0, 0, canvas.width, canvas.height);
+                ctx.imageSmoothingEnabled = true;
+            } else {
+                ctx.fillStyle = '#9be34a';
+                ctx.font = 'bold 28px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText(room.state.battery <= 0 ? 'SIN ENERGÍA' : 'SIN SEÑAL', canvas.width / 2, canvas.height / 2);
+            }
+            if (title) title.textContent = pick >= 0
+                ? 'CCTV // CAM ' + String(pick + 1).padStart(2, '0')
+                : 'CCTV // SIN SEÑAL';
+            if (status) status.textContent = pick >= 0
+                ? 'MONITOR ' + String(i + 1).padStart(2, '0') + ' · [E] / ◀ ▶ CAMBIAR CÁMARA'
+                : 'NO HAY CÁMARAS EXTERIORES DISPONIBLES';
+        }
+
         // Las camaras de pared vigilan al jugador: giran la cabeza hacia el
         // y encienden el LED rojo cuando esta en su radio
         updateCameras(dt) {
@@ -10651,11 +11113,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (!r.monitors || !r.monitors.length || !r.doorModel) continue;
                 if (Math.hypot(r.centerX - px, r.centerZ - pz) > 32) continue;
                 r._monPicks = r._monPicks || [0, 1, 2];
-                // Camaras ordenadas por cercania a la SALA (no al jugador):
-                // la asignacion es estable mientras el jugador no se mueve
-                const near = cams.slice().sort((a, b) =>
-                    Math.hypot(a.x - r.centerX, a.z - r.centerZ) -
-                    Math.hypot(b.x - r.centerX, b.z - r.centerZ));
+                // Cámaras ordenadas por cercanía a la SALA, igual que en el
+                // visor: así la imagen del monitor y la ampliada siempre son
+                // exactamente la misma señal.
+                const near = this.getRoomFeedCameras(r);
                 for (let i = 0; i < r.monitors.length; i++) {
                     const mon = r.monitors[i];
                     const pick = r._monPicks[i];
@@ -10685,6 +11146,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         feed.buf = new Uint8Array(256 * 192 * 4);
                         feed.tex = new THREE.CanvasTexture(feed.canvas);
                         feed.tex.minFilter = THREE.LinearFilter;
+                        feed.ctx.fillStyle = '#061007';
+                        feed.ctx.fillRect(0, 0, 256, 192);
+                        feed.ctx.fillStyle = '#9be34a';
+                        feed.ctx.font = 'bold 14px Courier New';
+                        feed.ctx.textAlign = 'center';
+                        feed.ctx.fillText('CCTV // INICIALIZANDO', 128, 96);
                         this._monFeeds.set(key, feed);
                     }
                     // Etiqueta CAM xx de la placa del monitor
@@ -10750,12 +11217,18 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     // Tinte verde de vision nocturna + contraste (FNAF)
                     this.renderer.readRenderTargetPixels(feed.rt, 0, 0, 256, 192, feed.buf);
                     const d = feed.img.data;
-                    for (let p = 0; p < d.length; p += 4) {
-                        const lum = (feed.buf[p] * 0.299 + feed.buf[p + 1] * 0.587 + feed.buf[p + 2] * 0.114) | 0;
-                        d[p] = (lum * 0.22) | 0;
-                        d[p + 1] = Math.min(255, lum * 1.35 + 34) | 0;
-                        d[p + 2] = (lum * 0.4) | 0;
-                        d[p + 3] = 255;
+                    // WebGL devuelve las filas desde abajo; invertir Y evita
+                    // que la señal aparezca cabeza abajo en el CRT y el visor.
+                    for (let y = 0; y < 192; y++) {
+                        for (let x = 0; x < 256; x++) {
+                            const p = (y * 256 + x) * 4;
+                            const src = ((191 - y) * 256 + x) * 4;
+                            const lum = (feed.buf[src] * 0.299 + feed.buf[src + 1] * 0.587 + feed.buf[src + 2] * 0.114) | 0;
+                            d[p] = (lum * 0.22) | 0;
+                            d[p + 1] = Math.min(255, lum * 1.35 + 34) | 0;
+                            d[p + 2] = (lum * 0.4) | 0;
+                            d[p + 3] = 255;
+                        }
                     }
                     feed.ctx.putImageData(feed.img, 0, 0);
                     feed.tex.needsUpdate = true;
@@ -10822,6 +11295,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 this.updateSecurityRooms(dt);
                 this.updateCameras(dt);
                 this.updateCameraFeeds(dt);
+                this.updateCameraFeedOverlay();
                 this.updateChalkDrawing();
                 this.checkInteractionsPrompt();
                 // Mapa: marcar explorado (cada 0,3 s), repintar si esta abierto

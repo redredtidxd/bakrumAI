@@ -23,6 +23,25 @@
     <div id="interact-prompt">PRESIONA [E]</div>
     <div id="toast-box"></div>
 
+    <!-- VISOR DE CCTV: se abre al interactuar con un monitor de la cabina -->
+    <div id="camera-feed-overlay" aria-hidden="true">
+        <div class="camera-feed-window">
+            <div class="camera-feed-head">
+                <span id="camera-feed-title">CCTV // SIN SEÑAL</span>
+                <button id="camera-feed-close" class="camera-feed-close" type="button" aria-label="Cerrar visor">✕</button>
+            </div>
+            <canvas id="camera-feed-canvas" width="768" height="576"></canvas>
+            <div class="camera-feed-foot">
+                <span id="camera-feed-status">INTERACTÚA CON UNA PANTALLA PARA CAMBIAR DE CÁMARA</span>
+                <span class="camera-feed-actions">
+                    <button id="camera-feed-prev" type="button">◀</button>
+                    <button id="camera-feed-next" type="button">▶</button>
+                    <span>[ESC] CERRAR</span>
+                </span>
+            </div>
+        </div>
+    </div>
+
     <!-- CONTROLES TÁCTILES (móvil/tableta) -->
     <div id="touch-ui">
         <div id="joy-base"><div id="joy-knob"></div></div>

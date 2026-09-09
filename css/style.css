@@ -108,6 +108,72 @@
             background: #ffcc00;
         }
 
+        /* VISOR DE CCTV DE LA SALA DE SEGURIDAD */
+        #camera-feed-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 75;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(4, 7, 5, 0.78);
+            pointer-events: auto;
+        }
+        #camera-feed-overlay.open {
+            display: flex;
+        }
+        .camera-feed-window {
+            width: min(760px, 88vw);
+            background: #10160f;
+            border: 2px solid #5b7445;
+            box-shadow: 0 0 38px rgba(0, 0, 0, 0.9), inset 0 0 0 1px rgba(164, 210, 92, 0.16);
+            color: #b9dc78;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        .camera-feed-head, .camera-feed-foot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 9px 12px;
+            background: #182218;
+            border-bottom: 1px solid #3e5830;
+            letter-spacing: 1px;
+            font-size: 11px;
+        }
+        .camera-feed-foot {
+            border-top: 1px solid #3e5830;
+            border-bottom: 0;
+            font-size: 10px;
+            flex-wrap: wrap;
+        }
+        .camera-feed-actions {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-left: auto;
+        }
+        .camera-feed-close, .camera-feed-actions button {
+            border: 1px solid #65864e;
+            background: #253622;
+            color: #d2f49a;
+            font: inherit;
+            cursor: pointer;
+            min-width: 28px;
+            min-height: 26px;
+        }
+        .camera-feed-close:hover, .camera-feed-actions button:hover {
+            background: #3d5830;
+        }
+        #camera-feed-canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            min-height: 220px;
+            background: #061007;
+            image-rendering: auto;
+        }
+
         /* PROMPT INTERACCIÓN */
         #interact-prompt {
             position: absolute;
@@ -655,6 +721,21 @@
             top: 34%;
             font-size: 11px;
             padding: 5px 12px;
+        }
+        body.touch-mode .camera-feed-window {
+            width: 94vw;
+        }
+        body.touch-mode .camera-feed-head,
+        body.touch-mode .camera-feed-foot {
+            font-size: 9px;
+            padding: 8px;
+        }
+        body.touch-mode .camera-feed-foot {
+            display: block;
+        }
+        body.touch-mode .camera-feed-actions {
+            margin-top: 7px;
+            margin-left: 0;
         }
         body.touch-mode #toast-box {
             top: 64px;

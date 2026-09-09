@@ -162,6 +162,7 @@
             this._noSignalTex = null;
             this._panelTimer = 0;
             this._iRechargeAcc = 0;
+            this.cameraFeedView = { open: false, room: null, monitorIndex: 0 };
             this._entSpawnNotified = false;
 
             window.addEventListener('beforeunload', () => this.net.leave());
@@ -377,11 +378,29 @@
                 if (e.code === 'Digit1') this.selectSlot(1);
                 if (e.code === 'Digit2') this.selectSlot(2);
                 if (e.code === 'Digit3') this.selectSlot(3);
-                if (e.code === 'KeyE') this.handleInteraction();
+                if (e.code === 'KeyE') {
+                    if (this.cameraFeedView.open) {
+                        e.preventDefault();
+                        this.cycleCameraFeed(1);
+                    } else {
+                        this.handleInteraction();
+                    }
+                }
+                if (e.code === 'ArrowLeft' && this.cameraFeedView.open) {
+                    e.preventDefault();
+                    this.cycleCameraFeed(-1);
+                }
+                if (e.code === 'ArrowRight' && this.cameraFeedView.open) {
+                    e.preventDefault();
+                    this.cycleCameraFeed(1);
+                }
                 if (e.code === 'KeyN') this.toggleNotebook();
                 if (e.code === 'KeyM') this.toggleMap();
                 if (e.code === 'KeyT' && !this.chatOpen) this.toggleChat(true);
-                if (e.code === 'Escape' && this.chatOpen) this.toggleChat(false);
+                if (e.code === 'Escape') {
+                    if (this.cameraFeedView.open) this.closeCameraFeed();
+                    else if (this.chatOpen) this.toggleChat(false);
+                }
             });
 
             document.addEventListener('keyup', (e) => {
@@ -418,7 +437,12 @@
             this.renderer.domElement.addEventListener('click', () => {
                 // En movil no hay pointer lock: los controles tactiles ya estan activos
                 if (this.gameActive && !this.isLocked && !IS_TOUCH) {
-                    document.body.requestPointerLock();
+                    try {
+                        if (document.body.ownerDocument === document && document.body.requestPointerLock) {
+                            const lock = document.body.requestPointerLock();
+                            if (lock && lock.catch) lock.catch(() => {});
+                        }
+                    } catch (err) { /* no bloquear el juego en webviews */ }
                 }
             });
 
@@ -665,7 +689,16 @@
                 if (IS_TOUCH) {
                     this.notify('🕹 IZQ.: mover · DERECHA: mirar · Toque rápido: interactuar');
                 } else {
-                    document.body.requestPointerLock();
+                    // El click del boton de inicio puede venir de un documento
+                    // embebido en Preview; el pointer-lock solo se solicita
+                    // desde el documento que contiene el canvas y nunca debe
+                    // romper el arranque si el navegador lo rechaza.
+                    try {
+                        if (document.body.ownerDocument === document && document.body.requestPointerLock) {
+                            const lock = document.body.requestPointerLock();
+                            if (lock && lock.catch) lock.catch(() => {});
+                        }
+                    } catch (err) { /* algunos webviews no permiten pointer lock */ }
                 }
             };
 
@@ -697,6 +730,17 @@
             document.getElementById('btn-map-zoom-in').onclick = () => this.mapZoom(1.35);
             document.getElementById('btn-map-zoom-out').onclick = () => this.mapZoom(1 / 1.35);
             document.getElementById('btn-map-center').onclick = () => this.mapCenterOnPlayer();
+
+            // Visor CCTV: los botones viven por encima del canvas del juego y
+            // no deben devolver el foco al pointer-lock. El feed se actualiza
+            // en el bucle principal, asi el visor nunca muestra una imagen
+            // estatica o una pantalla negra al abrirlo.
+            const feedClose = document.getElementById('camera-feed-close');
+            const feedPrev = document.getElementById('camera-feed-prev');
+            const feedNext = document.getElementById('camera-feed-next');
+            if (feedClose) feedClose.addEventListener('click', (e) => { e.preventDefault(); this.closeCameraFeed(); });
+            if (feedPrev) feedPrev.addEventListener('click', (e) => { e.preventDefault(); this.cycleCameraFeed(-1); });
+            if (feedNext) feedNext.addEventListener('click', (e) => { e.preventDefault(); this.cycleCameraFeed(1); });
             this.initMapCanvas();
 
             document.getElementById('vol-slider').oninput = (e) => {
@@ -838,16 +882,8 @@
                             o = o.parent;
                         }
                         if (hitMon) {
-                            const cams = this.worldSystem.cameras;
-                            if (cams.length > 1) {
-                                const idx = r.monitors.indexOf(hitMon);
-                                r._monPicks = r._monPicks || [0, 1, 2];
-                                r._monPicks[idx] = (r._monPicks[idx] + 1) % Math.min(cams.length, 3);
-                                this.notify('📹 CAM ' + String(r._monPicks[idx] + 1).padStart(2, '0'));
-                                audio.playSwitchClick();
-                            } else {
-                                this.notify('📹 SOLO HAY UNA CÁMARA EN EL NIVEL');
-                            }
+                            const idx = r.monitors.indexOf(hitMon);
+                            this.openCameraFeed(r, idx);
                             return;
                         }
                         if (!hitDoor) continue;
@@ -927,8 +963,16 @@
                 if (mapM && mapM.style.display === 'flex') { mapM.style.display = 'none'; this.mapOpen = false; }
             }
             if (IS_TOUCH) return;   // en movil no hay pointer lock que liberar
-            if (!isOpen) document.exitPointerLock();
-            else document.body.requestPointerLock();
+            if (!isOpen) {
+                if (document.exitPointerLock && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (err) { /* noop */ }
+                }
+            } else if (document.body.requestPointerLock) {
+                try {
+                    const lock = document.body.requestPointerLock();
+                    if (lock && lock.catch) lock.catch(() => {});
+                } catch (err) { /* noop */ }
+            }
         }
 
         // ---- MAPA COMPARTIDO --------------------------------------------
@@ -1004,11 +1048,18 @@
                 this.mapView.z = this.player.pos.z;
                 this.renderMap();
                 if (IS_TOUCH) return;
-                document.exitPointerLock();
+                if (document.exitPointerLock && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (err) { /* noop */ }
+                }
             } else {
                 modal.style.display = 'none';
                 this.mapOpen = false;
-                if (!IS_TOUCH) document.body.requestPointerLock();
+                if (!IS_TOUCH && document.body.requestPointerLock) {
+                    try {
+                        const lock = document.body.requestPointerLock();
+                        if (lock && lock.catch) lock.catch(() => {});
+                    } catch (err) { /* noop */ }
+                }
             }
         }
 
@@ -1686,10 +1737,15 @@
             this.chatOpen = willOpen;
             const input = document.getElementById('chat-input');
             if (willOpen) {
-                if (!IS_TOUCH) document.exitPointerLock();
+                if (!IS_TOUCH && document.exitPointerLock && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (err) { /* noop */ }
+                }
                 setTimeout(() => { if (input) input.focus(); }, 30);
-            } else if (!IS_TOUCH && this.gameActive) {
-                document.body.requestPointerLock();
+            } else if (!IS_TOUCH && this.gameActive && document.body.requestPointerLock) {
+                try {
+                    const lock = document.body.requestPointerLock();
+                    if (lock && lock.catch) lock.catch(() => {});
+                } catch (err) { /* noop */ }
             }
         }
 
@@ -1770,7 +1826,7 @@
                         }
                         if (hitMon) {
                             found = true;
-                            prompt.textContent = '[E] CAMBIAR CÁMARA';
+                            prompt.textContent = '[E] VER CÁMARA CCTV';
                             break;
                         }
                         if (!hitDoor) continue;
@@ -2018,11 +2074,16 @@
 
         triggerGameOver(reason) {
             this.gameActive = false;
-            document.exitPointerLock();
+            if (document.exitPointerLock && document.pointerLockElement) {
+                try { document.exitPointerLock(); } catch (err) { /* noop */ }
+            }
             this.toggleChat(false);
             document.getElementById('hud').style.display = 'none';
             document.getElementById('game-over-reason').textContent = reason;
             document.getElementById('game-over-screen').style.display = 'flex';
+            if (document.exitPointerLock && document.pointerLockElement) {
+                try { document.exitPointerLock(); } catch (err) { /* noop */ }
+            }
             this.net.leave();
         }
 
@@ -2099,6 +2160,107 @@
             }
         }
 
+        // Visor de una pantalla: se muestra el mismo canvas que alimenta el
+        // CRT del mundo. Separarlo del render 3D es intencionado: incluso si
+        // el monitor queda parcialmente oculto por la carcasa, al interactuar
+        // el jugador siempre ve la señal completa y puede cambiar de cámara.
+        getRoomFeedCameras(room) {
+            const cams = this.worldSystem.cameras || [];
+            return cams.slice().sort((a, b) =>
+                Math.hypot(a.x - room.centerX, a.z - room.centerZ) -
+                Math.hypot(b.x - room.centerX, b.z - room.centerZ));
+        }
+
+        openCameraFeed(room, monitorIndex = 0) {
+            if (!room || !room.monitors || !room.monitors.length) return;
+            room._monPicks = room._monPicks || room.monitors.map((_, i) => i);
+            const idx = Math.max(0, Math.min(room.monitors.length - 1, monitorIndex | 0));
+            const near = this.getRoomFeedCameras(room);
+            if (near.length) {
+                for (let i = 0; i < room.monitors.length; i++) {
+                    const p = Number.isFinite(room._monPicks[i]) ? room._monPicks[i] : i;
+                    room._monPicks[i] = ((p % near.length) + near.length) % near.length;
+                }
+            }
+            this.cameraFeedView = { open: true, room, monitorIndex: idx };
+            const overlay = document.getElementById('camera-feed-overlay');
+            if (overlay) {
+                overlay.classList.add('open');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+            // El visor necesita recibir clicks; salir del pointer-lock solo si
+            // realmente estaba activo evita excepciones en webviews/preview.
+            if (document.pointerLockElement && document.exitPointerLock) {
+                try { document.exitPointerLock(); } catch (err) { /* noop */ }
+            }
+            this.updateCameraFeedOverlay();
+        }
+
+        closeCameraFeed() {
+            const overlay = document.getElementById('camera-feed-overlay');
+            if (overlay) {
+                overlay.classList.remove('open');
+                overlay.setAttribute('aria-hidden', 'true');
+            }
+            this.cameraFeedView = { open: false, room: null, monitorIndex: 0 };
+        }
+
+        cycleCameraFeed(delta) {
+            const view = this.cameraFeedView;
+            if (!view.open || !view.room) return;
+            const room = view.room;
+            const near = this.getRoomFeedCameras(room);
+            if (!near.length) {
+                this.updateCameraFeedOverlay();
+                return;
+            }
+            room._monPicks = room._monPicks || room.monitors.map((_, i) => i);
+            const i = view.monitorIndex;
+            const current = Number.isFinite(room._monPicks[i]) ? room._monPicks[i] : 0;
+            room._monPicks[i] = ((current + delta) % near.length + near.length) % near.length;
+            const feed = this._monFeeds.get(room.id + ':' + i);
+            if (feed) {
+                feed.timer = 0;
+                feed.lastPick = -1;
+            }
+            audio.playSwitchClick();
+            this.updateCameraFeedOverlay();
+        }
+
+        updateCameraFeedOverlay() {
+            const view = this.cameraFeedView;
+            if (!view.open || !view.room) return;
+            const room = view.room;
+            const i = view.monitorIndex;
+            const near = this.getRoomFeedCameras(room);
+            room._monPicks = room._monPicks || room.monitors.map((_, n) => n);
+            const pick = near.length ? (((room._monPicks[i] || 0) % near.length) + near.length) % near.length : -1;
+            const feed = this._monFeeds.get(room.id + ':' + i);
+            const canvas = document.getElementById('camera-feed-canvas');
+            const title = document.getElementById('camera-feed-title');
+            const status = document.getElementById('camera-feed-status');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#061007';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            if (feed && feed.canvas && feed.canvas.width && room.state.battery > 0 && pick >= 0) {
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(feed.canvas, 0, 0, canvas.width, canvas.height);
+                ctx.imageSmoothingEnabled = true;
+            } else {
+                ctx.fillStyle = '#9be34a';
+                ctx.font = 'bold 28px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText(room.state.battery <= 0 ? 'SIN ENERGÍA' : 'SIN SEÑAL', canvas.width / 2, canvas.height / 2);
+            }
+            if (title) title.textContent = pick >= 0
+                ? 'CCTV // CAM ' + String(pick + 1).padStart(2, '0')
+                : 'CCTV // SIN SEÑAL';
+            if (status) status.textContent = pick >= 0
+                ? 'MONITOR ' + String(i + 1).padStart(2, '0') + ' · [E] / ◀ ▶ CAMBIAR CÁMARA'
+                : 'NO HAY CÁMARAS EXTERIORES DISPONIBLES';
+        }
+
         // Las camaras de pared vigilan al jugador: giran la cabeza hacia el
         // y encienden el LED rojo cuando esta en su radio
         updateCameras(dt) {
@@ -2156,11 +2318,10 @@
                 if (!r.monitors || !r.monitors.length || !r.doorModel) continue;
                 if (Math.hypot(r.centerX - px, r.centerZ - pz) > 32) continue;
                 r._monPicks = r._monPicks || [0, 1, 2];
-                // Camaras ordenadas por cercania a la SALA (no al jugador):
-                // la asignacion es estable mientras el jugador no se mueve
-                const near = cams.slice().sort((a, b) =>
-                    Math.hypot(a.x - r.centerX, a.z - r.centerZ) -
-                    Math.hypot(b.x - r.centerX, b.z - r.centerZ));
+                // Cámaras ordenadas por cercanía a la SALA, igual que en el
+                // visor: así la imagen del monitor y la ampliada siempre son
+                // exactamente la misma señal.
+                const near = this.getRoomFeedCameras(r);
                 for (let i = 0; i < r.monitors.length; i++) {
                     const mon = r.monitors[i];
                     const pick = r._monPicks[i];
@@ -2190,6 +2351,12 @@
                         feed.buf = new Uint8Array(256 * 192 * 4);
                         feed.tex = new THREE.CanvasTexture(feed.canvas);
                         feed.tex.minFilter = THREE.LinearFilter;
+                        feed.ctx.fillStyle = '#061007';
+                        feed.ctx.fillRect(0, 0, 256, 192);
+                        feed.ctx.fillStyle = '#9be34a';
+                        feed.ctx.font = 'bold 14px Courier New';
+                        feed.ctx.textAlign = 'center';
+                        feed.ctx.fillText('CCTV // INICIALIZANDO', 128, 96);
                         this._monFeeds.set(key, feed);
                     }
                     // Etiqueta CAM xx de la placa del monitor
@@ -2255,12 +2422,18 @@
                     // Tinte verde de vision nocturna + contraste (FNAF)
                     this.renderer.readRenderTargetPixels(feed.rt, 0, 0, 256, 192, feed.buf);
                     const d = feed.img.data;
-                    for (let p = 0; p < d.length; p += 4) {
-                        const lum = (feed.buf[p] * 0.299 + feed.buf[p + 1] * 0.587 + feed.buf[p + 2] * 0.114) | 0;
-                        d[p] = (lum * 0.22) | 0;
-                        d[p + 1] = Math.min(255, lum * 1.35 + 34) | 0;
-                        d[p + 2] = (lum * 0.4) | 0;
-                        d[p + 3] = 255;
+                    // WebGL devuelve las filas desde abajo; invertir Y evita
+                    // que la señal aparezca cabeza abajo en el CRT y el visor.
+                    for (let y = 0; y < 192; y++) {
+                        for (let x = 0; x < 256; x++) {
+                            const p = (y * 256 + x) * 4;
+                            const src = ((191 - y) * 256 + x) * 4;
+                            const lum = (feed.buf[src] * 0.299 + feed.buf[src + 1] * 0.587 + feed.buf[src + 2] * 0.114) | 0;
+                            d[p] = (lum * 0.22) | 0;
+                            d[p + 1] = Math.min(255, lum * 1.35 + 34) | 0;
+                            d[p + 2] = (lum * 0.4) | 0;
+                            d[p + 3] = 255;
+                        }
                     }
                     feed.ctx.putImageData(feed.img, 0, 0);
                     feed.tex.needsUpdate = true;
@@ -2327,6 +2500,7 @@
                 this.updateSecurityRooms(dt);
                 this.updateCameras(dt);
                 this.updateCameraFeeds(dt);
+                this.updateCameraFeedOverlay();
                 this.updateChalkDrawing();
                 this.checkInteractionsPrompt();
                 // Mapa: marcar explorado (cada 0,3 s), repintar si esta abierto
