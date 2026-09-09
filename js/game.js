@@ -7,15 +7,52 @@
     const IS_TOUCH = (('ontouchstart' in window) || navigator.maxTouchPoints > 0) &&
         (window.innerWidth < 1100 || !window.matchMedia('(pointer: fine)').matches);
 
-    // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
-    // Al subirla, actualiza también el ?v=... de index.html (cache busting:
-    // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.12.0';
-    // Esta entrega incorpora renderizado CCTV por turnos, caché de cámaras y
-    // lectura GPU->CPU solo para el visor abierto. La etiqueta "Opt" solo se
-    // muestra cuando estas optimizaciones están activadas.
-    const GAME_OPTIMIZED = true;
+    // HISTORIAL DE VERSIONES: no se borra una entrega al publicar otra. Las
+    // dos variantes 1.12.0 siguen seleccionables: la normal prioriza calidad
+    // y la Opt activa el perfil de rendimiento fuerte. Las anteriores quedan
+    // archivadas y visibles para no perder el historial (este archivo contiene
+    // el motor actual; no se finge cargar codigo que ya no esta incluido).
+    const VERSION_HISTORY = Object.freeze([
+        { id: '1.12.0-opt', version: '1.12.0', optimized: true, selectable: true, label: 'Version 1.12.0 Opt', note: 'Rendimiento fuerte · CCTV por turnos' },
+        { id: '1.12.0', version: '1.12.0', optimized: false, selectable: true, label: 'Version 1.12.0 normal', note: 'Perfil normal · maxima calidad' },
+        { id: '1.11.0', version: '1.11.0', optimized: false, selectable: false, archived: true, label: 'Version 1.11.0 · archivada', note: 'Sala CCTV original' },
+        { id: '1.10.0', version: '1.10.0', optimized: false, selectable: false, archived: true, label: 'Version 1.10.0 · archivada', note: 'Base anterior' }
+    ]);
+    const DEFAULT_VERSION_ID = '1.12.0-opt';
+    function storedVersionId() {
+        try {
+            const id = localStorage.getItem('backrooms-version-id');
+            const v = VERSION_HISTORY.find(x => x.id === id && x.selectable);
+            return v ? v.id : DEFAULT_VERSION_ID;
+        } catch (e) {
+            return DEFAULT_VERSION_ID;
+        }
+    }
+    const ACTIVE_VERSION_ID = storedVersionId();
+    const ACTIVE_VERSION = VERSION_HISTORY.find(x => x.id === ACTIVE_VERSION_ID) || VERSION_HISTORY[0];
+    const GAME_VERSION = ACTIVE_VERSION.version;
+    // La etiqueta "Opt" solo existe en una variante que realmente activa el
+    // perfil optimizado. Nunca se añade a la version normal.
+    const GAME_OPTIMIZED = !!ACTIVE_VERSION.optimized;
     const GAME_VERSION_LABEL = 'v' + GAME_VERSION + (GAME_OPTIMIZED ? ' Opt' : '');
+
+    // El PIN de una sala privada no se guarda ni se publica: solo se usa para
+    // derivar un canal MQTT distinto. Así dos salas con la misma semilla pero
+    // distinto PIN no se mezclan, y el mundo sigue siendo el mismo porque la
+    // semilla se mantiene separada del canal de red.
+    function makeRoomChannelKey(seed, visibility, pin) {
+        const text = String(seed == null ? '' : seed).trim().toLowerCase();
+        if (visibility !== 'private') {
+            return 'pub_' + (text.replace(/[^a-z0-9_-]/g, '') || 'random');
+        }
+        let h = 2166136261 >>> 0;
+        const value = text + '|' + String(pin || '').trim();
+        for (let i = 0; i < value.length; i++) {
+            h ^= value.charCodeAt(i);
+            h = Math.imul(h, 16777619) >>> 0;
+        }
+        return 'priv_' + h.toString(36);
+    }
 
     class BackroomsGame {
         constructor() {
@@ -36,7 +73,17 @@
             this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
             this.renderer.setSize(window.innerWidth, window.innerHeight);
             // En movil se baja la resolucion (pixel ratio 1): mas fps y menos calor
-            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_TOUCH ? 1 : 1.5));
+            // El perfil Opt baja el coste de rasterizado de forma medible:
+            // menos pixel ratio, luces activas limitadas y CCTV con turnos
+            // mas espaciados. La variante normal conserva la resolucion alta.
+            this.optimizedMode = GAME_OPTIMIZED;
+            this.activeVersion = ACTIVE_VERSION;
+            this._renderFrame = 0;
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,
+                // Opt es un perfil de rendimiento real: reduce la carga de
+                // píxeles además de limitar luces/CCTV. La versión normal no
+                // muestra "Opt" porque mantiene este techo de calidad.
+                this.optimizedMode ? (IS_TOUCH ? 0.78 : 0.78) : (IS_TOUCH ? 1.15 : 1.5)));
             this.renderer.setClearColor(FOG_COLOR);
             // Control de exposición: mapeado de tonos oscuro y aterrador
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -81,11 +128,16 @@
             // (ver updateLights), asi una sala grande o un cruce con muchas
             // lamparas queda entero encendido.
             this.lightPool = [];
-            for (let i = 0; i < 64; i++) {
+            // En Opt se mantienen las luces cercanas imprescindibles, pero se
+            // reduce mucho el número de PointLights que WebGL evalúa.
+            const lightCount = this.optimizedMode ? 20 : 64;
+            for (let i = 0; i < lightCount; i++) {
                 const pl = new THREE.PointLight(0xffd878, 0, 18, 2.0);
                 this.scene.add(pl);
                 this.lightPool.push(pl);
             }
+            this._lightUpdateTimer = 0;
+            this._noiseUpdateTimer = 0;
 
             this.player = {
                 pos: this.camera.position,
@@ -97,6 +149,44 @@
                 stepTimer: 0,
                 bobTimer: 0
             };
+
+            // Estadisticas persistentes durante la partida: se pueden abrir
+            // con [P] en cualquier momento y tambien quedan en la pantalla de
+            // muerte. Los sets evitan contar dos veces la misma sala.
+            this.stats = {
+                startedAt: 0,
+                finishedAt: 0,
+                deaths: 0,
+                distance: 0,
+                roomsVisited: 0,
+                securityRoomsFound: 0,
+                pickups: 0,
+                chalkMarks: 0,
+                doorsOpened: 0,
+                doorsClosed: 0,
+                camerasViewed: 0,
+                flashlightSeconds: 0,
+                sprintSeconds: 0,
+                entitySpawns: 0,
+                entityEncounters: 0,
+                lastReason: '',
+                roomKeys: new Set(),
+                securityKeys: new Set()
+            };
+            this._statsLastPos = new THREE.Vector3();
+            this._statsRoomTimer = 0;
+            this._entityEncounterActive = false;
+            this._lastEntityActive = false;
+            this.statsOpen = false;
+            this._noiseTimer = 0;
+            this._interactionTimer = 0;
+            // El bot debe aparecer pronto y de forma comprobable, sin esperar
+            // casi un minuto: doce segundos dejan tiempo para orientarse pero
+            // evitan que una partida parezca rota o sin Entidad.
+            this._entityWarmupSeconds = 12;
+            this._entityWarmupElapsed = 0;
+            this._entityHostReady = false;
+            this._entityHostPid = null;
 
             this.inventory = {
                 currentSlot: 1,
@@ -121,6 +211,12 @@
             // si el jugador escribe una semilla con LETRAS, el codigo es el
             // propio texto (saneado) y asi se comparte tal cual se escribe.
             this.roomCode = null;
+            this.networkRoomKey = null;
+            this.roomName = '';
+            this.roomVisibility = 'public';
+            this.roomPin = '';
+            this.roomName = '';
+            this.roomListings = [];
             this.updateSeedLabel();
 
             this.worldSystem = new WorldGridSystem(this.scene);
@@ -130,7 +226,11 @@
             // Multijugador (hasta 6): mismo mundo deterministico + broker MQTT
             this.net = new MultiplayerManager(this.scene, this.camera, {
                 onToast: (msg) => this.notify(msg),
-                onKill: (reason) => this.triggerGameOver(reason)
+                onKill: (reason) => this.triggerGameOver(reason),
+                onRoomListings: (rooms) => {
+                    this.roomListings = rooms || [];
+                    if (this.roomsModalOpen) this.renderRoomList(this.roomListings);
+                }
             });
             // El mundo y la tiza se sincronizan por red: objetos reclamados y
             // dibujos visibles para toda la sala
@@ -166,9 +266,9 @@
             this._feedTime = 0;
             this._feedFrame = 0;
             this._feedRoundRobin = 0;
-            this._feedReadbackEvery = 2; // solo el feed que esta viendo el jugador
-            this._feedCaptureDistance = 42;
-            this._feedMinInterval = 0.22; // una captura por ranura, sin renderizar 3 CRT a la vez
+            this._feedReadbackEvery = this.optimizedMode ? 4 : 2; // solo el feed abierto lee pixeles
+            this._feedCaptureDistance = this.optimizedMode ? 36 : 42;
+            this._feedMinInterval = this.optimizedMode ? 0.30 : 0.16; // Opt: una captura por turno, sin tres renders a la vez
             this._feedOverlayStamp = '';
             this._noSignalTex = null;
             this._panelTimer = 0;
@@ -227,17 +327,11 @@
             if (notesLabel) notesLabel.textContent = `NOTAS: 0 / ${this.inventory.totalNotes}`;
             this.updateFlashlightHUD();
 
-            setTimeout(() => {
-                // Solo el ANFITRIÓN de la sala (o el jugador solitario) simula
-                // la entidad; el resto la ve como espectro sincronizado. El
-                // spawn en si lo hace la entidad a los 50 s (y reaparece sola
-                // si el jugador se aleja demasiado); al aparecer de verdad se
-                // avisa a la sala con onEntitySpawned.
-                if (this.gameActive && this.net.isEntityHost()) {
-                    this.entity.canRespawn = true;
-                }
-            }, 50000);
-
+            // La Entidad empieza a contar el calentamiento al pulsar
+            // COMENZAR, no al cargar la página. Antes el temporizador podía
+            // terminar mientras el menú seguía abierto y el bot nunca se
+            // habilitaba al entrar; ahora el bucle lo activa de forma segura
+            // cuando el anfitrión real está elegido.
             window.addEventListener('resize', () => this.onResize());
             this.animate();
         }
@@ -418,6 +512,7 @@
                 }
                 if (e.code === 'KeyN') this.toggleNotebook();
                 if (e.code === 'KeyM') this.toggleMap();
+                if (e.code === 'KeyP') this.toggleStats();
                 if (e.code === 'KeyT' && !this.chatOpen) this.toggleChat(true);
                 if (e.code === 'Escape') {
                     if (this.cameraFeedView.open) this.closeCameraFeed();
@@ -607,6 +702,7 @@
             bindTap('btn-touch-note', () => this.toggleNotebook());
             bindTap('btn-touch-chat', () => this.toggleChat());
             bindTap('btn-touch-map', () => this.toggleMap());
+            bindTap('btn-touch-stats', () => this.toggleStats());
             bindTap('btn-touch-interact', () => this.handleInteraction());
             // Cerrar cuaderno/mapa tambien por toque directo (el click sintetico
             // puede quedar bloqueado en algunos navegadores moviles)
@@ -647,6 +743,23 @@
             if (mv) mv.textContent = 'THE BACKROOMS ' + GAME_VERSION_LABEL;
             const hv = document.getElementById('hud-version');
             if (hv) hv.textContent = GAME_VERSION_LABEL;
+            const versionSelect = document.getElementById('version-selector');
+            const versionNote = document.getElementById('version-note');
+            if (versionSelect) {
+                versionSelect.value = ACTIVE_VERSION_ID;
+                versionSelect.onchange = (e) => {
+                    const next = VERSION_HISTORY.find(v => v.id === e.target.value && v.selectable);
+                    if (!next) {
+                        e.target.value = ACTIVE_VERSION_ID;
+                        return;
+                    }
+                    try { localStorage.setItem('backrooms-version-id', next.id); } catch (err) { /* noop */ }
+                    // El perfil se decide al crear el renderer; recargar evita
+                    // mezclar luces/render targets de dos perfiles.
+                    location.reload();
+                };
+            }
+            if (versionNote) versionNote.textContent = ACTIVE_VERSION.note + ' · se aplica al recargar';
 
             // Recuerda el nombre entre partidas
             const nameInput = document.getElementById('name-input');
@@ -666,6 +779,16 @@
 
             document.getElementById('btn-start').onclick = () => {
                 audio.init();
+
+                const visibilityEl = document.getElementById('room-visibility');
+                const pinEl = document.getElementById('room-pin-input');
+                this.roomVisibility = visibilityEl ? visibilityEl.value : 'public';
+                this.roomPin = pinEl ? pinEl.value.trim() : '';
+                if (this.roomVisibility === 'private' && this.roomPin.length < 4) {
+                    this.notify('🔒 LA SALA PRIVADA NECESITA UN PIN DE 4 A 12 CARACTERES');
+                    if (pinEl) pinEl.focus();
+                    return;
+                }
 
                 // Semilla personalizada: si el campo del menu trae una semilla
                 // distinta, se regenera TODO el mundo antes de empezar.
@@ -703,11 +826,46 @@
                 if (name) {
                     try { localStorage.setItem('backrooms-name', name); } catch (e) { /* noop */ }
                 }
-                this.net.join(this.roomCode !== null ? this.roomCode : this.worldSeed, name);
+                const seedValue = this.roomCode !== null ? this.roomCode : this.worldSeed;
+                const roomNameEl = document.getElementById('room-name-input');
+                this.roomName = (roomNameEl && roomNameEl.value.trim()) || ('SALA ' + seedValue);
+                this.networkRoomKey = makeRoomChannelKey(seedValue, this.roomVisibility, this.roomPin);
+                this.net.join(this.networkRoomKey, name, {
+                    visibility: this.roomVisibility,
+                    roomName: this.roomName,
+                    seed: seedValue
+                });
 
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
                 this.gameActive = true;
+                this.stats.startedAt = Date.now();
+                this.stats.finishedAt = 0;
+                this.stats.lastReason = '';
+                this.stats.roomKeys.clear();
+                this.stats.securityKeys.clear();
+                this.stats.distance = 0;
+                this.stats.deaths = 0;
+                this.stats.roomsVisited = 0;
+                this.stats.securityRoomsFound = 0;
+                this.stats.pickups = 0;
+                this.stats.chalkMarks = 0;
+                this.stats.doorsOpened = 0;
+                this.stats.doorsClosed = 0;
+                this.stats.camerasViewed = 0;
+                this.stats.flashlightSeconds = 0;
+                this.stats.sprintSeconds = 0;
+                this.stats.entitySpawns = 0;
+                this.stats.entityEncounters = 0;
+                this._statsLastPos.copy(this.player.pos);
+                this._statsRoomTimer = 0;
+                this._entityWarmupElapsed = 0;
+                this._entityHostReady = false;
+                this.entity.canRespawn = false;
+                this.entity.active = false;
+                this.entity.mesh.visible = false;
+                this._entSpawnNotified = false;
+                this.renderStats();
                 if (IS_TOUCH) {
                     this.notify('🕹 IZQ.: mover · DERECHA: mirar · Toque rápido: interactuar');
                 } else {
@@ -739,6 +897,51 @@
             const closeNbX = document.getElementById('btn-close-notebook-x');
             if (closeNbX) closeNbX.onclick = () => this.toggleNotebook();
             document.getElementById('btn-close-map').onclick = () => this.toggleMap();
+
+            // Salas públicas/privadas: el PIN nunca sale en el listado público.
+            const visibility = document.getElementById('room-visibility');
+            const pinInput = document.getElementById('room-pin-input');
+            if (visibility) visibility.onchange = () => {
+                if (pinInput) pinInput.style.display = visibility.value === 'private' ? 'block' : 'none';
+            };
+            const createVisibility = document.getElementById('room-create-visibility');
+            const createPin = document.getElementById('room-create-pin');
+            if (createVisibility) createVisibility.onchange = () => {
+                if (createPin) createPin.style.display = createVisibility.value === 'private' ? 'block' : 'none';
+            };
+            const openRooms = document.getElementById('btn-open-rooms');
+            if (openRooms) openRooms.onclick = () => this.openRoomsModal();
+            const closeRooms = document.getElementById('btn-close-rooms');
+            if (closeRooms) closeRooms.onclick = () => this.closeRoomsModal();
+            const refreshRooms = document.getElementById('btn-refresh-rooms');
+            if (refreshRooms) refreshRooms.onclick = () => this.refreshRoomList();
+            const createRoom = document.getElementById('btn-create-room');
+            if (createRoom) createRoom.onclick = () => {
+                const seedTarget = document.getElementById('seed-input');
+                const nameTarget = document.getElementById('room-name-input');
+                const code = document.getElementById('room-code-input');
+                const roomVis = document.getElementById('room-create-visibility');
+                const roomPin = document.getElementById('room-create-pin');
+                if (seedTarget && code && code.value.trim()) seedTarget.value = code.value.trim();
+                if (nameTarget && nameTarget.value.trim()) {
+                    const mainRoomName = document.getElementById('room-name-input');
+                    if (mainRoomName) mainRoomName.value = nameTarget.value.trim();
+                }
+                if (visibility && roomVis) visibility.value = roomVis.value;
+                if (pinInput && roomPin) {
+                    pinInput.value = roomPin.value.trim();
+                    pinInput.style.display = roomVis && roomVis.value === 'private' ? 'block' : 'none';
+                }
+                this.closeRoomsModal();
+                this.notify(roomVis && roomVis.value === 'private'
+                    ? '🔒 SALA PRIVADA PREPARADA · comparte código y PIN'
+                    : '🌐 SALA PÚBLICA PREPARADA');
+            };
+            // Stats: se pueden abrir durante la partida y se conservan en muerte.
+            const closeStats = document.getElementById('btn-close-stats');
+            if (closeStats) closeStats.onclick = () => this.toggleStats(false);
+            const showDeathStats = document.getElementById('btn-show-stats');
+            if (showDeathStats) showDeathStats.onclick = () => this.toggleStats(true);
             // Chat: Enter envia, Escape cierra, boton ENVIAR tambien
             const chatInput = document.getElementById('chat-input');
             if (chatInput) {
@@ -772,6 +975,211 @@
             document.getElementById('btn-respawn').onclick = () => {
                 location.reload();
             };
+            if (visibility) visibility.dispatchEvent(new Event('change'));
+            if (createVisibility) createVisibility.dispatchEvent(new Event('change'));
+            this.renderRoomList([]);
+        }
+
+        openRoomsModal() {
+            const modal = document.getElementById('rooms-modal');
+            if (!modal) return;
+            modal.style.display = 'flex';
+            this.roomsModalOpen = true;
+            this.refreshRoomList();
+        }
+
+        closeRoomsModal() {
+            const modal = document.getElementById('rooms-modal');
+            if (modal) modal.style.display = 'none';
+            this.roomsModalOpen = false;
+        }
+
+        refreshRoomList() {
+            const list = this.net && this.net.getPublicRooms ? this.net.getPublicRooms() : (this.roomListings || []);
+            this.renderRoomList(list);
+            if (this.net && this.net.requestRoomListings) this.net.requestRoomListings();
+        }
+
+        renderRoomList(rooms) {
+            const box = document.getElementById('room-list');
+            if (!box) return;
+            box.textContent = '';
+            const list = Array.isArray(rooms) ? rooms : [];
+            if (!list.length) {
+                const empty = document.createElement('div');
+                empty.className = 'room-empty';
+                empty.textContent = 'NO HAY SALAS PÚBLICAS ACTIVAS · CREA UNA O COMPARTE UN CÓDIGO';
+                box.appendChild(empty);
+                return;
+            }
+            list.slice().sort((a, b) => (b.count || 0) - (a.count || 0)).forEach((room) => {
+                const row = document.createElement('div');
+                row.className = 'room-item';
+                const info = document.createElement('div');
+                const title = document.createElement('div');
+                title.className = 'room-item-name';
+                title.textContent = room.name || ('SALA ' + (room.seed || room.key));
+                const meta = document.createElement('div');
+                meta.className = 'room-item-meta';
+                meta.textContent = 'CÓDIGO: ' + String(room.seed || room.key) + ' · ' + (room.count || 0) + '/6 · ' + (room.names || []).join(', ');
+                info.append(title, meta);
+                const state = document.createElement('span');
+                state.className = 'room-item-meta';
+                state.textContent = (room.count || 0) >= 6 ? 'LLENA' : 'ABIERTA';
+                const join = document.createElement('button');
+                join.className = 'btn';
+                join.type = 'button';
+                join.textContent = 'PREPARAR';
+                join.style.margin = '0';
+                join.style.padding = '6px 9px';
+                join.onclick = () => {
+                    const seed = document.getElementById('seed-input');
+                    const rn = document.getElementById('room-name-input');
+                    const vis = document.getElementById('room-visibility');
+                    if (seed) seed.value = String(room.seed || room.key);
+                    if (rn) rn.value = String(room.name || '');
+                    if (vis) { vis.value = 'public'; vis.dispatchEvent(new Event('change')); }
+                    this.closeRoomsModal();
+                    this.notify('🌐 SALA SELECCIONADA · pulsa COMENZAR');
+                };
+                row.append(info, state, join);
+                box.appendChild(row);
+            });
+        }
+
+        toggleStats(force) {
+            const modal = document.getElementById('stats-modal');
+            if (!modal) return;
+            const open = force === undefined ? !this.statsOpen : !!force;
+            this.statsOpen = open;
+            modal.classList.toggle('open', open);
+            modal.setAttribute('aria-hidden', open ? 'false' : 'true');
+            if (open) {
+                this.renderStats();
+                if (!IS_TOUCH && document.exitPointerLock && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (err) { /* noop */ }
+                }
+            } else if (!IS_TOUCH && this.gameActive && document.body.requestPointerLock) {
+                try {
+                    const lock = document.body.requestPointerLock();
+                    if (lock && lock.catch) lock.catch(() => {});
+                } catch (err) { /* noop */ }
+            }
+        }
+
+        formatPlayTime() {
+            const start = this.stats.startedAt || Date.now();
+            const end = this.stats.finishedAt || Date.now();
+            const sec = Math.max(0, Math.floor((end - start) / 1000));
+            const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+            const ss = String(sec % 60).padStart(2, '0');
+            return mm + ':' + ss;
+        }
+
+        escapeStatText(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        buildStatsMarkup() {
+            const s = this.stats;
+            const mode = this.escapeStatText(this.activeVersion ? this.activeVersion.label : GAME_VERSION_LABEL);
+            const room = this.escapeStatText(this.roomCode !== null ? this.roomCode : (this.worldSeed || '--'));
+            const reason = this.escapeStatText(s.lastReason);
+            return `
+                <div class="stats-section">PARTIDA</div>
+                <div class="stats-grid">
+                    <div class="stat-row"><span>Versión</span><strong>${mode}</strong></div>
+                    <div class="stat-row"><span>Sala / semilla</span><strong>${room}</strong></div>
+                    <div class="stat-row"><span>Tiempo activo</span><strong>${this.formatPlayTime()}</strong></div>
+                    <div class="stat-row"><span>Distancia recorrida</span><strong>${this.stats.distance.toFixed(1)} m</strong></div>
+                    <div class="stat-row"><span>Muertes</span><strong>${this.stats.deaths}</strong></div>
+                    <div class="stat-row"><span>Salas visitadas</span><strong>${this.stats.roomsVisited}</strong></div>
+                    <div class="stat-row"><span>Refugios encontrados</span><strong>${this.stats.securityRoomsFound}</strong></div>
+                    <div class="stat-row"><span>Objetos recogidos</span><strong>${this.stats.pickups}</strong></div>
+                </div>
+                <div class="stats-section">RECURSOS E INTERACCIONES</div>
+                <div class="stats-grid">
+                    <div class="stat-row"><span>Marcas de tiza</span><strong>${this.stats.chalkMarks}</strong></div>
+                    <div class="stat-row"><span>Cámaras vistas</span><strong>${this.stats.camerasViewed}</strong></div>
+                    <div class="stat-row"><span>Puertas abiertas</span><strong>${this.stats.doorsOpened}</strong></div>
+                    <div class="stat-row"><span>Puertas cerradas</span><strong>${this.stats.doorsClosed}</strong></div>
+                    <div class="stat-row"><span>Linterna encendida</span><strong>${Math.floor(this.stats.flashlightSeconds)} s</strong></div>
+                    <div class="stat-row"><span>Tiempo corriendo</span><strong>${Math.floor(this.stats.sprintSeconds)} s</strong></div>
+                </div>
+                <div class="stats-section">LA ENTIDAD</div>
+                <div class="stats-grid">
+                    <div class="stat-row"><span>Apariciones</span><strong>${this.stats.entitySpawns}</strong></div>
+                    <div class="stat-row"><span>Encuentros</span><strong>${this.stats.entityEncounters}</strong></div>
+                </div>
+                <div class="stats-note">${reason ? 'ÚLTIMO REGISTRO: ' + reason : 'Pulsa [P] en cualquier momento para actualizar este registro.'}</div>`;
+        }
+
+        renderStats() {
+            if (!this.stats) return;
+            const markup = this.buildStatsMarkup();
+            const live = document.getElementById('stats-content');
+            const death = document.getElementById('game-over-stats');
+            if (live) live.innerHTML = markup;
+            if (death) death.innerHTML = markup;
+        }
+
+        updateStats(dt) {
+            if (!this.stats || !this.gameActive) return;
+            const p = this.player.pos;
+            const step = Math.hypot(p.x - this._statsLastPos.x, p.z - this._statsLastPos.z);
+            if (step < 5) this.stats.distance += step;
+            this._statsLastPos.copy(p);
+            if (this.flashlightOn) this.stats.flashlightSeconds += dt;
+            if (this.keys['ShiftLeft'] && (this.keys['KeyW'] || this.keys['KeyA'] || this.keys['KeyS'] || this.keys['KeyD'] || this.touchMove.x || this.touchMove.y)) {
+                this.stats.sprintSeconds += dt;
+            }
+            this._statsRoomTimer -= dt;
+            if (this._statsRoomTimer <= 0) {
+                this._statsRoomTimer = 0.5;
+                const C = CELL_SIZE;
+                for (const ch of this.worldSystem.chunks.values()) {
+                    if (!ch.loaded) continue;
+                    for (const r of ch.rooms || []) {
+                        const minX = (ch.cx * CHUNK_SIZE + r.x) * C;
+                        const maxX = (ch.cx * CHUNK_SIZE + r.x + r.w) * C;
+                        const minZ = (ch.cz * CHUNK_SIZE + r.z) * C;
+                        const maxZ = (ch.cz * CHUNK_SIZE + r.z + r.h) * C;
+                        if (p.x > minX + 0.2 && p.x < maxX - 0.2 && p.z > minZ + 0.2 && p.z < maxZ - 0.2) {
+                            const key = 'room:' + ch.cx + ':' + ch.cz + ':' + r.x + ':' + r.z;
+                            if (!this.stats.roomKeys.has(key)) {
+                                this.stats.roomKeys.add(key);
+                                this.stats.roomsVisited++;
+                            }
+                        }
+                    }
+                    for (const sr of ch.securityRooms || []) {
+                        if (p.x > sr.minX && p.x < sr.maxX && p.z > sr.minZ && p.z < sr.maxZ) {
+                            if (!this.stats.securityKeys.has(sr.id)) {
+                                this.stats.securityKeys.add(sr.id);
+                                this.stats.securityRoomsFound++;
+                            }
+                        }
+                    }
+                }
+            }
+            const ent = this.entity;
+            if (ent && ent.active) {
+                if (!this._lastEntityActive) this.stats.entitySpawns++;
+                const d = Math.hypot(ent.pos.x - p.x, ent.pos.z - p.z);
+                const close = d < 20 && (ent.seesPlayer || ent.state === 'CHASING');
+                if (close && !this._entityEncounterActive) this.stats.entityEncounters++;
+                this._entityEncounterActive = close;
+                this._lastEntityActive = true;
+            } else {
+                this._entityEncounterActive = false;
+                this._lastEntityActive = false;
+            }
+            if (this.statsOpen) this.renderStats();
         }
 
         selectSlot(slot) {
@@ -883,6 +1291,7 @@
                             } else if (p.type === 'note') {
                                 this.addLoreNote(p.text, p.noteIndex);
                             }
+                            this.stats.pickups++;
                             done = true;
                             break;
                         }
@@ -921,6 +1330,8 @@
                             }
                         } else {
                             r.state.doorOpen = !r.state.doorOpen;
+                            if (r.state.doorOpen) this.stats.doorsOpened++;
+                            else this.stats.doorsClosed++;
                             this.doorStates.set(r.id, r.state.doorOpen);
                             this.net.publishDoor(r.id, r.state.doorOpen);
                             audio.playSwitchClick();
@@ -1542,6 +1953,7 @@
                         // Los dibujos de tiza se comparten con toda la sala
                         this.net.queueChalkDot(hit.point, n, this.inventory.chalkColor);
                         this.chalkSystem.lastDrawPoint = hit.point.clone();
+                        this.stats.chalkMarks++;
 
                         this.inventory.chalkPoints = Math.max(0, this.inventory.chalkPoints - 0.32);
                         this.updateChalkHUD();
@@ -1554,6 +1966,14 @@
         }
 
         updateLights(dt) {
+            // En Opt no se reordena toda la piscina de luces en cada frame:
+            // las luces solo cambian cuando el jugador ha avanzado un poco.
+            // La iluminacion sigue siendo estable, pero se elimina una
+            // ordenacion costosa de cientos de lamparas por frame.
+            this._lightUpdateTimer -= dt;
+            const lightInterval = this.optimizedMode ? 0.12 : 0.033;
+            if (this._lightUpdateTimer > 0) return;
+            this._lightUpdateTimer = lightInterval;
             // La luz depende SOLO de la posicion del jugador, nunca de hacia
             // donde apunta la camara: antes la piscina priorizaba las lamparas
             // visibles en pantalla y girar la vista reasignaba los focos, asi
@@ -2095,17 +2515,32 @@
         }
 
         triggerGameOver(reason) {
+            if (!this.gameActive) return;
+            // Captura el ultimo desplazamiento/tiempo y el encuentro que
+            // provoco la muerte antes de apagar el bucle de partida.
+            this.updateStats(0);
             this.gameActive = false;
+            this.stats.finishedAt = Date.now();
+            this.stats.deaths++;
+            this.stats.lastReason = reason || 'SEÑAL PERDIDA';
+            this.closeCameraFeed();
+            this.statsOpen = false;
+            const statsModal = document.getElementById('stats-modal');
+            if (statsModal) {
+                statsModal.classList.remove('open');
+                statsModal.setAttribute('aria-hidden', 'true');
+            }
             if (document.exitPointerLock && document.pointerLockElement) {
                 try { document.exitPointerLock(); } catch (err) { /* noop */ }
             }
             this.toggleChat(false);
-            document.getElementById('hud').style.display = 'none';
-            document.getElementById('game-over-reason').textContent = reason;
-            document.getElementById('game-over-screen').style.display = 'flex';
-            if (document.exitPointerLock && document.pointerLockElement) {
-                try { document.exitPointerLock(); } catch (err) { /* noop */ }
-            }
+            const hud = document.getElementById('hud');
+            if (hud) hud.style.display = 'none';
+            const reasonEl = document.getElementById('game-over-reason');
+            if (reasonEl) reasonEl.textContent = this.stats.lastReason;
+            this.renderStats();
+            const screen = document.getElementById('game-over-screen');
+            if (screen) screen.style.display = 'flex';
             this.net.leave();
         }
 
@@ -2211,6 +2646,7 @@
                 }
             }
             this.cameraFeedView = { open: true, room, monitorIndex: idx };
+            this.stats.camerasViewed++;
             const overlay = document.getElementById('camera-feed-overlay');
             if (overlay) {
                 overlay.classList.add('open');
@@ -2649,6 +3085,35 @@
                 }
                 this.net.update(dt, this.player.pos, this.yaw, this.pitch, this.flashlightOn, this.worldSystem.wallBoxes, this.entity, this.furnitureBodies);
                 this.updateNetHUD();
+
+                // La Entidad solo la simula el anfitrion real. Antes el
+                // calentamiento se inicializaba, pero nunca se avanzaba: en
+                // consecuencia canRespawn quedaba en false para siempre y el
+                // bot no aparecia. Ahora espera doce segundos desde que la
+                // sala esta lista y luego se programa una primera aparicion.
+                const entityHost = this.net.isEntityHost();
+                if (entityHost) {
+                    if (!this._entityHostReady) {
+                        this._entityWarmupElapsed += dt;
+                        if (this._entityWarmupElapsed >= this._entityWarmupSeconds) {
+                            this._entityHostReady = true;
+                            this.entity.canRespawn = true;
+                            this.entity.respawnTimer = 0.35;
+                            this.notify('⚠ LA ENTIDAD HA ENTRADO EN EL NIVEL');
+                        }
+                    }
+                } else {
+                    this._entityHostReady = false;
+                    this._entityWarmupElapsed = 0;
+                    this.entity.canRespawn = false;
+                    if (this.entity.active) {
+                        this.entity.active = false;
+                        this.entity.mesh.visible = false;
+                        this.entity.path = [];
+                        this.entity.pathTarget = null;
+                    }
+                }
+
                 this.entity.update(
                     dt,
                     this.player.pos,
@@ -2659,16 +3124,37 @@
                     this.furnitureBodies
                 );
                 // Cuando la entidad aparece de verdad (o reaparece), la sala
-                // se entera: los espectros se colocan en su posicion real
+                // se entera: los espectros se colocan en su posicion real.
+                // Al desaparecer se envia tambien el estado "gone" para que
+                // ningún jugador conserve un bot fantasma.
                 if (this.entity.active && !this._entSpawnNotified) {
                     this._entSpawnNotified = true;
                     this.net.onEntitySpawned();
+                } else if (!this.entity.active && this._entSpawnNotified) {
+                    this._entSpawnNotified = false;
+                    this.net.onEntityGone();
                 }
+                this.updateStats(dt);
             }
 
-            if (Math.random() < 0.3) this.renderNoise();
+            // El ruido VHS es decorativo y no debe consumir una imagen de
+            // 256x256 en cada frame. Opt lo actualiza con mucha menos
+            // frecuencia; el efecto visual sigue siendo continuo.
+            this._noiseUpdateTimer -= dt;
+            const noiseInterval = this.optimizedMode ? 0.12 : 0.05;
+            if (this._noiseUpdateTimer <= 0) {
+                this._noiseUpdateTimer = noiseInterval;
+                this.renderNoise();
+            }
 
-            this.renderer.render(this.scene, this.camera);
+            // Perfil Opt: la simulación sigue actualizándose a la frecuencia
+            // completa, pero el coste de rasterizado principal se reduce a
+            // una imagen cada dos frames (30 fps visuales con movimiento
+            // suave de física y red). La variante normal renderiza todos.
+            this._renderFrame++;
+            if (!this.optimizedMode || (this._renderFrame & 1) === 0) {
+                this.renderer.render(this.scene, this.camera);
+            }
         }
     }
 

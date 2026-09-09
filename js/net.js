@@ -21,12 +21,16 @@
             this.camera = camera;
             this.onToast = opts.onToast || (() => {});
             this.onKill = opts.onKill || (() => {});
+            this.onRoomListings = opts.onRoomListings || (() => {});
             this.MAX_PLAYERS = 6;
 
             // Identidad unica de esta sesion (solo [0-9a-zA-Z], requisito MQTT)
             this.pid = 'p' + Math.random().toString(36).slice(2, 8);
             this.roomKey = null;
             this.playerName = 'EXPLORADOR';
+            this.roomVisibility = 'public';
+            this.roomName = '';
+            this.roomSeed = '';
 
             // Brokers publicos probados (WebSocket seguro + MQTT anonimo);
             // si el primero no responde se prueba el siguiente.
@@ -35,6 +39,12 @@
                 { host: 'broker.emqx.io', port: 8084, path: '/mqtt' }
             ];
             this.brokerIdx = 0;
+            this.directoryBrokerIdx = 0;
+            this.directoryClient = null;
+            this.directoryConnected = false;
+            this.roomDirectory = new Map(); // roomKey -> Map<pid, anuncio publico>
+            this._directoryAdvertised = false;
+            this._directoryTimer = 0;
 
             this.client = null;
             this.connected = false;   // socket MQTT arriba
@@ -145,11 +155,161 @@
         }
 
         // ----------------------------------------------------------------
+        //  DIRECTORIO DE SALAS PUBLICAS
+        // ----------------------------------------------------------------
+        // No hay servidor propio: cada jugador publica un anuncio RETAINED
+        // muy pequeño en un canal de directorio. Los anuncios privados nunca
+        // se publican, y los viejos caducan localmente tras un corte.
+        directoryWildcard() { return 'br0/directory/#'; }
+        directoryTopic(roomKey, pid) { return 'br0/directory/' + roomKey + '/' + pid; }
+
+        purgeRoomDirectory() {
+            const now = Date.now();
+            for (const [roomKey, members] of [...this.roomDirectory]) {
+                for (const [pid, data] of [...members]) {
+                    if (!data || now - (data.t || 0) > 18000) members.delete(pid);
+                }
+                if (!members.size) this.roomDirectory.delete(roomKey);
+            }
+        }
+
+        emitRoomListings() {
+            this.purgeRoomDirectory();
+            const out = [];
+            for (const [key, members] of this.roomDirectory) {
+                const list = [...members.values()];
+                if (!list.length) continue;
+                const first = list[0];
+                const names = [...new Set(list.map(x => String(x.n || 'EXPLORADOR')).filter(Boolean))];
+                out.push({
+                    key,
+                    seed: first.seed == null ? key.replace(/^pub_/, '') : first.seed,
+                    name: first.roomName || ('SALA ' + (first.seed == null ? key : first.seed)),
+                    count: list.length,
+                    names,
+                    max: this.MAX_PLAYERS,
+                    visibility: 'public'
+                });
+            }
+            out.sort((a, b) => (b.count || 0) - (a.count || 0));
+            this.onRoomListings(out);
+            return out;
+        }
+
+        handleDirectoryMessage(m) {
+            const parts = m.destinationName.split('/');
+            const roomKey = parts[2], pid = parts[3];
+            if (!roomKey || !pid) return;
+            let members = this.roomDirectory.get(roomKey);
+            if (m.payloadBytes.length === 0 || !m.payloadString) {
+                if (members) {
+                    members.delete(pid);
+                    if (!members.size) this.roomDirectory.delete(roomKey);
+                }
+                this.emitRoomListings();
+                return;
+            }
+            let data = {};
+            try { data = JSON.parse(m.payloadString); } catch (e) { return; }
+            if (data.v !== 'public' || !data.n) return;
+            if (!members) {
+                members = new Map();
+                this.roomDirectory.set(roomKey, members);
+            }
+            data.t = typeof data.t === 'number' ? data.t : Date.now();
+            members.set(pid, data);
+            this.emitRoomListings();
+        }
+
+        requestRoomListings() {
+            this.emitRoomListings();
+            if (typeof Paho === 'undefined') return;
+            if (this.connected && this.client) {
+                try { this.client.subscribe(this.directoryWildcard(), { qos: 0 }); } catch (e) { /* noop */ }
+                return;
+            }
+            if (this.directoryConnected && this.directoryClient) return;
+            this.directoryBrokerIdx = 0;
+            this.connectDirectoryNext();
+        }
+
+        connectDirectoryNext() {
+            if (this.directoryBrokerIdx >= this.brokers.length || this.directoryConnected) return;
+            const b = this.brokers[this.directoryBrokerIdx++];
+            const cid = 'fbd' + Math.random().toString(36).slice(2, 10);
+            const PahoClient = (Paho.MQTT && Paho.MQTT.Client) || Paho.Client;
+            try {
+                const client = new PahoClient(b.host, b.port, b.path, cid);
+                client.onMessageArrived = (m) => this.handleMessage(m);
+                client.onConnectionLost = () => {
+                    if (this.directoryClient === client) {
+                        this.directoryConnected = false;
+                        this.directoryClient = null;
+                    }
+                };
+                client.connect({
+                    useSSL: true,
+                    timeout: 8,
+                    keepAliveInterval: 20,
+                    cleanSession: true,
+                    onSuccess: () => {
+                        this.directoryClient = client;
+                        this.directoryConnected = true;
+                        try { client.subscribe(this.directoryWildcard(), { qos: 0 }); } catch (e) { /* noop */ }
+                        this.emitRoomListings();
+                    },
+                    onFailure: () => this.connectDirectoryNext()
+                });
+            } catch (e) {
+                this.connectDirectoryNext();
+            }
+        }
+
+        stopDirectoryOnly() {
+            if (this.directoryClient) {
+                try { this.directoryClient.disconnect(); } catch (e) { /* noop */ }
+            }
+            this.directoryClient = null;
+            this.directoryConnected = false;
+        }
+
+        publishDirectoryPresence() {
+            if (this.roomVisibility !== 'public' || !this.client || !this.connected || !this.joined || !this.roomKey) return;
+            try {
+                this.client.send(this.directoryTopic(this.roomKey, this.pid), JSON.stringify({
+                    v: 'public', p: this.pid, n: this.playerName,
+                    seed: this.roomSeed, roomName: this.roomName,
+                    t: Date.now()
+                }), 0, true);
+                this._directoryAdvertised = true;
+            } catch (e) { /* noop */ }
+        }
+
+        clearDirectoryPresence() {
+            if (!this._directoryAdvertised || !this.roomKey) return;
+            try {
+                if (this.client && this.connected) this.client.send(this.directoryTopic(this.roomKey, this.pid), '', 0, true);
+            } catch (e) { /* noop */ }
+            this._directoryAdvertised = false;
+            const members = this.roomDirectory.get(this.roomKey);
+            if (members) {
+                members.delete(this.pid);
+                if (!members.size) this.roomDirectory.delete(this.roomKey);
+            }
+            this.emitRoomListings();
+        }
+
+        // ----------------------------------------------------------------
         //  CONEXION / SALA
         // ----------------------------------------------------------------
-        join(roomKey, playerName) {
+        join(roomKey, playerName, roomOpts = {}) {
+            this.stopDirectoryOnly();
             this.roomKey = String(roomKey);
             this.playerName = (playerName || 'EXPLORADOR').slice(0, 14).toUpperCase();
+            this.roomVisibility = roomOpts.visibility === 'private' ? 'private' : 'public';
+            this.roomName = String(roomOpts.roomName || ('SALA ' + this.roomKey)).slice(0, 28);
+            this.roomSeed = roomOpts.seed == null ? this.roomKey : roomOpts.seed;
+            this._directoryAdvertised = false;
             this.isHost = true;
 
             // PID PERSISTENTE por sala+nombre: al recargar o reiniciar la
@@ -221,6 +381,7 @@
             sub(this.doorTopic());
             sub(this.furnitureTopic());
             sub(this.chatTopic());
+            try { sub(this.directoryWildcard()); } catch (e) { /* algunos brokers limitan comodines */ }
             this.publishPresence();
             this.onToast('🛰 CONECTADO · sala ' + this.roomKey);
             // Pequena espera para recibir las presencias retenidas de los que
@@ -240,6 +401,8 @@
             this.snapshotDone = true;
             this.joined = true;
             this.updateHost();
+            this.publishDirectoryPresence();
+            this.emitRoomListings();
             // Nada mas entrar se comparte el mapa explorado hasta ahora: el
             // mapa es GLOBAL, lo que cualquier jugador ha visto lo ve la sala
             this.publishMap();
@@ -253,6 +416,7 @@
 
         // Desconexion limpia: se borra la presencia retenida y se sale
         leave() {
+            this.clearDirectoryPresence();
             this.snapshotDone = false;
             this.joined = false;
             this.connected = false;
@@ -447,6 +611,11 @@
             const kind = parts[2];
 
             // Topico de la entidad (br0/sala/ent): sin pid, 3 segmentos
+            if (parts[1] === 'directory') {
+                this.handleDirectoryMessage(m);
+                return;
+            }
+
             if (kind === 'ent') {
                 this.handleEntityMessage(m);
                 return;
@@ -753,12 +922,19 @@
         }
 
         onEntitySpawned() {
-            if (!this.client || !this.connected || !this.joined) return;
+            if (!this.client || !this.connected || !this.joined || !this.entity) return;
             try {
                 this.client.send(this.entTopic(), JSON.stringify({
                     a: 1, spawned: 1,
                     x: this.entity.pos.x, z: this.entity.pos.z, yaw: this.entity.yaw
                 }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
+        onEntityGone() {
+            if (!this.client || !this.connected || !this.joined) return;
+            try {
+                this.client.send(this.entTopic(), JSON.stringify({ gone: 1, a: 0 }), 0, false);
             } catch (e) { /* noop */ }
         }
 
@@ -861,6 +1037,11 @@
                 if (this.presenceTimer > 6) {
                     this.presenceTimer = 0;
                     this.publishPresence();
+                }
+                this._directoryTimer += dt;
+                if (this._directoryTimer > 7) {
+                    this._directoryTimer = 0;
+                    this.publishDirectoryPresence();
                 }
                 // Mapa compartido: snapshot periodico (~5 s) para que quien
                 // entre tarde reciba todo lo explorado por la sala
@@ -1019,6 +1200,10 @@
                     this.onKill('LA ENTIDAD TE ALCANZÓ Y TE DEVORÓ EN LA PENUMBRA');
                 }
             }
+        }
+
+        getPublicRooms() {
+            return this.emitRoomListings();
         }
 
         // Texto para el HUD: sala, ocupacion y rol

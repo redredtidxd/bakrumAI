@@ -634,6 +634,7 @@
         #btn-touch-flash   { right: 22px;  bottom: 160px; }
         #btn-touch-note    { right: 88px; bottom: 160px; }
         #btn-touch-interact{ right: 22px;  bottom: 96px; font-size: 16px; }
+        #btn-touch-stats   { right: 154px; bottom: 224px; }
         .touch-btn.off {
             opacity: 0.4;
             border-color: #3d3521;
@@ -972,6 +973,79 @@
         #chat-input:focus {
             border-color: #bda052;
         }
+
+        /* ================= ESTADÍSTICAS ================= */
+        .stats-modal {
+            position: absolute;
+            inset: 0;
+            z-index: 85;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(7, 7, 5, 0.78);
+            pointer-events: auto;
+        }
+        .stats-modal.open { display: flex; }
+        .stats-box {
+            width: min(620px, 92vw);
+            max-height: 84vh;
+            overflow: auto;
+            background: linear-gradient(180deg, rgba(25, 27, 18, 0.98), rgba(10, 12, 8, 0.98));
+            border: 1px solid #70623b;
+            box-shadow: 0 0 45px #000;
+            color: #d8c89d;
+        }
+        .stats-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            border-bottom: 1px solid #403a25;
+        }
+        .stats-head h2, .rooms-title { color: #e0bc62; font-size: 16px; letter-spacing: 2px; }
+        .stats-head p, .rooms-subtitle { color: #817652; font-size: 10px; letter-spacing: 1px; margin-top: 5px; }
+        .stats-content { padding: 15px 16px; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 7px 22px;
+        }
+        .stat-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dotted #3a3524; font-size: 12px; }
+        .stat-row span:first-child { color: #8f8668; }
+        .stat-row strong { color: #e8d58d; }
+        .stats-section { color: #9be34a; font-size: 10px; letter-spacing: 2px; margin: 7px 0 4px; }
+        .stats-note { margin-top: 13px; color: #6e674f; font-size: 10px; }
+        .game-over-stats { max-height: 250px; overflow: auto; border: 1px solid #302b1e; margin: 0 0 15px; text-align: left; }
+
+        /* ================= LISTADO DE SALAS ================= */
+        .rooms-box { max-width: 720px; max-height: 90vh; overflow: auto; text-align: left; }
+        .rooms-title-row, .room-access-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        .rooms-title { margin: 0; }
+        .room-list { min-height: 100px; max-height: 230px; overflow-y: auto; margin: 15px 0; border: 1px solid #383322; background: rgba(8, 9, 6, 0.65); }
+        .room-empty { padding: 22px; text-align: center; color: #70684f; font-size: 11px; letter-spacing: 1px; }
+        .room-item { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid #292719; font-size: 11px; }
+        .room-item:last-child { border-bottom: 0; }
+        .room-item-name { color: #e0bc62; font-weight: bold; }
+        .room-item-meta { color: #8f8668; font-size: 10px; }
+        .room-access-box, .room-create-box { border: 1px solid #383322; padding: 10px; margin: 12px 0; background: rgba(10, 11, 7, 0.5); }
+        .room-access-head, .room-create-title { color: #b9dc78; font-size: 10px; letter-spacing: 1px; }
+        .room-access-fields { display: flex; gap: 8px; margin-top: 8px; }
+        .room-access-fields select, .room-access-fields input, .version-picker-row select, .room-create-grid input, .room-create-grid select { flex: 1; min-width: 0; padding: 8px; background: #0d0c08; color: #d8c89d; border: 1px solid #4a4028; font: inherit; font-size: 11px; }
+        .room-browser-button { margin: 0; padding: 5px 9px; font-size: 10px; }
+        .version-picker-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; color: #8c8266; font-size: 10px; letter-spacing: 1px; }
+        .version-picker-row select { flex: 0 1 310px; }
+        .version-note { color: #6f6446; font-size: 9px; margin-top: 5px; letter-spacing: 0.4px; }
+        .room-create-title { margin-bottom: 8px; }
+        .room-create-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+        .room-actions { text-align: right; margin-top: 8px; }
+        .room-help { color: #70684f; font-size: 10px; line-height: 1.45; margin-top: 3px; }
+        @media (max-width: 620px) {
+            .stats-grid { grid-template-columns: 1fr; }
+            .room-access-fields, .room-create-grid { display: flex; flex-direction: column; }
+            .room-item { grid-template-columns: 1fr auto; }
+            .room-item-meta { grid-column: 1 / -1; }
+            .version-picker-row { flex-wrap: wrap; }
+        }
         body.touch-mode #chat-ui {
             left: 50%;
             transform: translateX(-50%);
@@ -987,6 +1061,11 @@
             font-size: 14px;
             padding: 10px;
         }
+        body.touch-mode .stats-box { width: 94vw; max-height: 82vh; }
+        body.touch-mode .stats-content { padding: 10px; }
+        body.touch-mode .stats-head { padding: 10px; }
+        body.touch-mode .rooms-box { width: 94vw; padding: 15px; }
+        body.touch-mode .room-item { padding: 12px 8px; }
     </style>
 </head>
 <body>
@@ -1029,6 +1108,7 @@
         <button id="btn-touch-note" class="touch-btn" title="Cuaderno">📓</button>
         <button id="btn-touch-chat" class="touch-btn" title="Chat">💬</button>
         <button id="btn-touch-map" class="touch-btn" title="Mapa compartido">🗺️</button>
+        <button id="btn-touch-stats" class="touch-btn" title="Estadísticas">📊</button>
         <button id="btn-touch-interact" class="touch-btn" title="Interactuar">E</button>
     </div>
 
@@ -1095,7 +1175,7 @@
             </div>
             <div style="text-align: right; font-size: 11px; color: #756a47;">
                 <div>[WASD] Moverse | [SHIFT] Correr | [F] Linterna</div>
-                <div>[CLICK IZQ.] Dibujar | [E] Interactuar | [N] Cuaderno | [T] Chat</div>
+                <div>[CLICK IZQ.] Dibujar | [E] Interactuar | [N] Cuaderno | [T] Chat | [P] Estadísticas</div>
             </div>
         </div>
     </div>
@@ -1134,14 +1214,73 @@
             <div style="margin-bottom: 16px;">
                 <label for="name-input" style="font-size: 11px; letter-spacing: 2px; color: #8c8266; display: block; margin-bottom: 7px;">NOMBRE (MULTIJUGADOR)</label>
                 <input type="text" id="name-input" placeholder="Explorador" autocomplete="off" spellcheck="false" maxlength="14">
-            </div>                <p style="font-size: 11px; line-height: 1.7; color: #7d7355; margin-bottom: 14px;">
+            </div>
+            <div class="room-access-box">
+                <div class="room-access-head">
+                    <span>TIPO DE SALA</span>
+                    <button id="btn-open-rooms" class="btn room-browser-button" type="button">VER SALAS</button>
+                </div>
+                <div class="room-access-fields">
+                    <select id="room-visibility" aria-label="Visibilidad de la sala">
+                        <option value="public">🌐 SALA PÚBLICA · aparece en el listado</option>
+                        <option value="private">🔒 SALA PRIVADA · solo con código y PIN</option>
+                    </select>
+                    <input type="text" id="room-pin-input" placeholder="PIN privado (4-12 caracteres)" autocomplete="off" spellcheck="false" maxlength="12" style="display:none;">
+                </div>
+            </div>
+            <p style="font-size: 11px; line-height: 1.7; color: #7d7355; margin-bottom: 14px;">
                 🛰 <b style="color:#a39879;">MULTIJUGADOR · HASTA 6 EXPLORADORES:</b> quienes escriban la <b style="color:#a39879;">MISMA SEMILLA</b> caen en la misma sala (números o <b style="color:#a39879;">letras</b>: da igual mayúsculas o tildes). El código del HUD (SEMILLA) es el que hay que compartir. Si la sala está llena jugarás en solitario.
             </p>
             <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
             <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.12.0 Opt</div>
+            <div class="version-picker-row">
+                <label for="version-selector">VERSIÓN:</label>
+                <select id="version-selector" aria-label="Seleccionar versión">
+                    <option value="1.12.0-opt">Version 1.12.0 Opt</option>
+                    <option value="1.12.0">Version 1.12.0 normal</option>
+                    <optgroup label="Historial almacenado">
+                        <option value="1.11.0" disabled>Version 1.11.0 · archivada</option>
+                        <option value="1.10.0" disabled>Version 1.10.0 · archivada</option>
+                    </optgroup>
+                </select>
+            </div>
+            <div id="version-note" class="version-note">Opt: perfil de rendimiento fuerte · el selector se aplica al recargar</div>
             <div style="margin-top: 18px; font-size: 12px;">
                 <label for="vol-slider">VOLUMEN:</label>
                 <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="0.7" style="vertical-align:middle; accent-color:#bda052;">
+            </div>
+        </div>
+    </div>
+
+    <!-- LISTADO Y CREACIÓN DE SALAS -->
+    <div id="rooms-modal" class="overlay-screen" style="display: none;">
+        <div class="menu-box rooms-box">
+            <div class="rooms-title-row">
+                <div>
+                    <h2 class="rooms-title">SALAS DE EXPLORACIÓN</h2>
+                    <p class="rooms-subtitle">PÚBLICAS DESCUBIERTAS EN LOS ÚLTIMOS SEGUNDOS</p>
+                </div>
+                <button id="btn-close-rooms" class="btn" type="button">✕</button>
+            </div>
+            <div id="room-list" class="room-list">
+                <div class="room-empty">BUSCANDO SALAS PÚBLICAS…</div>
+            </div>
+            <div class="room-create-box">
+                <div class="room-create-title">CREAR / PREPARAR UNA SALA</div>
+                <div class="room-create-grid">
+                    <input id="room-name-input" type="text" maxlength="22" placeholder="Nombre de la sala" autocomplete="off" spellcheck="false">
+                    <input id="room-code-input" type="text" maxlength="32" placeholder="Código/semilla (vacío = aleatorio)" autocomplete="off" spellcheck="false">
+                    <select id="room-create-visibility" aria-label="Visibilidad de la nueva sala">
+                        <option value="public">🌐 Pública</option>
+                        <option value="private">🔒 Privada</option>
+                    </select>
+                    <input id="room-create-pin" type="text" maxlength="12" placeholder="PIN (solo privada)" autocomplete="off" spellcheck="false" style="display:none;">
+                </div>
+                <div class="room-actions">
+                    <button id="btn-refresh-rooms" class="btn" type="button">↻ ACTUALIZAR</button>
+                    <button id="btn-create-room" class="btn" type="button">USAR ESTA SALA</button>
+                </div>
+                <p class="room-help">Pública: aparece en el listado mientras haya jugadores. Privada: no se anuncia; comparte el código y el PIN con tus amigos.</p>
             </div>
         </div>
     </div>
@@ -1184,12 +1323,27 @@
         </div>
     </div>
 
+    <!-- ESTADÍSTICAS EN CUALQUIER MOMENTO -->
+    <div id="stats-modal" class="stats-modal" aria-hidden="true">
+        <div class="stats-box">
+            <div class="stats-head">
+                <div>
+                    <h2>REGISTRO DE SUPERVIVENCIA</h2>
+                    <p>SE ACTUALIZA EN TIEMPO REAL · [P]</p>
+                </div>
+                <button id="btn-close-stats" class="btn" type="button">✕</button>
+            </div>
+            <div id="stats-content" class="stats-content"></div>
+        </div>
+    </div>
+
     <!-- PANTALLA GAME OVER -->
     <div id="game-over-screen" class="overlay-screen" style="display: none;">
-        <div class="menu-box">
+        <div class="menu-box game-over-box">
             <h1 class="menu-title" style="color: #d11e1e; text-shadow: 0 0 15px rgba(209,30,30,0.7);">SEÑAL PERDIDA</h1>
             <p id="game-over-reason" class="menu-subtitle" style="color: #888;">LA ENTIDAD TE ALCANZÓ</p>
-            <p style="font-size: 12px; color: #666; margin-bottom: 20px;">Tu señal se ha disuelto en la bruma del Nivel 0.</p>
+            <p style="font-size: 12px; color: #666; margin-bottom: 14px;">Tu señal se ha disuelto en la bruma del Nivel 0.</p>
+            <div id="game-over-stats" class="stats-content game-over-stats"></div>
             <button id="btn-respawn" class="btn">REINTENTAR</button>
         </div>
     </div>
@@ -7246,6 +7400,13 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // Linea de vision del ultimo frame: game.js la usa para el drenaje
             // de cordura (solo drena mientras la entidad te ve de verdad).
             this.seesPlayer = false;
+            // Estado especial de refugio: si el explorador cierra una sala de
+            // seguridad delante de la Entidad, esta llega al vano, espera un
+            // momento y se marcha lejos en vez de quedarse pegada a la puerta
+            // o intentar atravesarla.
+            this.securityRoomId = null;
+            this.securityWaitTimer = 0;
+            this.securityCooldownUntil = 0;
 
             const model = createEntityModel();
             this.mesh = model.group;
@@ -7260,6 +7421,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 const wx = (c.x + 0.5) * CELL_SIZE;
                 const wz = (c.z + 0.5) * CELL_SIZE;
                 if (this.worldSystem && this.worldSystem.pointInSlab(wx, wz)) return false;
+                // Nunca aparece dentro de la cabina: las salas de seguridad
+                // son refugios y el bot debe verse llegar desde el pasillo.
+                if (this.worldSystem && this.worldSystem.securityRooms && this.worldSystem.securityRooms.some(r =>
+                    wx > r.minX + 0.08 && wx < r.maxX - 0.08 &&
+                    wz > r.minZ + 0.08 && wz < r.maxZ - 0.08)) return false;
                 return Math.hypot(wx - playerPos.x, wz - playerPos.z) >= 48.0;
             });
 
@@ -7274,6 +7440,48 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.pathTarget = null;
             this.pickWanderTarget(walkableCells, playerPos);
             audio.playMonsterRoar();
+        }
+
+        isInsideSecurityRoom(room, pos, margin = 0.08) {
+            if (!room || !pos) return false;
+            return pos.x > room.minX + margin && pos.x < room.maxX - margin &&
+                pos.z > room.minZ + margin && pos.z < room.maxZ - margin;
+        }
+
+        securityOutsidePoint(room) {
+            const pad = 1.05;
+            const x = room.doorWorldX;
+            const z = room.doorWorldZ;
+            if (room.doorSide === 'W') return new THREE.Vector3(x - pad, 0, z);
+            if (room.doorSide === 'E') return new THREE.Vector3(x + pad, 0, z);
+            if (room.doorSide === 'N') return new THREE.Vector3(x, 0, z - pad);
+            return new THREE.Vector3(x, 0, z + pad);
+        }
+
+        // Selecciona un destino claramente alejado del refugio y del jugador.
+        // Si no hay suficientes celdas cargadas se usa el vagabundeo normal,
+        // pero nunca se reelige inmediatamente la puerta de seguridad.
+        pickFarWanderTarget(walkableCells, playerPos, room) {
+            let open = [];
+            if (this.worldSystem) {
+                for (const ch of this.worldSystem.chunks.values()) {
+                    if (!ch.loaded) continue;
+                    for (const c of ch.openCells) open.push(c);
+                }
+            }
+            if (!open.length) open = walkableCells;
+            const cx = room ? room.centerX : playerPos.x;
+            const cz = room ? room.centerZ : playerPos.z;
+            const pool = open.filter(c => {
+                const wx = (c.x + 0.5) * CELL_SIZE;
+                const wz = (c.z + 0.5) * CELL_SIZE;
+                return Math.hypot(wx - playerPos.x, wz - playerPos.z) > 28 &&
+                    Math.hypot(wx - cx, wz - cz) > 24;
+            });
+            const source = pool.length ? pool : open;
+            if (!source.length) return;
+            const pick = source[Math.floor(Math.random() * source.length)];
+            this.recomputePath(new THREE.Vector3((pick.x + 0.5) * CELL_SIZE, 0, (pick.z + 0.5) * CELL_SIZE), walkableCells);
         }
 
         // Elige un destino ALCANZABLE por la rejilla de celdas abiertas, con
@@ -7616,6 +7824,84 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
             const dist = this.pos.distanceTo(playerPos);
 
+            // Refugio de seguridad: la Entidad puede detectar que el jugador
+            // está dentro, pero una puerta cerrada corta la línea de visión y
+            // el camino. Se acerca al lado exterior del vano, permanece allí
+            // unos segundos para que se note su presencia y luego se aleja a
+            // otra zona. Esta rama ocurre antes de CHASING para que nunca
+            // drene cordura ni mate a través de la puerta.
+            const safeRoom = this.worldSystem && this.worldSystem.securityRooms
+                ? this.worldSystem.securityRooms.find(r => !r.state.doorOpen &&
+                    this.isInsideSecurityRoom(r, playerPos) &&
+                    (!r.id || this.securityCooldownUntil <= Date.now()))
+                : null;
+            if (safeRoom) {
+                const inside = this.isInsideSecurityRoom(safeRoom, this.pos, 0.02);
+                if (inside) {
+                    // Solo puede ocurrir si la puerta se cerró en el mismo
+                    // instante en que estaba cruzando: recolocarlo fuera evita
+                    // que quede atrapado o atraviese la hoja.
+                    this.pos.copy(this.securityOutsidePoint(safeRoom));
+                    this.path = [];
+                    this.pathTarget = null;
+                }
+                const outside = this.securityOutsidePoint(safeRoom);
+                const doorDist = Math.hypot(this.pos.x - outside.x, this.pos.z - outside.z);
+                if (this.securityRoomId !== safeRoom.id) {
+                    this.securityRoomId = safeRoom.id;
+                    this.securityWaitTimer = 0;
+                    this.state = 'SECURITY_APPROACH';
+                    this.path = [];
+                    this.pathTarget = null;
+                }
+                if (this.state === 'SECURITY_APPROACH') {
+                    this.speed = 2.1;
+                    if (doorDist <= 2.15) {
+                        this.state = 'SECURITY_WAIT';
+                        this.securityWaitTimer = 4.5;
+                        this.path = [];
+                        this.pathTarget = null;
+                    } else {
+                        if (!this.path.length && !this.pathTarget) {
+                            this.recomputePath(outside, walkableCells);
+                        }
+                        this.followPath(dt, walkableCells);
+                    }
+                } else if (this.state === 'SECURITY_WAIT') {
+                    this.speed = 0;
+                    this.securityWaitTimer -= dt;
+                    this.yaw = Math.atan2(playerPos.x - this.pos.x, playerPos.z - this.pos.z);
+                    if (this.securityWaitTimer <= 0) {
+                        this.securityRoomId = null;
+                        // No vuelve a plantarse en la misma puerta mientras el
+                        // jugador siga dentro: espera unos segundos, se aleja
+                        // de verdad y deja un margen antes de poder detectarlo
+                        // otra vez en ese refugio.
+                        this.securityCooldownUntil = Date.now() + 12000;
+                        this.state = 'WANDERING';
+                        this.path = [];
+                        this.pathTarget = null;
+                        this.pickFarWanderTarget(walkableCells, playerPos, safeRoom);
+                    }
+                }
+                this.seesPlayer = false;
+                this.mesh.position.set(this.pos.x, 0, this.pos.z);
+                this.mesh.rotation.y = this.yaw;
+                const safeGlitch = document.getElementById('glitch-overlay');
+                if (safeGlitch) safeGlitch.style.display = 'none';
+                return;
+            } else if (this.securityRoomId) {
+                // La puerta volvió a abrirse o el jugador salió: reanudar la IA
+                // normal sin conservar el objetivo antiguo del refugio.
+                this.securityRoomId = null;
+                this.securityCooldownUntil = 0;
+                if (this.state === 'SECURITY_APPROACH' || this.state === 'SECURITY_WAIT') {
+                    this.state = 'WANDERING';
+                    this.path = [];
+                    this.pathTarget = null;
+                }
+            }
+
             // Si el jugador se aleja mucho, la entidad desaparece (nada de
             // presion constante desde el otro lado del mapa) y vuelve luego
             if (dist > 110) {
@@ -7842,12 +8128,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.camera = camera;
             this.onToast = opts.onToast || (() => {});
             this.onKill = opts.onKill || (() => {});
+            this.onRoomListings = opts.onRoomListings || (() => {});
             this.MAX_PLAYERS = 6;
 
             // Identidad unica de esta sesion (solo [0-9a-zA-Z], requisito MQTT)
             this.pid = 'p' + Math.random().toString(36).slice(2, 8);
             this.roomKey = null;
             this.playerName = 'EXPLORADOR';
+            this.roomVisibility = 'public';
+            this.roomName = '';
+            this.roomSeed = '';
 
             // Brokers publicos probados (WebSocket seguro + MQTT anonimo);
             // si el primero no responde se prueba el siguiente.
@@ -7856,6 +8146,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 { host: 'broker.emqx.io', port: 8084, path: '/mqtt' }
             ];
             this.brokerIdx = 0;
+            this.directoryBrokerIdx = 0;
+            this.directoryClient = null;
+            this.directoryConnected = false;
+            this.roomDirectory = new Map(); // roomKey -> Map<pid, anuncio publico>
+            this._directoryAdvertised = false;
+            this._directoryTimer = 0;
 
             this.client = null;
             this.connected = false;   // socket MQTT arriba
@@ -7966,11 +8262,161 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }
 
         // ----------------------------------------------------------------
+        //  DIRECTORIO DE SALAS PUBLICAS
+        // ----------------------------------------------------------------
+        // No hay servidor propio: cada jugador publica un anuncio RETAINED
+        // muy pequeño en un canal de directorio. Los anuncios privados nunca
+        // se publican, y los viejos caducan localmente tras un corte.
+        directoryWildcard() { return 'br0/directory/#'; }
+        directoryTopic(roomKey, pid) { return 'br0/directory/' + roomKey + '/' + pid; }
+
+        purgeRoomDirectory() {
+            const now = Date.now();
+            for (const [roomKey, members] of [...this.roomDirectory]) {
+                for (const [pid, data] of [...members]) {
+                    if (!data || now - (data.t || 0) > 18000) members.delete(pid);
+                }
+                if (!members.size) this.roomDirectory.delete(roomKey);
+            }
+        }
+
+        emitRoomListings() {
+            this.purgeRoomDirectory();
+            const out = [];
+            for (const [key, members] of this.roomDirectory) {
+                const list = [...members.values()];
+                if (!list.length) continue;
+                const first = list[0];
+                const names = [...new Set(list.map(x => String(x.n || 'EXPLORADOR')).filter(Boolean))];
+                out.push({
+                    key,
+                    seed: first.seed == null ? key.replace(/^pub_/, '') : first.seed,
+                    name: first.roomName || ('SALA ' + (first.seed == null ? key : first.seed)),
+                    count: list.length,
+                    names,
+                    max: this.MAX_PLAYERS,
+                    visibility: 'public'
+                });
+            }
+            out.sort((a, b) => (b.count || 0) - (a.count || 0));
+            this.onRoomListings(out);
+            return out;
+        }
+
+        handleDirectoryMessage(m) {
+            const parts = m.destinationName.split('/');
+            const roomKey = parts[2], pid = parts[3];
+            if (!roomKey || !pid) return;
+            let members = this.roomDirectory.get(roomKey);
+            if (m.payloadBytes.length === 0 || !m.payloadString) {
+                if (members) {
+                    members.delete(pid);
+                    if (!members.size) this.roomDirectory.delete(roomKey);
+                }
+                this.emitRoomListings();
+                return;
+            }
+            let data = {};
+            try { data = JSON.parse(m.payloadString); } catch (e) { return; }
+            if (data.v !== 'public' || !data.n) return;
+            if (!members) {
+                members = new Map();
+                this.roomDirectory.set(roomKey, members);
+            }
+            data.t = typeof data.t === 'number' ? data.t : Date.now();
+            members.set(pid, data);
+            this.emitRoomListings();
+        }
+
+        requestRoomListings() {
+            this.emitRoomListings();
+            if (typeof Paho === 'undefined') return;
+            if (this.connected && this.client) {
+                try { this.client.subscribe(this.directoryWildcard(), { qos: 0 }); } catch (e) { /* noop */ }
+                return;
+            }
+            if (this.directoryConnected && this.directoryClient) return;
+            this.directoryBrokerIdx = 0;
+            this.connectDirectoryNext();
+        }
+
+        connectDirectoryNext() {
+            if (this.directoryBrokerIdx >= this.brokers.length || this.directoryConnected) return;
+            const b = this.brokers[this.directoryBrokerIdx++];
+            const cid = 'fbd' + Math.random().toString(36).slice(2, 10);
+            const PahoClient = (Paho.MQTT && Paho.MQTT.Client) || Paho.Client;
+            try {
+                const client = new PahoClient(b.host, b.port, b.path, cid);
+                client.onMessageArrived = (m) => this.handleMessage(m);
+                client.onConnectionLost = () => {
+                    if (this.directoryClient === client) {
+                        this.directoryConnected = false;
+                        this.directoryClient = null;
+                    }
+                };
+                client.connect({
+                    useSSL: true,
+                    timeout: 8,
+                    keepAliveInterval: 20,
+                    cleanSession: true,
+                    onSuccess: () => {
+                        this.directoryClient = client;
+                        this.directoryConnected = true;
+                        try { client.subscribe(this.directoryWildcard(), { qos: 0 }); } catch (e) { /* noop */ }
+                        this.emitRoomListings();
+                    },
+                    onFailure: () => this.connectDirectoryNext()
+                });
+            } catch (e) {
+                this.connectDirectoryNext();
+            }
+        }
+
+        stopDirectoryOnly() {
+            if (this.directoryClient) {
+                try { this.directoryClient.disconnect(); } catch (e) { /* noop */ }
+            }
+            this.directoryClient = null;
+            this.directoryConnected = false;
+        }
+
+        publishDirectoryPresence() {
+            if (this.roomVisibility !== 'public' || !this.client || !this.connected || !this.joined || !this.roomKey) return;
+            try {
+                this.client.send(this.directoryTopic(this.roomKey, this.pid), JSON.stringify({
+                    v: 'public', p: this.pid, n: this.playerName,
+                    seed: this.roomSeed, roomName: this.roomName,
+                    t: Date.now()
+                }), 0, true);
+                this._directoryAdvertised = true;
+            } catch (e) { /* noop */ }
+        }
+
+        clearDirectoryPresence() {
+            if (!this._directoryAdvertised || !this.roomKey) return;
+            try {
+                if (this.client && this.connected) this.client.send(this.directoryTopic(this.roomKey, this.pid), '', 0, true);
+            } catch (e) { /* noop */ }
+            this._directoryAdvertised = false;
+            const members = this.roomDirectory.get(this.roomKey);
+            if (members) {
+                members.delete(this.pid);
+                if (!members.size) this.roomDirectory.delete(this.roomKey);
+            }
+            this.emitRoomListings();
+        }
+
+        // ----------------------------------------------------------------
         //  CONEXION / SALA
         // ----------------------------------------------------------------
-        join(roomKey, playerName) {
+        join(roomKey, playerName, roomOpts = {}) {
+            this.stopDirectoryOnly();
             this.roomKey = String(roomKey);
             this.playerName = (playerName || 'EXPLORADOR').slice(0, 14).toUpperCase();
+            this.roomVisibility = roomOpts.visibility === 'private' ? 'private' : 'public';
+            this.roomName = String(roomOpts.roomName || ('SALA ' + this.roomKey)).slice(0, 28);
+            this.roomSeed = roomOpts.seed == null ? this.roomKey : roomOpts.seed;
+            this._directoryAdvertised = false;
             this.isHost = true;
 
             // PID PERSISTENTE por sala+nombre: al recargar o reiniciar la
@@ -8042,6 +8488,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             sub(this.doorTopic());
             sub(this.furnitureTopic());
             sub(this.chatTopic());
+            try { sub(this.directoryWildcard()); } catch (e) { /* algunos brokers limitan comodines */ }
             this.publishPresence();
             this.onToast('🛰 CONECTADO · sala ' + this.roomKey);
             // Pequena espera para recibir las presencias retenidas de los que
@@ -8061,6 +8508,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.snapshotDone = true;
             this.joined = true;
             this.updateHost();
+            this.publishDirectoryPresence();
+            this.emitRoomListings();
             // Nada mas entrar se comparte el mapa explorado hasta ahora: el
             // mapa es GLOBAL, lo que cualquier jugador ha visto lo ve la sala
             this.publishMap();
@@ -8074,6 +8523,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
         // Desconexion limpia: se borra la presencia retenida y se sale
         leave() {
+            this.clearDirectoryPresence();
             this.snapshotDone = false;
             this.joined = false;
             this.connected = false;
@@ -8268,6 +8718,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const kind = parts[2];
 
             // Topico de la entidad (br0/sala/ent): sin pid, 3 segmentos
+            if (parts[1] === 'directory') {
+                this.handleDirectoryMessage(m);
+                return;
+            }
+
             if (kind === 'ent') {
                 this.handleEntityMessage(m);
                 return;
@@ -8574,12 +9029,19 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }
 
         onEntitySpawned() {
-            if (!this.client || !this.connected || !this.joined) return;
+            if (!this.client || !this.connected || !this.joined || !this.entity) return;
             try {
                 this.client.send(this.entTopic(), JSON.stringify({
                     a: 1, spawned: 1,
                     x: this.entity.pos.x, z: this.entity.pos.z, yaw: this.entity.yaw
                 }), 0, false);
+            } catch (e) { /* noop */ }
+        }
+
+        onEntityGone() {
+            if (!this.client || !this.connected || !this.joined) return;
+            try {
+                this.client.send(this.entTopic(), JSON.stringify({ gone: 1, a: 0 }), 0, false);
             } catch (e) { /* noop */ }
         }
 
@@ -8682,6 +9144,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (this.presenceTimer > 6) {
                     this.presenceTimer = 0;
                     this.publishPresence();
+                }
+                this._directoryTimer += dt;
+                if (this._directoryTimer > 7) {
+                    this._directoryTimer = 0;
+                    this.publishDirectoryPresence();
                 }
                 // Mapa compartido: snapshot periodico (~5 s) para que quien
                 // entre tarde reciba todo lo explorado por la sala
@@ -8842,6 +9309,10 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             }
         }
 
+        getPublicRooms() {
+            return this.emitRoomListings();
+        }
+
         // Texto para el HUD: sala, ocupacion y rol
         hudText() {
             if (!this.connected && !this.joined) {
@@ -8872,15 +9343,52 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
     const IS_TOUCH = (('ontouchstart' in window) || navigator.maxTouchPoints > 0) &&
         (window.innerWidth < 1100 || !window.matchMedia('(pointer: fine)').matches);
 
-    // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
-    // Al subirla, actualiza también el ?v=... de index.html (cache busting:
-    // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.12.0';
-    // Esta entrega incorpora renderizado CCTV por turnos, caché de cámaras y
-    // lectura GPU->CPU solo para el visor abierto. La etiqueta "Opt" solo se
-    // muestra cuando estas optimizaciones están activadas.
-    const GAME_OPTIMIZED = true;
+    // HISTORIAL DE VERSIONES: no se borra una entrega al publicar otra. Las
+    // dos variantes 1.12.0 siguen seleccionables: la normal prioriza calidad
+    // y la Opt activa el perfil de rendimiento fuerte. Las anteriores quedan
+    // archivadas y visibles para no perder el historial (este archivo contiene
+    // el motor actual; no se finge cargar codigo que ya no esta incluido).
+    const VERSION_HISTORY = Object.freeze([
+        { id: '1.12.0-opt', version: '1.12.0', optimized: true, selectable: true, label: 'Version 1.12.0 Opt', note: 'Rendimiento fuerte · CCTV por turnos' },
+        { id: '1.12.0', version: '1.12.0', optimized: false, selectable: true, label: 'Version 1.12.0 normal', note: 'Perfil normal · maxima calidad' },
+        { id: '1.11.0', version: '1.11.0', optimized: false, selectable: false, archived: true, label: 'Version 1.11.0 · archivada', note: 'Sala CCTV original' },
+        { id: '1.10.0', version: '1.10.0', optimized: false, selectable: false, archived: true, label: 'Version 1.10.0 · archivada', note: 'Base anterior' }
+    ]);
+    const DEFAULT_VERSION_ID = '1.12.0-opt';
+    function storedVersionId() {
+        try {
+            const id = localStorage.getItem('backrooms-version-id');
+            const v = VERSION_HISTORY.find(x => x.id === id && x.selectable);
+            return v ? v.id : DEFAULT_VERSION_ID;
+        } catch (e) {
+            return DEFAULT_VERSION_ID;
+        }
+    }
+    const ACTIVE_VERSION_ID = storedVersionId();
+    const ACTIVE_VERSION = VERSION_HISTORY.find(x => x.id === ACTIVE_VERSION_ID) || VERSION_HISTORY[0];
+    const GAME_VERSION = ACTIVE_VERSION.version;
+    // La etiqueta "Opt" solo existe en una variante que realmente activa el
+    // perfil optimizado. Nunca se añade a la version normal.
+    const GAME_OPTIMIZED = !!ACTIVE_VERSION.optimized;
     const GAME_VERSION_LABEL = 'v' + GAME_VERSION + (GAME_OPTIMIZED ? ' Opt' : '');
+
+    // El PIN de una sala privada no se guarda ni se publica: solo se usa para
+    // derivar un canal MQTT distinto. Así dos salas con la misma semilla pero
+    // distinto PIN no se mezclan, y el mundo sigue siendo el mismo porque la
+    // semilla se mantiene separada del canal de red.
+    function makeRoomChannelKey(seed, visibility, pin) {
+        const text = String(seed == null ? '' : seed).trim().toLowerCase();
+        if (visibility !== 'private') {
+            return 'pub_' + (text.replace(/[^a-z0-9_-]/g, '') || 'random');
+        }
+        let h = 2166136261 >>> 0;
+        const value = text + '|' + String(pin || '').trim();
+        for (let i = 0; i < value.length; i++) {
+            h ^= value.charCodeAt(i);
+            h = Math.imul(h, 16777619) >>> 0;
+        }
+        return 'priv_' + h.toString(36);
+    }
 
     class BackroomsGame {
         constructor() {
@@ -8901,7 +9409,17 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
             this.renderer.setSize(window.innerWidth, window.innerHeight);
             // En movil se baja la resolucion (pixel ratio 1): mas fps y menos calor
-            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_TOUCH ? 1 : 1.5));
+            // El perfil Opt baja el coste de rasterizado de forma medible:
+            // menos pixel ratio, luces activas limitadas y CCTV con turnos
+            // mas espaciados. La variante normal conserva la resolucion alta.
+            this.optimizedMode = GAME_OPTIMIZED;
+            this.activeVersion = ACTIVE_VERSION;
+            this._renderFrame = 0;
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,
+                // Opt es un perfil de rendimiento real: reduce la carga de
+                // píxeles además de limitar luces/CCTV. La versión normal no
+                // muestra "Opt" porque mantiene este techo de calidad.
+                this.optimizedMode ? (IS_TOUCH ? 0.78 : 0.78) : (IS_TOUCH ? 1.15 : 1.5)));
             this.renderer.setClearColor(FOG_COLOR);
             // Control de exposición: mapeado de tonos oscuro y aterrador
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -8946,11 +9464,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // (ver updateLights), asi una sala grande o un cruce con muchas
             // lamparas queda entero encendido.
             this.lightPool = [];
-            for (let i = 0; i < 64; i++) {
+            // En Opt se mantienen las luces cercanas imprescindibles, pero se
+            // reduce mucho el número de PointLights que WebGL evalúa.
+            const lightCount = this.optimizedMode ? 20 : 64;
+            for (let i = 0; i < lightCount; i++) {
                 const pl = new THREE.PointLight(0xffd878, 0, 18, 2.0);
                 this.scene.add(pl);
                 this.lightPool.push(pl);
             }
+            this._lightUpdateTimer = 0;
+            this._noiseUpdateTimer = 0;
 
             this.player = {
                 pos: this.camera.position,
@@ -8962,6 +9485,44 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 stepTimer: 0,
                 bobTimer: 0
             };
+
+            // Estadisticas persistentes durante la partida: se pueden abrir
+            // con [P] en cualquier momento y tambien quedan en la pantalla de
+            // muerte. Los sets evitan contar dos veces la misma sala.
+            this.stats = {
+                startedAt: 0,
+                finishedAt: 0,
+                deaths: 0,
+                distance: 0,
+                roomsVisited: 0,
+                securityRoomsFound: 0,
+                pickups: 0,
+                chalkMarks: 0,
+                doorsOpened: 0,
+                doorsClosed: 0,
+                camerasViewed: 0,
+                flashlightSeconds: 0,
+                sprintSeconds: 0,
+                entitySpawns: 0,
+                entityEncounters: 0,
+                lastReason: '',
+                roomKeys: new Set(),
+                securityKeys: new Set()
+            };
+            this._statsLastPos = new THREE.Vector3();
+            this._statsRoomTimer = 0;
+            this._entityEncounterActive = false;
+            this._lastEntityActive = false;
+            this.statsOpen = false;
+            this._noiseTimer = 0;
+            this._interactionTimer = 0;
+            // El bot debe aparecer pronto y de forma comprobable, sin esperar
+            // casi un minuto: doce segundos dejan tiempo para orientarse pero
+            // evitan que una partida parezca rota o sin Entidad.
+            this._entityWarmupSeconds = 12;
+            this._entityWarmupElapsed = 0;
+            this._entityHostReady = false;
+            this._entityHostPid = null;
 
             this.inventory = {
                 currentSlot: 1,
@@ -8986,6 +9547,12 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // si el jugador escribe una semilla con LETRAS, el codigo es el
             // propio texto (saneado) y asi se comparte tal cual se escribe.
             this.roomCode = null;
+            this.networkRoomKey = null;
+            this.roomName = '';
+            this.roomVisibility = 'public';
+            this.roomPin = '';
+            this.roomName = '';
+            this.roomListings = [];
             this.updateSeedLabel();
 
             this.worldSystem = new WorldGridSystem(this.scene);
@@ -8995,7 +9562,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             // Multijugador (hasta 6): mismo mundo deterministico + broker MQTT
             this.net = new MultiplayerManager(this.scene, this.camera, {
                 onToast: (msg) => this.notify(msg),
-                onKill: (reason) => this.triggerGameOver(reason)
+                onKill: (reason) => this.triggerGameOver(reason),
+                onRoomListings: (rooms) => {
+                    this.roomListings = rooms || [];
+                    if (this.roomsModalOpen) this.renderRoomList(this.roomListings);
+                }
             });
             // El mundo y la tiza se sincronizan por red: objetos reclamados y
             // dibujos visibles para toda la sala
@@ -9031,9 +9602,9 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             this._feedTime = 0;
             this._feedFrame = 0;
             this._feedRoundRobin = 0;
-            this._feedReadbackEvery = 2; // solo el feed que esta viendo el jugador
-            this._feedCaptureDistance = 42;
-            this._feedMinInterval = 0.22; // una captura por ranura, sin renderizar 3 CRT a la vez
+            this._feedReadbackEvery = this.optimizedMode ? 4 : 2; // solo el feed abierto lee pixeles
+            this._feedCaptureDistance = this.optimizedMode ? 36 : 42;
+            this._feedMinInterval = this.optimizedMode ? 0.30 : 0.16; // Opt: una captura por turno, sin tres renders a la vez
             this._feedOverlayStamp = '';
             this._noSignalTex = null;
             this._panelTimer = 0;
@@ -9092,17 +9663,11 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             if (notesLabel) notesLabel.textContent = `NOTAS: 0 / ${this.inventory.totalNotes}`;
             this.updateFlashlightHUD();
 
-            setTimeout(() => {
-                // Solo el ANFITRIÓN de la sala (o el jugador solitario) simula
-                // la entidad; el resto la ve como espectro sincronizado. El
-                // spawn en si lo hace la entidad a los 50 s (y reaparece sola
-                // si el jugador se aleja demasiado); al aparecer de verdad se
-                // avisa a la sala con onEntitySpawned.
-                if (this.gameActive && this.net.isEntityHost()) {
-                    this.entity.canRespawn = true;
-                }
-            }, 50000);
-
+            // La Entidad empieza a contar el calentamiento al pulsar
+            // COMENZAR, no al cargar la página. Antes el temporizador podía
+            // terminar mientras el menú seguía abierto y el bot nunca se
+            // habilitaba al entrar; ahora el bucle lo activa de forma segura
+            // cuando el anfitrión real está elegido.
             window.addEventListener('resize', () => this.onResize());
             this.animate();
         }
@@ -9283,6 +9848,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 }
                 if (e.code === 'KeyN') this.toggleNotebook();
                 if (e.code === 'KeyM') this.toggleMap();
+                if (e.code === 'KeyP') this.toggleStats();
                 if (e.code === 'KeyT' && !this.chatOpen) this.toggleChat(true);
                 if (e.code === 'Escape') {
                     if (this.cameraFeedView.open) this.closeCameraFeed();
@@ -9472,6 +10038,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             bindTap('btn-touch-note', () => this.toggleNotebook());
             bindTap('btn-touch-chat', () => this.toggleChat());
             bindTap('btn-touch-map', () => this.toggleMap());
+            bindTap('btn-touch-stats', () => this.toggleStats());
             bindTap('btn-touch-interact', () => this.handleInteraction());
             // Cerrar cuaderno/mapa tambien por toque directo (el click sintetico
             // puede quedar bloqueado en algunos navegadores moviles)
@@ -9512,6 +10079,23 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             if (mv) mv.textContent = 'THE BACKROOMS ' + GAME_VERSION_LABEL;
             const hv = document.getElementById('hud-version');
             if (hv) hv.textContent = GAME_VERSION_LABEL;
+            const versionSelect = document.getElementById('version-selector');
+            const versionNote = document.getElementById('version-note');
+            if (versionSelect) {
+                versionSelect.value = ACTIVE_VERSION_ID;
+                versionSelect.onchange = (e) => {
+                    const next = VERSION_HISTORY.find(v => v.id === e.target.value && v.selectable);
+                    if (!next) {
+                        e.target.value = ACTIVE_VERSION_ID;
+                        return;
+                    }
+                    try { localStorage.setItem('backrooms-version-id', next.id); } catch (err) { /* noop */ }
+                    // El perfil se decide al crear el renderer; recargar evita
+                    // mezclar luces/render targets de dos perfiles.
+                    location.reload();
+                };
+            }
+            if (versionNote) versionNote.textContent = ACTIVE_VERSION.note + ' · se aplica al recargar';
 
             // Recuerda el nombre entre partidas
             const nameInput = document.getElementById('name-input');
@@ -9531,6 +10115,16 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
 
             document.getElementById('btn-start').onclick = () => {
                 audio.init();
+
+                const visibilityEl = document.getElementById('room-visibility');
+                const pinEl = document.getElementById('room-pin-input');
+                this.roomVisibility = visibilityEl ? visibilityEl.value : 'public';
+                this.roomPin = pinEl ? pinEl.value.trim() : '';
+                if (this.roomVisibility === 'private' && this.roomPin.length < 4) {
+                    this.notify('🔒 LA SALA PRIVADA NECESITA UN PIN DE 4 A 12 CARACTERES');
+                    if (pinEl) pinEl.focus();
+                    return;
+                }
 
                 // Semilla personalizada: si el campo del menu trae una semilla
                 // distinta, se regenera TODO el mundo antes de empezar.
@@ -9568,11 +10162,46 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 if (name) {
                     try { localStorage.setItem('backrooms-name', name); } catch (e) { /* noop */ }
                 }
-                this.net.join(this.roomCode !== null ? this.roomCode : this.worldSeed, name);
+                const seedValue = this.roomCode !== null ? this.roomCode : this.worldSeed;
+                const roomNameEl = document.getElementById('room-name-input');
+                this.roomName = (roomNameEl && roomNameEl.value.trim()) || ('SALA ' + seedValue);
+                this.networkRoomKey = makeRoomChannelKey(seedValue, this.roomVisibility, this.roomPin);
+                this.net.join(this.networkRoomKey, name, {
+                    visibility: this.roomVisibility,
+                    roomName: this.roomName,
+                    seed: seedValue
+                });
 
                 document.getElementById('start-menu').style.display = 'none';
                 document.getElementById('hud').style.display = 'flex';
                 this.gameActive = true;
+                this.stats.startedAt = Date.now();
+                this.stats.finishedAt = 0;
+                this.stats.lastReason = '';
+                this.stats.roomKeys.clear();
+                this.stats.securityKeys.clear();
+                this.stats.distance = 0;
+                this.stats.deaths = 0;
+                this.stats.roomsVisited = 0;
+                this.stats.securityRoomsFound = 0;
+                this.stats.pickups = 0;
+                this.stats.chalkMarks = 0;
+                this.stats.doorsOpened = 0;
+                this.stats.doorsClosed = 0;
+                this.stats.camerasViewed = 0;
+                this.stats.flashlightSeconds = 0;
+                this.stats.sprintSeconds = 0;
+                this.stats.entitySpawns = 0;
+                this.stats.entityEncounters = 0;
+                this._statsLastPos.copy(this.player.pos);
+                this._statsRoomTimer = 0;
+                this._entityWarmupElapsed = 0;
+                this._entityHostReady = false;
+                this.entity.canRespawn = false;
+                this.entity.active = false;
+                this.entity.mesh.visible = false;
+                this._entSpawnNotified = false;
+                this.renderStats();
                 if (IS_TOUCH) {
                     this.notify('🕹 IZQ.: mover · DERECHA: mirar · Toque rápido: interactuar');
                 } else {
@@ -9604,6 +10233,51 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             const closeNbX = document.getElementById('btn-close-notebook-x');
             if (closeNbX) closeNbX.onclick = () => this.toggleNotebook();
             document.getElementById('btn-close-map').onclick = () => this.toggleMap();
+
+            // Salas públicas/privadas: el PIN nunca sale en el listado público.
+            const visibility = document.getElementById('room-visibility');
+            const pinInput = document.getElementById('room-pin-input');
+            if (visibility) visibility.onchange = () => {
+                if (pinInput) pinInput.style.display = visibility.value === 'private' ? 'block' : 'none';
+            };
+            const createVisibility = document.getElementById('room-create-visibility');
+            const createPin = document.getElementById('room-create-pin');
+            if (createVisibility) createVisibility.onchange = () => {
+                if (createPin) createPin.style.display = createVisibility.value === 'private' ? 'block' : 'none';
+            };
+            const openRooms = document.getElementById('btn-open-rooms');
+            if (openRooms) openRooms.onclick = () => this.openRoomsModal();
+            const closeRooms = document.getElementById('btn-close-rooms');
+            if (closeRooms) closeRooms.onclick = () => this.closeRoomsModal();
+            const refreshRooms = document.getElementById('btn-refresh-rooms');
+            if (refreshRooms) refreshRooms.onclick = () => this.refreshRoomList();
+            const createRoom = document.getElementById('btn-create-room');
+            if (createRoom) createRoom.onclick = () => {
+                const seedTarget = document.getElementById('seed-input');
+                const nameTarget = document.getElementById('room-name-input');
+                const code = document.getElementById('room-code-input');
+                const roomVis = document.getElementById('room-create-visibility');
+                const roomPin = document.getElementById('room-create-pin');
+                if (seedTarget && code && code.value.trim()) seedTarget.value = code.value.trim();
+                if (nameTarget && nameTarget.value.trim()) {
+                    const mainRoomName = document.getElementById('room-name-input');
+                    if (mainRoomName) mainRoomName.value = nameTarget.value.trim();
+                }
+                if (visibility && roomVis) visibility.value = roomVis.value;
+                if (pinInput && roomPin) {
+                    pinInput.value = roomPin.value.trim();
+                    pinInput.style.display = roomVis && roomVis.value === 'private' ? 'block' : 'none';
+                }
+                this.closeRoomsModal();
+                this.notify(roomVis && roomVis.value === 'private'
+                    ? '🔒 SALA PRIVADA PREPARADA · comparte código y PIN'
+                    : '🌐 SALA PÚBLICA PREPARADA');
+            };
+            // Stats: se pueden abrir durante la partida y se conservan en muerte.
+            const closeStats = document.getElementById('btn-close-stats');
+            if (closeStats) closeStats.onclick = () => this.toggleStats(false);
+            const showDeathStats = document.getElementById('btn-show-stats');
+            if (showDeathStats) showDeathStats.onclick = () => this.toggleStats(true);
             // Chat: Enter envia, Escape cierra, boton ENVIAR tambien
             const chatInput = document.getElementById('chat-input');
             if (chatInput) {
@@ -9637,6 +10311,211 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
             document.getElementById('btn-respawn').onclick = () => {
                 location.reload();
             };
+            if (visibility) visibility.dispatchEvent(new Event('change'));
+            if (createVisibility) createVisibility.dispatchEvent(new Event('change'));
+            this.renderRoomList([]);
+        }
+
+        openRoomsModal() {
+            const modal = document.getElementById('rooms-modal');
+            if (!modal) return;
+            modal.style.display = 'flex';
+            this.roomsModalOpen = true;
+            this.refreshRoomList();
+        }
+
+        closeRoomsModal() {
+            const modal = document.getElementById('rooms-modal');
+            if (modal) modal.style.display = 'none';
+            this.roomsModalOpen = false;
+        }
+
+        refreshRoomList() {
+            const list = this.net && this.net.getPublicRooms ? this.net.getPublicRooms() : (this.roomListings || []);
+            this.renderRoomList(list);
+            if (this.net && this.net.requestRoomListings) this.net.requestRoomListings();
+        }
+
+        renderRoomList(rooms) {
+            const box = document.getElementById('room-list');
+            if (!box) return;
+            box.textContent = '';
+            const list = Array.isArray(rooms) ? rooms : [];
+            if (!list.length) {
+                const empty = document.createElement('div');
+                empty.className = 'room-empty';
+                empty.textContent = 'NO HAY SALAS PÚBLICAS ACTIVAS · CREA UNA O COMPARTE UN CÓDIGO';
+                box.appendChild(empty);
+                return;
+            }
+            list.slice().sort((a, b) => (b.count || 0) - (a.count || 0)).forEach((room) => {
+                const row = document.createElement('div');
+                row.className = 'room-item';
+                const info = document.createElement('div');
+                const title = document.createElement('div');
+                title.className = 'room-item-name';
+                title.textContent = room.name || ('SALA ' + (room.seed || room.key));
+                const meta = document.createElement('div');
+                meta.className = 'room-item-meta';
+                meta.textContent = 'CÓDIGO: ' + String(room.seed || room.key) + ' · ' + (room.count || 0) + '/6 · ' + (room.names || []).join(', ');
+                info.append(title, meta);
+                const state = document.createElement('span');
+                state.className = 'room-item-meta';
+                state.textContent = (room.count || 0) >= 6 ? 'LLENA' : 'ABIERTA';
+                const join = document.createElement('button');
+                join.className = 'btn';
+                join.type = 'button';
+                join.textContent = 'PREPARAR';
+                join.style.margin = '0';
+                join.style.padding = '6px 9px';
+                join.onclick = () => {
+                    const seed = document.getElementById('seed-input');
+                    const rn = document.getElementById('room-name-input');
+                    const vis = document.getElementById('room-visibility');
+                    if (seed) seed.value = String(room.seed || room.key);
+                    if (rn) rn.value = String(room.name || '');
+                    if (vis) { vis.value = 'public'; vis.dispatchEvent(new Event('change')); }
+                    this.closeRoomsModal();
+                    this.notify('🌐 SALA SELECCIONADA · pulsa COMENZAR');
+                };
+                row.append(info, state, join);
+                box.appendChild(row);
+            });
+        }
+
+        toggleStats(force) {
+            const modal = document.getElementById('stats-modal');
+            if (!modal) return;
+            const open = force === undefined ? !this.statsOpen : !!force;
+            this.statsOpen = open;
+            modal.classList.toggle('open', open);
+            modal.setAttribute('aria-hidden', open ? 'false' : 'true');
+            if (open) {
+                this.renderStats();
+                if (!IS_TOUCH && document.exitPointerLock && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (err) { /* noop */ }
+                }
+            } else if (!IS_TOUCH && this.gameActive && document.body.requestPointerLock) {
+                try {
+                    const lock = document.body.requestPointerLock();
+                    if (lock && lock.catch) lock.catch(() => {});
+                } catch (err) { /* noop */ }
+            }
+        }
+
+        formatPlayTime() {
+            const start = this.stats.startedAt || Date.now();
+            const end = this.stats.finishedAt || Date.now();
+            const sec = Math.max(0, Math.floor((end - start) / 1000));
+            const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+            const ss = String(sec % 60).padStart(2, '0');
+            return mm + ':' + ss;
+        }
+
+        escapeStatText(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        buildStatsMarkup() {
+            const s = this.stats;
+            const mode = this.escapeStatText(this.activeVersion ? this.activeVersion.label : GAME_VERSION_LABEL);
+            const room = this.escapeStatText(this.roomCode !== null ? this.roomCode : (this.worldSeed || '--'));
+            const reason = this.escapeStatText(s.lastReason);
+            return `
+                <div class="stats-section">PARTIDA</div>
+                <div class="stats-grid">
+                    <div class="stat-row"><span>Versión</span><strong>${mode}</strong></div>
+                    <div class="stat-row"><span>Sala / semilla</span><strong>${room}</strong></div>
+                    <div class="stat-row"><span>Tiempo activo</span><strong>${this.formatPlayTime()}</strong></div>
+                    <div class="stat-row"><span>Distancia recorrida</span><strong>${this.stats.distance.toFixed(1)} m</strong></div>
+                    <div class="stat-row"><span>Muertes</span><strong>${this.stats.deaths}</strong></div>
+                    <div class="stat-row"><span>Salas visitadas</span><strong>${this.stats.roomsVisited}</strong></div>
+                    <div class="stat-row"><span>Refugios encontrados</span><strong>${this.stats.securityRoomsFound}</strong></div>
+                    <div class="stat-row"><span>Objetos recogidos</span><strong>${this.stats.pickups}</strong></div>
+                </div>
+                <div class="stats-section">RECURSOS E INTERACCIONES</div>
+                <div class="stats-grid">
+                    <div class="stat-row"><span>Marcas de tiza</span><strong>${this.stats.chalkMarks}</strong></div>
+                    <div class="stat-row"><span>Cámaras vistas</span><strong>${this.stats.camerasViewed}</strong></div>
+                    <div class="stat-row"><span>Puertas abiertas</span><strong>${this.stats.doorsOpened}</strong></div>
+                    <div class="stat-row"><span>Puertas cerradas</span><strong>${this.stats.doorsClosed}</strong></div>
+                    <div class="stat-row"><span>Linterna encendida</span><strong>${Math.floor(this.stats.flashlightSeconds)} s</strong></div>
+                    <div class="stat-row"><span>Tiempo corriendo</span><strong>${Math.floor(this.stats.sprintSeconds)} s</strong></div>
+                </div>
+                <div class="stats-section">LA ENTIDAD</div>
+                <div class="stats-grid">
+                    <div class="stat-row"><span>Apariciones</span><strong>${this.stats.entitySpawns}</strong></div>
+                    <div class="stat-row"><span>Encuentros</span><strong>${this.stats.entityEncounters}</strong></div>
+                </div>
+                <div class="stats-note">${reason ? 'ÚLTIMO REGISTRO: ' + reason : 'Pulsa [P] en cualquier momento para actualizar este registro.'}</div>`;
+        }
+
+        renderStats() {
+            if (!this.stats) return;
+            const markup = this.buildStatsMarkup();
+            const live = document.getElementById('stats-content');
+            const death = document.getElementById('game-over-stats');
+            if (live) live.innerHTML = markup;
+            if (death) death.innerHTML = markup;
+        }
+
+        updateStats(dt) {
+            if (!this.stats || !this.gameActive) return;
+            const p = this.player.pos;
+            const step = Math.hypot(p.x - this._statsLastPos.x, p.z - this._statsLastPos.z);
+            if (step < 5) this.stats.distance += step;
+            this._statsLastPos.copy(p);
+            if (this.flashlightOn) this.stats.flashlightSeconds += dt;
+            if (this.keys['ShiftLeft'] && (this.keys['KeyW'] || this.keys['KeyA'] || this.keys['KeyS'] || this.keys['KeyD'] || this.touchMove.x || this.touchMove.y)) {
+                this.stats.sprintSeconds += dt;
+            }
+            this._statsRoomTimer -= dt;
+            if (this._statsRoomTimer <= 0) {
+                this._statsRoomTimer = 0.5;
+                const C = CELL_SIZE;
+                for (const ch of this.worldSystem.chunks.values()) {
+                    if (!ch.loaded) continue;
+                    for (const r of ch.rooms || []) {
+                        const minX = (ch.cx * CHUNK_SIZE + r.x) * C;
+                        const maxX = (ch.cx * CHUNK_SIZE + r.x + r.w) * C;
+                        const minZ = (ch.cz * CHUNK_SIZE + r.z) * C;
+                        const maxZ = (ch.cz * CHUNK_SIZE + r.z + r.h) * C;
+                        if (p.x > minX + 0.2 && p.x < maxX - 0.2 && p.z > minZ + 0.2 && p.z < maxZ - 0.2) {
+                            const key = 'room:' + ch.cx + ':' + ch.cz + ':' + r.x + ':' + r.z;
+                            if (!this.stats.roomKeys.has(key)) {
+                                this.stats.roomKeys.add(key);
+                                this.stats.roomsVisited++;
+                            }
+                        }
+                    }
+                    for (const sr of ch.securityRooms || []) {
+                        if (p.x > sr.minX && p.x < sr.maxX && p.z > sr.minZ && p.z < sr.maxZ) {
+                            if (!this.stats.securityKeys.has(sr.id)) {
+                                this.stats.securityKeys.add(sr.id);
+                                this.stats.securityRoomsFound++;
+                            }
+                        }
+                    }
+                }
+            }
+            const ent = this.entity;
+            if (ent && ent.active) {
+                if (!this._lastEntityActive) this.stats.entitySpawns++;
+                const d = Math.hypot(ent.pos.x - p.x, ent.pos.z - p.z);
+                const close = d < 20 && (ent.seesPlayer || ent.state === 'CHASING');
+                if (close && !this._entityEncounterActive) this.stats.entityEncounters++;
+                this._entityEncounterActive = close;
+                this._lastEntityActive = true;
+            } else {
+                this._entityEncounterActive = false;
+                this._lastEntityActive = false;
+            }
+            if (this.statsOpen) this.renderStats();
         }
 
         selectSlot(slot) {
@@ -9748,6 +10627,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             } else if (p.type === 'note') {
                                 this.addLoreNote(p.text, p.noteIndex);
                             }
+                            this.stats.pickups++;
                             done = true;
                             break;
                         }
@@ -9786,6 +10666,8 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                             }
                         } else {
                             r.state.doorOpen = !r.state.doorOpen;
+                            if (r.state.doorOpen) this.stats.doorsOpened++;
+                            else this.stats.doorsClosed++;
                             this.doorStates.set(r.id, r.state.doorOpen);
                             this.net.publishDoor(r.id, r.state.doorOpen);
                             audio.playSwitchClick();
@@ -10407,6 +11289,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                         // Los dibujos de tiza se comparten con toda la sala
                         this.net.queueChalkDot(hit.point, n, this.inventory.chalkColor);
                         this.chalkSystem.lastDrawPoint = hit.point.clone();
+                        this.stats.chalkMarks++;
 
                         this.inventory.chalkPoints = Math.max(0, this.inventory.chalkPoints - 0.32);
                         this.updateChalkHUD();
@@ -10419,6 +11302,14 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }
 
         updateLights(dt) {
+            // En Opt no se reordena toda la piscina de luces en cada frame:
+            // las luces solo cambian cuando el jugador ha avanzado un poco.
+            // La iluminacion sigue siendo estable, pero se elimina una
+            // ordenacion costosa de cientos de lamparas por frame.
+            this._lightUpdateTimer -= dt;
+            const lightInterval = this.optimizedMode ? 0.12 : 0.033;
+            if (this._lightUpdateTimer > 0) return;
+            this._lightUpdateTimer = lightInterval;
             // La luz depende SOLO de la posicion del jugador, nunca de hacia
             // donde apunta la camara: antes la piscina priorizaba las lamparas
             // visibles en pantalla y girar la vista reasignaba los focos, asi
@@ -10960,17 +11851,32 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
         }
 
         triggerGameOver(reason) {
+            if (!this.gameActive) return;
+            // Captura el ultimo desplazamiento/tiempo y el encuentro que
+            // provoco la muerte antes de apagar el bucle de partida.
+            this.updateStats(0);
             this.gameActive = false;
+            this.stats.finishedAt = Date.now();
+            this.stats.deaths++;
+            this.stats.lastReason = reason || 'SEÑAL PERDIDA';
+            this.closeCameraFeed();
+            this.statsOpen = false;
+            const statsModal = document.getElementById('stats-modal');
+            if (statsModal) {
+                statsModal.classList.remove('open');
+                statsModal.setAttribute('aria-hidden', 'true');
+            }
             if (document.exitPointerLock && document.pointerLockElement) {
                 try { document.exitPointerLock(); } catch (err) { /* noop */ }
             }
             this.toggleChat(false);
-            document.getElementById('hud').style.display = 'none';
-            document.getElementById('game-over-reason').textContent = reason;
-            document.getElementById('game-over-screen').style.display = 'flex';
-            if (document.exitPointerLock && document.pointerLockElement) {
-                try { document.exitPointerLock(); } catch (err) { /* noop */ }
-            }
+            const hud = document.getElementById('hud');
+            if (hud) hud.style.display = 'none';
+            const reasonEl = document.getElementById('game-over-reason');
+            if (reasonEl) reasonEl.textContent = this.stats.lastReason;
+            this.renderStats();
+            const screen = document.getElementById('game-over-screen');
+            if (screen) screen.style.display = 'flex';
             this.net.leave();
         }
 
@@ -11076,6 +11982,7 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 }
             }
             this.cameraFeedView = { open: true, room, monitorIndex: idx };
+            this.stats.camerasViewed++;
             const overlay = document.getElementById('camera-feed-overlay');
             if (overlay) {
                 overlay.classList.add('open');
@@ -11514,6 +12421,35 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                 }
                 this.net.update(dt, this.player.pos, this.yaw, this.pitch, this.flashlightOn, this.worldSystem.wallBoxes, this.entity, this.furnitureBodies);
                 this.updateNetHUD();
+
+                // La Entidad solo la simula el anfitrion real. Antes el
+                // calentamiento se inicializaba, pero nunca se avanzaba: en
+                // consecuencia canRespawn quedaba en false para siempre y el
+                // bot no aparecia. Ahora espera doce segundos desde que la
+                // sala esta lista y luego se programa una primera aparicion.
+                const entityHost = this.net.isEntityHost();
+                if (entityHost) {
+                    if (!this._entityHostReady) {
+                        this._entityWarmupElapsed += dt;
+                        if (this._entityWarmupElapsed >= this._entityWarmupSeconds) {
+                            this._entityHostReady = true;
+                            this.entity.canRespawn = true;
+                            this.entity.respawnTimer = 0.35;
+                            this.notify('⚠ LA ENTIDAD HA ENTRADO EN EL NIVEL');
+                        }
+                    }
+                } else {
+                    this._entityHostReady = false;
+                    this._entityWarmupElapsed = 0;
+                    this.entity.canRespawn = false;
+                    if (this.entity.active) {
+                        this.entity.active = false;
+                        this.entity.mesh.visible = false;
+                        this.entity.path = [];
+                        this.entity.pathTarget = null;
+                    }
+                }
+
                 this.entity.update(
                     dt,
                     this.player.pos,
@@ -11524,16 +12460,37 @@ const FLOOR_TEXTURE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAg
                     this.furnitureBodies
                 );
                 // Cuando la entidad aparece de verdad (o reaparece), la sala
-                // se entera: los espectros se colocan en su posicion real
+                // se entera: los espectros se colocan en su posicion real.
+                // Al desaparecer se envia tambien el estado "gone" para que
+                // ningún jugador conserve un bot fantasma.
                 if (this.entity.active && !this._entSpawnNotified) {
                     this._entSpawnNotified = true;
                     this.net.onEntitySpawned();
+                } else if (!this.entity.active && this._entSpawnNotified) {
+                    this._entSpawnNotified = false;
+                    this.net.onEntityGone();
                 }
+                this.updateStats(dt);
             }
 
-            if (Math.random() < 0.3) this.renderNoise();
+            // El ruido VHS es decorativo y no debe consumir una imagen de
+            // 256x256 en cada frame. Opt lo actualiza con mucha menos
+            // frecuencia; el efecto visual sigue siendo continuo.
+            this._noiseUpdateTimer -= dt;
+            const noiseInterval = this.optimizedMode ? 0.12 : 0.05;
+            if (this._noiseUpdateTimer <= 0) {
+                this._noiseUpdateTimer = noiseInterval;
+                this.renderNoise();
+            }
 
-            this.renderer.render(this.scene, this.camera);
+            // Perfil Opt: la simulación sigue actualizándose a la frecuencia
+            // completa, pero el coste de rasterizado principal se reduce a
+            // una imagen cada dos frames (30 fps visuales con movimiento
+            // suave de física y red). La variante normal renderiza todos.
+            this._renderFrame++;
+            if (!this.optimizedMode || (this._renderFrame & 1) === 0) {
+                this.renderer.render(this.scene, this.camera);
+            }
         }
     }
 

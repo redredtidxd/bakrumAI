@@ -51,6 +51,7 @@
         <button id="btn-touch-note" class="touch-btn" title="Cuaderno">📓</button>
         <button id="btn-touch-chat" class="touch-btn" title="Chat">💬</button>
         <button id="btn-touch-map" class="touch-btn" title="Mapa compartido">🗺️</button>
+        <button id="btn-touch-stats" class="touch-btn" title="Estadísticas">📊</button>
         <button id="btn-touch-interact" class="touch-btn" title="Interactuar">E</button>
     </div>
 
@@ -117,7 +118,7 @@
             </div>
             <div style="text-align: right; font-size: 11px; color: #756a47;">
                 <div>[WASD] Moverse | [SHIFT] Correr | [F] Linterna</div>
-                <div>[CLICK IZQ.] Dibujar | [E] Interactuar | [N] Cuaderno | [T] Chat</div>
+                <div>[CLICK IZQ.] Dibujar | [E] Interactuar | [N] Cuaderno | [T] Chat | [P] Estadísticas</div>
             </div>
         </div>
     </div>
@@ -156,14 +157,73 @@
             <div style="margin-bottom: 16px;">
                 <label for="name-input" style="font-size: 11px; letter-spacing: 2px; color: #8c8266; display: block; margin-bottom: 7px;">NOMBRE (MULTIJUGADOR)</label>
                 <input type="text" id="name-input" placeholder="Explorador" autocomplete="off" spellcheck="false" maxlength="14">
-            </div>                <p style="font-size: 11px; line-height: 1.7; color: #7d7355; margin-bottom: 14px;">
+            </div>
+            <div class="room-access-box">
+                <div class="room-access-head">
+                    <span>TIPO DE SALA</span>
+                    <button id="btn-open-rooms" class="btn room-browser-button" type="button">VER SALAS</button>
+                </div>
+                <div class="room-access-fields">
+                    <select id="room-visibility" aria-label="Visibilidad de la sala">
+                        <option value="public">🌐 SALA PÚBLICA · aparece en el listado</option>
+                        <option value="private">🔒 SALA PRIVADA · solo con código y PIN</option>
+                    </select>
+                    <input type="text" id="room-pin-input" placeholder="PIN privado (4-12 caracteres)" autocomplete="off" spellcheck="false" maxlength="12" style="display:none;">
+                </div>
+            </div>
+            <p style="font-size: 11px; line-height: 1.7; color: #7d7355; margin-bottom: 14px;">
                 🛰 <b style="color:#a39879;">MULTIJUGADOR · HASTA 6 EXPLORADORES:</b> quienes escriban la <b style="color:#a39879;">MISMA SEMILLA</b> caen en la misma sala (números o <b style="color:#a39879;">letras</b>: da igual mayúsculas o tildes). El código del HUD (SEMILLA) es el que hay que compartir. Si la sala está llena jugarás en solitario.
             </p>
             <button id="btn-start" class="btn">COMENZAR EXPLORACIÓN</button>
             <div id="menu-version" style="margin-top: 16px; font-size: 11px; letter-spacing: 3px; color: #5f563c;">THE BACKROOMS v1.12.0 Opt</div>
+            <div class="version-picker-row">
+                <label for="version-selector">VERSIÓN:</label>
+                <select id="version-selector" aria-label="Seleccionar versión">
+                    <option value="1.12.0-opt">Version 1.12.0 Opt</option>
+                    <option value="1.12.0">Version 1.12.0 normal</option>
+                    <optgroup label="Historial almacenado">
+                        <option value="1.11.0" disabled>Version 1.11.0 · archivada</option>
+                        <option value="1.10.0" disabled>Version 1.10.0 · archivada</option>
+                    </optgroup>
+                </select>
+            </div>
+            <div id="version-note" class="version-note">Opt: perfil de rendimiento fuerte · el selector se aplica al recargar</div>
             <div style="margin-top: 18px; font-size: 12px;">
                 <label for="vol-slider">VOLUMEN:</label>
                 <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="0.7" style="vertical-align:middle; accent-color:#bda052;">
+            </div>
+        </div>
+    </div>
+
+    <!-- LISTADO Y CREACIÓN DE SALAS -->
+    <div id="rooms-modal" class="overlay-screen" style="display: none;">
+        <div class="menu-box rooms-box">
+            <div class="rooms-title-row">
+                <div>
+                    <h2 class="rooms-title">SALAS DE EXPLORACIÓN</h2>
+                    <p class="rooms-subtitle">PÚBLICAS DESCUBIERTAS EN LOS ÚLTIMOS SEGUNDOS</p>
+                </div>
+                <button id="btn-close-rooms" class="btn" type="button">✕</button>
+            </div>
+            <div id="room-list" class="room-list">
+                <div class="room-empty">BUSCANDO SALAS PÚBLICAS…</div>
+            </div>
+            <div class="room-create-box">
+                <div class="room-create-title">CREAR / PREPARAR UNA SALA</div>
+                <div class="room-create-grid">
+                    <input id="room-name-input" type="text" maxlength="22" placeholder="Nombre de la sala" autocomplete="off" spellcheck="false">
+                    <input id="room-code-input" type="text" maxlength="32" placeholder="Código/semilla (vacío = aleatorio)" autocomplete="off" spellcheck="false">
+                    <select id="room-create-visibility" aria-label="Visibilidad de la nueva sala">
+                        <option value="public">🌐 Pública</option>
+                        <option value="private">🔒 Privada</option>
+                    </select>
+                    <input id="room-create-pin" type="text" maxlength="12" placeholder="PIN (solo privada)" autocomplete="off" spellcheck="false" style="display:none;">
+                </div>
+                <div class="room-actions">
+                    <button id="btn-refresh-rooms" class="btn" type="button">↻ ACTUALIZAR</button>
+                    <button id="btn-create-room" class="btn" type="button">USAR ESTA SALA</button>
+                </div>
+                <p class="room-help">Pública: aparece en el listado mientras haya jugadores. Privada: no se anuncia; comparte el código y el PIN con tus amigos.</p>
             </div>
         </div>
     </div>
@@ -206,12 +266,27 @@
         </div>
     </div>
 
+    <!-- ESTADÍSTICAS EN CUALQUIER MOMENTO -->
+    <div id="stats-modal" class="stats-modal" aria-hidden="true">
+        <div class="stats-box">
+            <div class="stats-head">
+                <div>
+                    <h2>REGISTRO DE SUPERVIVENCIA</h2>
+                    <p>SE ACTUALIZA EN TIEMPO REAL · [P]</p>
+                </div>
+                <button id="btn-close-stats" class="btn" type="button">✕</button>
+            </div>
+            <div id="stats-content" class="stats-content"></div>
+        </div>
+    </div>
+
     <!-- PANTALLA GAME OVER -->
     <div id="game-over-screen" class="overlay-screen" style="display: none;">
-        <div class="menu-box">
+        <div class="menu-box game-over-box">
             <h1 class="menu-title" style="color: #d11e1e; text-shadow: 0 0 15px rgba(209,30,30,0.7);">SEÑAL PERDIDA</h1>
             <p id="game-over-reason" class="menu-subtitle" style="color: #888;">LA ENTIDAD TE ALCANZÓ</p>
-            <p style="font-size: 12px; color: #666; margin-bottom: 20px;">Tu señal se ha disuelto en la bruma del Nivel 0.</p>
+            <p style="font-size: 12px; color: #666; margin-bottom: 14px;">Tu señal se ha disuelto en la bruma del Nivel 0.</p>
+            <div id="game-over-stats" class="stats-content game-over-stats"></div>
             <button id="btn-respawn" class="btn">REINTENTAR</button>
         </div>
     </div>

@@ -71,6 +71,13 @@
             // Linea de vision del ultimo frame: game.js la usa para el drenaje
             // de cordura (solo drena mientras la entidad te ve de verdad).
             this.seesPlayer = false;
+            // Estado especial de refugio: si el explorador cierra una sala de
+            // seguridad delante de la Entidad, esta llega al vano, espera un
+            // momento y se marcha lejos en vez de quedarse pegada a la puerta
+            // o intentar atravesarla.
+            this.securityRoomId = null;
+            this.securityWaitTimer = 0;
+            this.securityCooldownUntil = 0;
 
             const model = createEntityModel();
             this.mesh = model.group;
@@ -85,6 +92,11 @@
                 const wx = (c.x + 0.5) * CELL_SIZE;
                 const wz = (c.z + 0.5) * CELL_SIZE;
                 if (this.worldSystem && this.worldSystem.pointInSlab(wx, wz)) return false;
+                // Nunca aparece dentro de la cabina: las salas de seguridad
+                // son refugios y el bot debe verse llegar desde el pasillo.
+                if (this.worldSystem && this.worldSystem.securityRooms && this.worldSystem.securityRooms.some(r =>
+                    wx > r.minX + 0.08 && wx < r.maxX - 0.08 &&
+                    wz > r.minZ + 0.08 && wz < r.maxZ - 0.08)) return false;
                 return Math.hypot(wx - playerPos.x, wz - playerPos.z) >= 48.0;
             });
 
@@ -99,6 +111,48 @@
             this.pathTarget = null;
             this.pickWanderTarget(walkableCells, playerPos);
             audio.playMonsterRoar();
+        }
+
+        isInsideSecurityRoom(room, pos, margin = 0.08) {
+            if (!room || !pos) return false;
+            return pos.x > room.minX + margin && pos.x < room.maxX - margin &&
+                pos.z > room.minZ + margin && pos.z < room.maxZ - margin;
+        }
+
+        securityOutsidePoint(room) {
+            const pad = 1.05;
+            const x = room.doorWorldX;
+            const z = room.doorWorldZ;
+            if (room.doorSide === 'W') return new THREE.Vector3(x - pad, 0, z);
+            if (room.doorSide === 'E') return new THREE.Vector3(x + pad, 0, z);
+            if (room.doorSide === 'N') return new THREE.Vector3(x, 0, z - pad);
+            return new THREE.Vector3(x, 0, z + pad);
+        }
+
+        // Selecciona un destino claramente alejado del refugio y del jugador.
+        // Si no hay suficientes celdas cargadas se usa el vagabundeo normal,
+        // pero nunca se reelige inmediatamente la puerta de seguridad.
+        pickFarWanderTarget(walkableCells, playerPos, room) {
+            let open = [];
+            if (this.worldSystem) {
+                for (const ch of this.worldSystem.chunks.values()) {
+                    if (!ch.loaded) continue;
+                    for (const c of ch.openCells) open.push(c);
+                }
+            }
+            if (!open.length) open = walkableCells;
+            const cx = room ? room.centerX : playerPos.x;
+            const cz = room ? room.centerZ : playerPos.z;
+            const pool = open.filter(c => {
+                const wx = (c.x + 0.5) * CELL_SIZE;
+                const wz = (c.z + 0.5) * CELL_SIZE;
+                return Math.hypot(wx - playerPos.x, wz - playerPos.z) > 28 &&
+                    Math.hypot(wx - cx, wz - cz) > 24;
+            });
+            const source = pool.length ? pool : open;
+            if (!source.length) return;
+            const pick = source[Math.floor(Math.random() * source.length)];
+            this.recomputePath(new THREE.Vector3((pick.x + 0.5) * CELL_SIZE, 0, (pick.z + 0.5) * CELL_SIZE), walkableCells);
         }
 
         // Elige un destino ALCANZABLE por la rejilla de celdas abiertas, con
@@ -440,6 +494,84 @@
             }
 
             const dist = this.pos.distanceTo(playerPos);
+
+            // Refugio de seguridad: la Entidad puede detectar que el jugador
+            // está dentro, pero una puerta cerrada corta la línea de visión y
+            // el camino. Se acerca al lado exterior del vano, permanece allí
+            // unos segundos para que se note su presencia y luego se aleja a
+            // otra zona. Esta rama ocurre antes de CHASING para que nunca
+            // drene cordura ni mate a través de la puerta.
+            const safeRoom = this.worldSystem && this.worldSystem.securityRooms
+                ? this.worldSystem.securityRooms.find(r => !r.state.doorOpen &&
+                    this.isInsideSecurityRoom(r, playerPos) &&
+                    (!r.id || this.securityCooldownUntil <= Date.now()))
+                : null;
+            if (safeRoom) {
+                const inside = this.isInsideSecurityRoom(safeRoom, this.pos, 0.02);
+                if (inside) {
+                    // Solo puede ocurrir si la puerta se cerró en el mismo
+                    // instante en que estaba cruzando: recolocarlo fuera evita
+                    // que quede atrapado o atraviese la hoja.
+                    this.pos.copy(this.securityOutsidePoint(safeRoom));
+                    this.path = [];
+                    this.pathTarget = null;
+                }
+                const outside = this.securityOutsidePoint(safeRoom);
+                const doorDist = Math.hypot(this.pos.x - outside.x, this.pos.z - outside.z);
+                if (this.securityRoomId !== safeRoom.id) {
+                    this.securityRoomId = safeRoom.id;
+                    this.securityWaitTimer = 0;
+                    this.state = 'SECURITY_APPROACH';
+                    this.path = [];
+                    this.pathTarget = null;
+                }
+                if (this.state === 'SECURITY_APPROACH') {
+                    this.speed = 2.1;
+                    if (doorDist <= 2.15) {
+                        this.state = 'SECURITY_WAIT';
+                        this.securityWaitTimer = 4.5;
+                        this.path = [];
+                        this.pathTarget = null;
+                    } else {
+                        if (!this.path.length && !this.pathTarget) {
+                            this.recomputePath(outside, walkableCells);
+                        }
+                        this.followPath(dt, walkableCells);
+                    }
+                } else if (this.state === 'SECURITY_WAIT') {
+                    this.speed = 0;
+                    this.securityWaitTimer -= dt;
+                    this.yaw = Math.atan2(playerPos.x - this.pos.x, playerPos.z - this.pos.z);
+                    if (this.securityWaitTimer <= 0) {
+                        this.securityRoomId = null;
+                        // No vuelve a plantarse en la misma puerta mientras el
+                        // jugador siga dentro: espera unos segundos, se aleja
+                        // de verdad y deja un margen antes de poder detectarlo
+                        // otra vez en ese refugio.
+                        this.securityCooldownUntil = Date.now() + 12000;
+                        this.state = 'WANDERING';
+                        this.path = [];
+                        this.pathTarget = null;
+                        this.pickFarWanderTarget(walkableCells, playerPos, safeRoom);
+                    }
+                }
+                this.seesPlayer = false;
+                this.mesh.position.set(this.pos.x, 0, this.pos.z);
+                this.mesh.rotation.y = this.yaw;
+                const safeGlitch = document.getElementById('glitch-overlay');
+                if (safeGlitch) safeGlitch.style.display = 'none';
+                return;
+            } else if (this.securityRoomId) {
+                // La puerta volvió a abrirse o el jugador salió: reanudar la IA
+                // normal sin conservar el objetivo antiguo del refugio.
+                this.securityRoomId = null;
+                this.securityCooldownUntil = 0;
+                if (this.state === 'SECURITY_APPROACH' || this.state === 'SECURITY_WAIT') {
+                    this.state = 'WANDERING';
+                    this.path = [];
+                    this.pathTarget = null;
+                }
+            }
 
             // Si el jugador se aleja mucho, la entidad desaparece (nada de
             // presion constante desde el otro lado del mapa) y vuelve luego
