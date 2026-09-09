@@ -823,9 +823,12 @@
     }
 
     // ------------------------------------------------------------------
-    // MONITOR de pared (sala de seguridad): marco oscuro + pantalla cuyo
-    // material se sustituye por el feed de camaras (render target) y una
-    // capa de scanlines encima. world.js lo cuelga en la pared interior.
+    // MONITOR CRT de pared (sala de seguridad, estilo FNAF): cuerpo GRUESO
+    // ("la pantalla gorda"), pantalla cuyo material se sustituye por el feed
+    // de camaras (render target), capa de scanlines encima y una placa con
+    // la etiqueta "CAM 01" que game.js actualiza al cambiar de camara.
+    // world.js cuelga UNO EN CADA PARED de la sala (todos menos la de la
+    // puerta), cada uno con su propia camara y barrido lateral.
     // ------------------------------------------------------------------
     let scanlineTexCache = null;
     function scanlineTexture() {
@@ -839,23 +842,56 @@
         x.fillRect(0, 0, 8, 2);
         scanlineTexCache = new THREE.CanvasTexture(c);
         scanlineTexCache.wrapS = scanlineTexCache.wrapT = THREE.RepeatWrapping;
-        scanlineTexCache.repeat.set(30, 22);
+        scanlineTexCache.repeat.set(24, 16);
         return scanlineTexCache;
     }
-    function createMonitorScreenModel() {
+    function createMonitorScreenModel(camNumber = 1) {
         const group = new THREE.Group();
-        const frameMat = new THREE.MeshStandardMaterial({ color: 0x22252b, metalness: 0.6, roughness: 0.5 });
-        const frame = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.05, 0.14), frameMat);
-        frame.position.y = 0.55;
-        group.add(frame);
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x1d2027, metalness: 0.55, roughness: 0.55 });
+        const bevelMat = new THREE.MeshStandardMaterial({ color: 0x101218, metalness: 0.4, roughness: 0.75 });
+
+        // Carcasa CRT gruesa: el frente sobresale del cuerpo trasero
+        const back = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.92, 0.3), frameMat);
+        back.position.y = 0.54;
+        group.add(back);
+        const bevel = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.78, 0.05), bevelMat);
+        bevel.position.set(0, 0.56, 0.155);
+        group.add(bevel);
+
+        // Pantalla (el material se cambia por el render target del feed)
         const screenMat = new THREE.MeshBasicMaterial({ color: 0x0a0d12 });
-        const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.66, 0.9), screenMat);
-        screen.position.set(0, 0.55, 0.071);
+        const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.22, 0.66), screenMat);
+        screen.position.set(0, 0.57, 0.182);
         group.add(screen);
-        const scan = new THREE.Mesh(new THREE.PlaneGeometry(1.66, 0.9),
-            new THREE.MeshBasicMaterial({ map: scanlineTexture(), transparent: true, opacity: 0.4, depthWrite: false }));
-        scan.position.set(0, 0.55, 0.075);
+        const scan = new THREE.Mesh(new THREE.PlaneGeometry(1.22, 0.66),
+            new THREE.MeshBasicMaterial({ map: scanlineTexture(), transparent: true, opacity: 0.45, depthWrite: false }));
+        scan.position.set(0, 0.57, 0.186);
         group.add(scan);
-        group.userData = { screenMat };
+
+        // Placa inferior con la etiqueta de camara (canvas actualizable)
+        const labelCanvas = document.createElement('canvas');
+        labelCanvas.width = 128;
+        labelCanvas.height = 28;
+        const lx = labelCanvas.getContext('2d');
+        lx.fillStyle = '#0a0d12';
+        lx.fillRect(0, 0, 128, 28);
+        lx.fillStyle = '#9be34a';
+        lx.font = 'bold 15px Courier New';
+        lx.textAlign = 'center';
+        lx.fillText('CAM ' + String(camNumber).padStart(2, '0'), 64, 19);
+        const labelTex = new THREE.CanvasTexture(labelCanvas);
+        labelTex.minFilter = THREE.LinearFilter;
+        const label = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.092),
+            new THREE.MeshBasicMaterial({ map: labelTex }));
+        label.position.set(0, 0.1, 0.181);
+        group.add(label);
+
+        // LED verde de encendido
+        const ledMat = new THREE.MeshStandardMaterial({ color: 0x3fae49, emissive: 0x2f9e39, emissiveIntensity: 0.7 });
+        const led = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 8), ledMat);
+        led.position.set(0.5, 0.1, 0.181);
+        group.add(led);
+
+        group.userData = { screenMat, labelCanvas, labelTex, labelCtx: lx };
         return group;
     }

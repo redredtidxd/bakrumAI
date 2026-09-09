@@ -10,7 +10,7 @@
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.9.2';
+    const GAME_VERSION = '1.11.0';
 
     class BackroomsGame {
         constructor() {
@@ -35,7 +35,7 @@
             this.renderer.setClearColor(FOG_COLOR);
             // Control de exposición: mapeado de tonos oscuro y aterrador
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            this.renderer.toneMappingExposure = 0.58;
+            this.renderer.toneMappingExposure = 0.62;
             this.container.appendChild(this.renderer.domElement);
 
             // Anisotropía: paredes y moqueta se ven nítidas incluso en ángulo rasante
@@ -45,18 +45,20 @@
             });
 
             // Luz ambiental casi nula: paredes y moqueta en penumbra ocre
-            // AMARILLENTA (el backroom fluorescente, no blanco).
-            this.ambientLight = new THREE.AmbientLight(0xded187, 0.11);
+            // AMARILLENTA (el backroom fluorescente, no blanco). Un punto mas
+            // que antes: las zonas entre lamparas dejaban de leerse y el
+            // contraste con el pasillo iluminado era demasiado abrupto.
+            this.ambientLight = new THREE.AmbientLight(0xded187, 0.14);
             this.scene.add(this.ambientLight);
 
             // Relleno hemisférico mínimo para evitar el aspecto lavado
-            this.hemiLight = new THREE.HemisphereLight(0xfff3c0, 0x6a5d30, 0.10);
+            this.hemiLight = new THREE.HemisphereLight(0xfff3c0, 0x6a5d30, 0.13);
             this.scene.add(this.hemiLight);
 
             this.flashlightOn = true;
             // Linterna mejorada: mas alcance, tono calido amarillento y un cono
             // algo mas cerrado con borde suave (penumbra alta)
-            this.flashlight = new THREE.SpotLight(0xfff0b0, 2.0, 36, Math.PI / 6, 0.95, 2.0);
+            this.flashlight = new THREE.SpotLight(0xfff0b0, 2.2, 40, Math.PI / 6, 0.95, 2.0);
             this.flashlight.position.set(0, 0, 0);
             this.flashlight.target = new THREE.Object3D();
             this.camera.add(this.flashlight.target);
@@ -70,12 +72,12 @@
             // Piscina de luces de techo AMARILLENTAS (0xffd878): antes eran 8
             // focos con radio 9 m que no llegaban ni a la lampara vecina y el
             // pasillo quedaba negro hasta pisar cada foco. Ahora 64 focos con
-            // radio 16 m: se iluminan siempre las 64 lamparas MAS CERCANAS
+            // radio 18 m: se iluminan siempre las 64 lamparas MAS CERCANAS
             // (ver updateLights), asi una sala grande o un cruce con muchas
             // lamparas queda entero encendido.
             this.lightPool = [];
             for (let i = 0; i < 64; i++) {
-                const pl = new THREE.PointLight(0xffd878, 0, 16, 2.0);
+                const pl = new THREE.PointLight(0xffd878, 0, 18, 2.0);
                 this.scene.add(pl);
                 this.lightPool.push(pl);
             }
@@ -152,10 +154,11 @@
             // Chat de sala
             this.net.onChatData = (n, m) => this.appendChat(n, m);
             this.chatOpen = false;
-            this._feedTimer = 0;
-            this._feedIdx = 0;
-            this._feedRT = null;
-            this._feedCam = null;
+            // Feeds de los monitores de las salas de seguridad: UNO POR
+            // MONITOR (cada pantalla muestra una camara DISTINTA, con su
+            // render target y su barrido lateral). Clave: id de sala + indice.
+            this._monFeeds = new Map();
+            this._feedTime = 0;
             this._noSignalTex = null;
             this._panelTimer = 0;
             this._iRechargeAcc = 0;
@@ -231,7 +234,7 @@
             }
 
             this.flashlightOn = !this.flashlightOn;
-            this.flashlight.intensity = this.flashlightOn ? 2.0 : 0;
+            this.flashlight.intensity = this.flashlightOn ? 2.2 : 0;
             if (this.flashlightOn) audio.playSwitchClick();
             this.updateFlashlightHUD();
         }
@@ -268,10 +271,10 @@
                     }
                 } else if (this.inventory.flashBattery < 20) {
                     // Parpadeo agonizante antes de agotarse
-                    this.flashlight.intensity = 1.1 + Math.random() * 1.0;
+                    this.flashlight.intensity = 1.2 + Math.random() * 1.1;
                     if (Math.random() < 0.06) audio.flickerHum();
                 } else {
-                    this.flashlight.intensity = 2.0;
+                    this.flashlight.intensity = 2.2;
                 }
             }
             this.updateFlashlightHUD();
@@ -822,14 +825,30 @@
                     // Puerta de metal de la SALA DE SEGURIDAD: [E] abre/cierra
                     // (con pila); sin pila, [E] recarga con una de repuesto.
                     // Tambien se activa desde el panel de control (la pantalla
-                    // donde se ve la pila restante)
+                    // donde se ve la pila restante). Y los MONITORES: [E]
+                    // cambia la camara que retransmiten a la siguiente.
                     for (const r of this.worldSystem.securityRooms) {
                         if (!r.doorModel) continue;
                         let o = hit.object;
                         let hitDoor = false;
+                        let hitMon = null;
                         while (o) {
                             if (o === r.doorModel || o === r.panelGroup) { hitDoor = true; break; }
+                            if (r.monitors && r.monitors.includes(o)) { hitMon = o; break; }
                             o = o.parent;
+                        }
+                        if (hitMon) {
+                            const cams = this.worldSystem.cameras;
+                            if (cams.length > 1) {
+                                const idx = r.monitors.indexOf(hitMon);
+                                r._monPicks = r._monPicks || [0, 1, 2];
+                                r._monPicks[idx] = (r._monPicks[idx] + 1) % Math.min(cams.length, 3);
+                                this.notify('📹 CAM ' + String(r._monPicks[idx] + 1).padStart(2, '0'));
+                                audio.playSwitchClick();
+                            } else {
+                                this.notify('📹 SOLO HAY UNA CÁMARA EN EL NIVEL');
+                            }
+                            return;
                         }
                         if (!hitDoor) continue;
                         if (r.state.battery <= 0) {
@@ -1431,11 +1450,24 @@
             const hits = raycaster.intersectObjects(this.scene.children, true);
 
             for (let hit of hits) {
-                if (hit.distance < 2.7 && hit.object.material && (hit.object.material === Materials.wall || hit.object.material === Materials.floor)) {
+                if (hit.distance < 2.7 && hit.object.material) {
+                    // Las paredes curvas y diagonales usan un CLON de
+                    // Materials.wall (con DoubleSide): comparar por referencia
+                    // fallaba y la tiza no pintaba en las paredes inclinadas.
+                    // Se comparan las TEXTURAS compartidas, que si lo son.
+                    const m = hit.object.material;
+                    const wallish = m.map && (m.map === Materials.wall.map || m.map === Materials.floor.map);
+                    if (!wallish) continue;
+                    // Normal de la cara: en las paredes de doble cara la normal
+                    // de la geometria puede apuntar al lado contrario de la
+                    // camara; la tiza quedaria invisible (mirando a la pared
+                    // por dentro). Se voltea si apunta en el sentido del rayo.
+                    const n = hit.face.normal.clone();
+                    if (n.dot(raycaster.ray.direction) > 0) n.negate();
                     if (!this.chalkSystem.lastDrawPoint || this.chalkSystem.lastDrawPoint.distanceTo(hit.point) > 0.05) {
-                        this.chalkSystem.addDot(hit.point, hit.face.normal, this.inventory.chalkColor);
+                        this.chalkSystem.addDot(hit.point, n, this.inventory.chalkColor);
                         // Los dibujos de tiza se comparten con toda la sala
-                        this.net.queueChalkDot(hit.point, hit.face.normal, this.inventory.chalkColor);
+                        this.net.queueChalkDot(hit.point, n, this.inventory.chalkColor);
                         this.chalkSystem.lastDrawPoint = hit.point.clone();
 
                         this.inventory.chalkPoints = Math.max(0, this.inventory.chalkPoints - 0.32);
@@ -1459,16 +1491,15 @@
             }).sort((a, b) => a.dist - b.dist);
 
             this.lightPool.forEach((light, i) => {
-                if (sorted[i] && sorted[i].dist < 21) {
+                if (sorted[i] && sorted[i].dist < 24) {
                     const l = sorted[i].lamp;
                     light.position.copy(l.pos);
 
                     if (l.state === 1) {
                         // Paneles encendidos: luz continua, visible de lejos.
-                        // Mas tenue que antes: las zonas "todo encendido"
-                        // quedaban lavadas; asi se mantiene el tono amarillo
-                        // y el contraste con la oscuridad.
-                        light.intensity = 0.52;
+                        // Un punto mas brillante que antes para que el pasillo
+                        // iluminado no se apague entre lampara y lampara.
+                        light.intensity = 0.62;
                     } else if (l.state === 2) {
                         l.flickerTimer -= dt;
                         if (l.flickerTimer <= 0) {
@@ -1476,7 +1507,7 @@
                             l.flickerTimer = Math.random() * 0.25 + 0.05;
                             if (!l.isLitNow && Math.random() < 0.15) audio.flickerHum();
                         }
-                        light.intensity = l.isLitNow ? (0.56 + Math.random() * 0.16) : 0.05;
+                        light.intensity = l.isLitNow ? (0.66 + Math.random() * 0.18) : 0.05;
                     }
                 } else {
                     light.intensity = 0;
@@ -1508,6 +1539,11 @@
             mesh.visible = true;
             mesh.position.set(x, 0, z);
             snapToFloor(mesh, 0);
+            // Y base del modelo (las mesas/sillas caidas se asientan con el
+            // centro por ENCIMA del suelo). Al aplicar posiciones remotas se
+            // conserva: si se forzara y=0, los modelos tumbados se hundian en
+            // la moqueta ("las mesas y sillas atraviesan el suelo").
+            body.baseY = mesh.position.y;
             this.updateFurnitureAABB(body);
             this.furnitureBodies.push(body);
             return body;
@@ -1619,7 +1655,10 @@
                 const b = this.furnitureBodies.find(x => x.fid === it.id);
                 if (!b || !b.mesh) continue;
                 if (typeof it.x === 'number' && typeof it.z === 'number') {
-                    b.mesh.position.set(it.x, 0, it.z);
+                    // y = Y base asentada del modelo: las mesas/sillas caidas
+                    // tienen el centro por encima del suelo; forzar y=0 las
+                    // hundia en la moqueta cuando llegaba una posicion remota
+                    b.mesh.position.set(it.x, b.baseY || b.mesh.position.y, it.z);
                     this.updateFurnitureAABB(b);
                     b._remoteAt = Date.now();
                 }
@@ -1717,14 +1756,22 @@
                         }
                     }
                     if (found) break;
-                    // Puerta de metal de sala de seguridad (con su pila)
+                    // Puerta de metal de sala de seguridad (con su pila) y
+                    // monitores de camaras ([E] cambia la camara)
                     for (const r of this.worldSystem.securityRooms) {
                         if (!r.doorModel) continue;
                         let o = hit.object;
                         let hitDoor = false;
+                        let hitMon = false;
                         while (o) {
                             if (o === r.doorModel || o === r.panelGroup) { hitDoor = true; break; }
+                            if (r.monitors && r.monitors.includes(o)) { hitMon = true; break; }
                             o = o.parent;
+                        }
+                        if (hitMon) {
+                            found = true;
+                            prompt.textContent = '[E] CAMBIAR CÁMARA';
+                            break;
                         }
                         if (!hitDoor) continue;
                         found = true;
@@ -1803,10 +1850,11 @@
             // escalera de cuadrados de la colision: se quedaba a ~0,4 m de
             // la cara visible y la pared parecia mal colocada.
             const slabs = this.worldSystem.slantedSlabs;
-            if (slabs && slabs.length) {
+            const resolveSlabs = (x, z) => {
+                if (!slabs || !slabs.length) return [x, z];
                 for (const s of slabs) {
                     const cos = Math.cos(s.ang), sin = Math.sin(s.ang);
-                    const dx = newX - s.cx, dz = newZ - s.cz;
+                    const dx = x - s.cx, dz = z - s.cz;
                     const lx = dx * cos - dz * sin;
                     const lz = dx * sin + dz * cos;
                     const T = Math.max(s.T0, s.T1);
@@ -1838,27 +1886,80 @@
                             nlx = cx2 + ddx * r;
                             nlz = cz2 + ddz * r;
                         }
-                        newX = s.cx + nlx * cos + nlz * sin;
-                        newZ = s.cz - nlx * sin + nlz * cos;
+                        x = s.cx + nlx * cos + nlz * sin;
+                        z = s.cz - nlx * sin + nlz * cos;
                     }
                 }
-            }
+                return [x, z];
+            };
+            [newX, newZ] = resolveSlabs(newX, newZ);
 
-            // Muebles empujables: el jugador los desplaza en su dirección de avance
+            // Muebles empujables: el jugador los desplaza en su direccion de
+            // avance. La resolucion se hace por el LADO de la caja en el que
+            // esta el jugador, NUNCA por el signo del movimiento: antes, al
+            // tocar una silla/mesa moviendote solo en un eje (o con el mueble
+            // deslizandose hacia ti), el jugador saltaba al lado contrario
+            // del mueble ("me teletransporta al empujar") y podia acabar
+            // dentro de una pared.
             for (const b of this.furnitureBodies) {
                 if (!b.aabb) continue;
                 const box = b.aabb;
-                if (newX + r > box.minX && newX - r < box.maxX && this.player.pos.z + r > box.minZ && this.player.pos.z - r < box.maxZ) {
-                    newX = deltaX > 0 ? box.minX - r : box.maxX + r;
-                    if (deltaX !== 0) b.vel.x += deltaX * 16;
+                const boxCX = (box.minX + box.maxX) / 2;
+                const boxCZ = (box.minZ + box.maxZ) / 2;
+                const prevInBoxX = this.player.pos.x + r > box.minX && this.player.pos.x - r < box.maxX;
+                const prevInBoxZ = this.player.pos.z + r > box.minZ && this.player.pos.z - r < box.maxZ;
+                const overlapX = newX + r > box.minX && newX - r < box.maxX && this.player.pos.z + r > box.minZ && this.player.pos.z - r < box.maxZ;
+                const overlapZ = this.player.pos.x + r > box.minX && this.player.pos.x - r < box.maxX && newZ + r > box.minZ && newZ - r < box.maxZ;
+                if (overlapX) {
+                    if (prevInBoxX) {
+                        // El mueble se deslizo hacia el jugador (lo empuja
+                        // otro, o reboto en un muro): salir por la cara mas
+                        // proxima, sin saltos de lado
+                        const penL = newX + r - box.minX;
+                        const penR = box.maxX - (newX - r);
+                        newX = penL < penR ? box.minX - r : box.maxX + r;
+                    } else {
+                        // El jugador cruza una cara: quedarse en el lado del
+                        // que viene
+                        newX = this.player.pos.x < boxCX ? box.minX - r : box.maxX + r;
+                    }
+                    if (!prevInBoxX && deltaX !== 0 && ((this.player.pos.x < boxCX) === (deltaX > 0))) {
+                        b.vel.x += deltaX * 16;
+                    }
                 }
-                if (this.player.pos.x + r > box.minX && this.player.pos.x - r < box.maxX && newZ + r > box.minZ && newZ - r < box.maxZ) {
-                    newZ = deltaZ > 0 ? box.minZ - r : box.maxZ + r;
-                    if (deltaZ !== 0) b.vel.z += deltaZ * 16;
+                if (overlapZ) {
+                    if (prevInBoxZ) {
+                        const penB = newZ + r - box.minZ;
+                        const penF = box.maxZ - (newZ - r);
+                        newZ = penB < penF ? box.minZ - r : box.maxZ + r;
+                    } else {
+                        newZ = this.player.pos.z < boxCZ ? box.minZ - r : box.maxZ + r;
+                    }
+                    if (!prevInBoxZ && deltaZ !== 0 && ((this.player.pos.z < boxCZ) === (deltaZ > 0))) {
+                        b.vel.z += deltaZ * 16;
+                    }
                 }
                 const sp = Math.hypot(b.vel.x, b.vel.z);
                 if (sp > 3.2) { b.vel.x *= 3.2 / sp; b.vel.z *= 3.2 / sp; }
             }
+
+            // Pasada final contra muros y tabiques: la posicion resuelta
+            // contra un mueble no debe quedar dentro de una pared (antes,
+            // al empujar una mesa contra un muro, el jugador entraba en la
+            // pared por el empuje del mueble: "noclip al empujar").
+            for (let box of this.worldSystem.wallBoxes) {
+                if (slabBoxSet && slabBoxSet.has(box)) continue;
+                if (newX + r > box.minX && newX - r < box.maxX && newZ + r > box.minZ && newZ - r < box.maxZ) {
+                    const penX = Math.min(newX + r - box.minX, box.maxX - (newX - r));
+                    const penZ = Math.min(newZ + r - box.minZ, box.maxZ - (newZ - r));
+                    if (penX < penZ) {
+                        newX = (newX + r - box.minX < box.maxX - (newX - r)) ? box.minX - r : box.maxX + r;
+                    } else {
+                        newZ = (newZ + r - box.minZ < box.maxZ - (newZ - r)) ? box.minZ - r : box.maxZ + r;
+                    }
+                }
+            }
+            [newX, newZ] = resolveSlabs(newX, newZ);
 
             this.player.pos.x = newX;
             this.player.pos.z = newZ;
@@ -2029,13 +2130,14 @@
             }
         }
 
-        // Monitor de la sala de seguridad: retransmite (render target) la
-        // imagen de las camaras de pared generadas, rotando cada 0,5 s entre
-        // las 4 mas cercanas al jugador
+        // Monitores de las salas de seguridad (FNAF): UNO POR PARED, cada
+        // uno con su camara DISTINTA (las mas cercanas a la sala, sin
+        // repetir) y su propio render target. La camara del feed BARRE de
+        // lado a lado con fase propia por monitor, y [E] sobre un monitor
+        // cambia su camara a la siguiente. Solo retransmiten las salas
+        // cercanas al jugador (las pantallas lejanas no se ven).
         updateCameraFeeds(dt) {
-            if (!this._feedRT) {
-                this._feedRT = new THREE.WebGLRenderTarget(320, 240);
-                this._feedCam = new THREE.PerspectiveCamera(60, 320 / 240, 0.1, 80);
+            if (!this._noSignalTex) {
                 const c = document.createElement('canvas');
                 c.width = 320; c.height = 240;
                 const x = c.getContext('2d');
@@ -2047,49 +2149,124 @@
                 x.fillText('SIN SEÑAL', 160, 122);
                 this._noSignalTex = new THREE.CanvasTexture(c);
             }
-            this._feedTimer += dt;
-            if (this._feedTimer < 0.5) return;
-            this._feedTimer = 0;
+            this._feedTime += dt;
             const cams = this.worldSystem.cameras;
-            if (cams.length) {
-                const near = cams.slice().sort((a, b) =>
-                    Math.hypot(a.x - this.player.pos.x, a.z - this.player.pos.z) -
-                    Math.hypot(b.x - this.player.pos.x, b.z - this.player.pos.z));
-                const cam = near[this._feedIdx % Math.min(near.length, 4)];
-                this._feedIdx++;
-                cam.group.updateMatrixWorld(true);
-                const pos = new THREE.Vector3();
-                cam.group.getWorldPosition(pos);
-                this._feedCam.position.copy(pos);
-                const q = new THREE.Quaternion();
-                cam.group.userData.head.getWorldQuaternion(q);
-                const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
-                const tgt = pos.clone().addScaledVector(dir, 12);
-                tgt.y = Math.max(0.5, pos.y - 0.5);
-                this._feedCam.lookAt(tgt);
-                // Evitar el bucle de realimentacion de GL: el monitor usa como
-                // textura el propio render target y, si la camara de seguridad
-                // lo ve mientras se renderiza el feed, WebGL descarta el frame
-                // (GL_INVALID_OPERATION) y el monitor puede quedarse negro.
-                const hidden = [];
-                for (const r of this.worldSystem.securityRooms) {
-                    if (r.monitor) { hidden.push(r.monitor); r.monitor.visible = false; }
-                    if (r.panelGroup) { hidden.push(r.panelGroup); r.panelGroup.visible = false; }
-                }
-                this.renderer.setRenderTarget(this._feedRT);
-                this.renderer.render(this.scene, this._feedCam);
-                this.renderer.setRenderTarget(null);
-                for (const m of hidden) m.visible = true;
-            }
+            const px = this.player.pos.x, pz = this.player.pos.z;
             for (const r of this.worldSystem.securityRooms) {
-                if (!r.monitor) continue;
-                const mat = r.monitor.userData.screenMat;
-                if (r.state.battery > 0 && cams.length) {
-                    mat.map = this._feedRT.texture;
-                } else {
-                    mat.map = this._noSignalTex;
+                if (!r.monitors || !r.monitors.length || !r.doorModel) continue;
+                if (Math.hypot(r.centerX - px, r.centerZ - pz) > 32) continue;
+                r._monPicks = r._monPicks || [0, 1, 2];
+                // Camaras ordenadas por cercania a la SALA (no al jugador):
+                // la asignacion es estable mientras el jugador no se mueve
+                const near = cams.slice().sort((a, b) =>
+                    Math.hypot(a.x - r.centerX, a.z - r.centerZ) -
+                    Math.hypot(b.x - r.centerX, b.z - r.centerZ));
+                for (let i = 0; i < r.monitors.length; i++) {
+                    const mon = r.monitors[i];
+                    const pick = r._monPicks[i];
+                    const key = r.id + ':' + i;
+                    let feed = this._monFeeds.get(key);
+                    if (!feed) {
+                        feed = {
+                            rt: new THREE.WebGLRenderTarget(256, 192),
+                            cam: new THREE.PerspectiveCamera(60, 256 / 192, 0.1, 80),
+                            timer: i * 0.2,
+                            lastPick: -1,
+                            // Vision nocturna verde (FNAF): el feed en crudo
+                            // salia casi negro (los pasillos estan oscuros) y
+                            // en la pantalla no se leia nada. Se lee el
+                            // render target y se remapea a tonos verdes con
+                            // contraste subido.
+                            canvas: document.createElement('canvas'),
+                            ctx: null,
+                            buf: null,
+                            img: null,
+                            tex: null
+                        };
+                        feed.canvas.width = 256;
+                        feed.canvas.height = 192;
+                        feed.ctx = feed.canvas.getContext('2d');
+                        feed.img = feed.ctx.createImageData(256, 192);
+                        feed.buf = new Uint8Array(256 * 192 * 4);
+                        feed.tex = new THREE.CanvasTexture(feed.canvas);
+                        feed.tex.minFilter = THREE.LinearFilter;
+                        this._monFeeds.set(key, feed);
+                    }
+                    // Etiqueta CAM xx de la placa del monitor
+                    if (feed.lastPick !== pick) {
+                        feed.lastPick = pick;
+                        const lx = mon.userData.labelCtx;
+                        if (lx) {
+                            lx.clearRect(0, 0, 128, 28);
+                            lx.fillStyle = '#0a0d12';
+                            lx.fillRect(0, 0, 128, 28);
+                            lx.fillStyle = '#9be34a';
+                            lx.font = 'bold 15px Courier New';
+                            lx.textAlign = 'center';
+                            lx.fillText('CAM ' + String(pick + 1).padStart(2, '0'), 64, 19);
+                            mon.userData.labelTex.needsUpdate = true;
+                        }
+                    }
+                    const mat = mon.userData.screenMat;
+                    if (r.state.battery <= 0 || pick >= near.length) {
+                        mat.map = this._noSignalTex;
+                        mat.needsUpdate = true;
+                        continue;
+                    }
+                    feed.timer += dt;
+                    if (feed.timer < 0.55) {
+                        mat.map = feed.tex || feed.rt.texture;
+                        mat.needsUpdate = true;
+                        continue;
+                    }
+                    feed.timer = 0;
+                    const camObj = near[pick];
+                    camObj.group.updateMatrixWorld(true);
+                    const pos = new THREE.Vector3();
+                    camObj.group.getWorldPosition(pos);
+                    const q = new THREE.Quaternion();
+                    camObj.group.userData.head.getWorldQuaternion(q);
+                    const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+                    // Barrido lateral: la camara del feed se mueve de lado a
+                    // lado con su propia fase por monitor (FNAF: las camaras
+                    // vigilan barriendo el pasillo)
+                    const pan = Math.sin(this._feedTime * 0.45 + i * 2.1) * 0.65;
+                    const baseYaw = Math.atan2(dir.x, dir.z);
+                    const yaw = baseYaw + pan;
+                    const cam = feed.cam;
+                    cam.position.copy(pos);
+                    cam.lookAt(new THREE.Vector3(
+                        pos.x + Math.sin(yaw) * 12,
+                        Math.max(0.5, pos.y - 0.6),
+                        pos.z + Math.cos(yaw) * 12));
+                    // Evitar el bucle de realimentacion de GL: el monitor usa
+                    // como textura el propio render target y, si la camara de
+                    // seguridad lo ve mientras se renderiza el feed, WebGL
+                    // descarta el frame (GL_INVALID_OPERATION) y la pantalla
+                    // puede quedarse negra.
+                    const hidden = [];
+                    for (const r2 of this.worldSystem.securityRooms) {
+                        for (const m of r2.monitors || []) { hidden.push(m); m.visible = false; }
+                    }
+                    this.renderer.setRenderTarget(feed.rt);
+                    this.renderer.render(this.scene, cam);
+                    this.renderer.setRenderTarget(null);
+                    for (const m of hidden) m.visible = true;
+                    // Tinte verde de vision nocturna + contraste (FNAF)
+                    this.renderer.readRenderTargetPixels(feed.rt, 0, 0, 256, 192, feed.buf);
+                    const d = feed.img.data;
+                    for (let p = 0; p < d.length; p += 4) {
+                        const lum = (feed.buf[p] * 0.299 + feed.buf[p + 1] * 0.587 + feed.buf[p + 2] * 0.114) | 0;
+                        d[p] = (lum * 0.22) | 0;
+                        d[p + 1] = Math.min(255, lum * 1.35 + 34) | 0;
+                        d[p + 2] = (lum * 0.4) | 0;
+                        d[p + 3] = 255;
+                    }
+                    feed.ctx.putImageData(feed.img, 0, 0);
+                    feed.tex.needsUpdate = true;
+                    mat.map = feed.tex;
+                    mat.needsUpdate = true;
                 }
-                mat.needsUpdate = true;
             }
         }
 

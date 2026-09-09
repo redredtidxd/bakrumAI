@@ -8,7 +8,8 @@
 
    - Presencia: mensajes RETAINED por jugador; si un cliente se cae sin
      avisar, su presencia se limpia sola con el heartbeat (12 s).
-   - Estado: posicion/rotacion/linterna a ~12 Hz, interpolados en remoto.
+   - Estado: posicion/rotacion/linterna a ~18 Hz (solo con movimiento),
+     interpolados en remoto entre muestras con retraso fijo (~120 ms).
    - Entidad: SOLO el cliente con el pid mas bajo simula al monstruo y
      publica su posicion; el resto lo ve como espectro sincronizado y sufre
      el contacto/vision igualmente (mundo identico -> muros identicos).
@@ -150,6 +151,21 @@
             this.roomKey = String(roomKey);
             this.playerName = (playerName || 'EXPLORADOR').slice(0, 14).toUpperCase();
             this.isHost = true;
+
+            // PID PERSISTENTE por sala+nombre: al recargar o reiniciar la
+            // pagina se reutiliza la misma identidad (mismo topico RETAINED),
+            // asi la presencia anterior se SOBRESCRIBE en vez de convivir con
+            // la nueva ("al reiniciar se ven jugadores duplicados"). Si el
+            // jugador cambia de nombre o de sala, se genera otro pid.
+            try {
+                const pidKey = 'fb_pid:' + this.roomKey + ':' + this.playerName;
+                let saved = localStorage.getItem(pidKey);
+                if (!saved || !/^p[a-z0-9]{5}$/.test(saved)) {
+                    saved = 'p' + Math.random().toString(36).slice(2, 8);
+                    localStorage.setItem(pidKey, saved);
+                }
+                this.pid = saved;
+            } catch (e) { /* localStorage puede fallar (modo privado): pid nuevo */ }
 
             if (typeof Paho === 'undefined') {
                 this.onToast('⚠ MULTIJUGADOR NO DISPONIBLE · modo solitario');
@@ -521,7 +537,9 @@
                         x: 0, y: 0, z: 0, yaw: 0,
                         tx: 0, ty: 0, tz: 0, tyaw: 0,
                         f: false,
-                        hasState: false
+                        hasState: false,
+                        hist: [],
+                        timeBase: undefined
                     });
                     if (this.snapshotDone && this.joined && !this.roomFull) {
                         this.onToast('👤 ' + this.peers.get(pid).name + ' entró en la sala');
@@ -554,6 +572,19 @@
                 p.f = !!d.f;
                 p.lastSeen = Date.now();
                 p.lastStateAt = Date.now();
+                // Historial con marcas de tiempo para interpolar con retraso
+                // fijo. El reloj del emisor se normaliza al local con la
+                // primera muestra (los relojes de cada maquina pueden ir
+                // desviados); si el mensaje viejo no trae t, se usa la hora
+                // de llegada.
+                if (p.timeBase === undefined) {
+                    p.timeBase = (typeof d.t === 'number' && isFinite(d.t)) ? Date.now() - d.t : 0;
+                }
+                const tLocal = (typeof d.t === 'number' && isFinite(d.t)) ? d.t + p.timeBase : Date.now();
+                p.hist = p.hist || [];
+                p.hist.push({ t: tLocal, x: p.tx, y: p.ty, z: p.tz, yaw: p.tyaw });
+                if (p.hist.length > 40) p.hist.shift();
+                while (p.hist.length > 2 && tLocal - p.hist[0].t > 1500) p.hist.shift();
                 if (!p.hasState) {
                     // Primer estado: crear el modelo YA en su posicion real
                     // (sin aparecer en el origen ni volar hasta aqui)
@@ -793,13 +824,14 @@
             const furnitureBoxes = furnitureBodies ? furnitureBodies.map(b => b.aabb).filter(Boolean) : null;
 
             if (this.connected && this.joined && !this.roomFull) {
-                // Estado propio ~12 Hz pero SOLO cuando hay movimiento real:
-                // un jugador quieto no necesita 12 mensajes/s. Menos trafico
-                // en el broker = menos lag cuando la sala esta llena (y se
+                // Estado propio ~18 Hz pero SOLO cuando hay movimiento real:
+                // un jugador quieto no necesita tantos mensajes. Mas
+                // frecuencia = los demas te ven mas fluido y con menos delay
+                // (el broker publico aguanta este ritmo en salas de 6). Se
                 // sigue publicando al menos cada 0,5 s para que el timeout de
-                // 45 s de los demas nunca te eche de la sala).
+                // 45 s de los demas nunca te eche de la sala.
                 this.pubTimer += dt;
-                if (this.pubTimer > 0.083) {
+                if (this.pubTimer > 0.055) {
                     this.pubTimer = 0;
                     const moved = !this._lastPubPos ||
                         Math.hypot(playerPos.x - this._lastPubPos.x, playerPos.z - this._lastPubPos.z) > 0.05 ||
@@ -880,8 +912,12 @@
                 }
             }
 
-            // Interpolacion y render de los jugadores remotos
-            const k = 1 - Math.pow(0.0001, dt);
+            // Interpolacion y render de los jugadores remotos. Se interpola
+            // entre dos muestras RECIBIDAS (historial con marcas de tiempo)
+            // con un retraso de render fijo (~120 ms): el movimiento queda
+            // fluido y con mucho menos "arrastre" que la suavizacion
+            // exponencial (antes el modelo remoto iba 300-500 ms por detras
+            // del jugador real: "hay mucho ping y delay entre jugadores").
             const nowMs = Date.now();
             for (const [pid, p] of this.peers) {
                 const r = this.remotePlayers.get(pid);
@@ -893,19 +929,31 @@
                     p.y = p.ty;
                     p.z = p.tz;
                     p.yaw = p.tyaw;
-                }
-                // Si no llegan estados nuevos (micro-corte del broker, lag
-                // con la sala llena), se CONGELA la interpolacion: antes se
-                // seguia convergiendo hacia el ultimo punto recibido y el
-                // modelo se arrastraba en camara lenta hacia una posicion
-                // vieja ("me ve que me muevo lento" aunque yo ya estaba
-                // lejos). Al volver los mensajes, retoma.
-                const stale = nowMs - (p.lastStateAt || 0) > 350;
-                if (!stale) {
-                    p.x += (p.tx - p.x) * k;
-                    p.y += (p.ty - p.y) * k;
-                    p.z += (p.tz - p.z) * k;
-                    p.yaw = lerpAngleShort(p.yaw, p.tyaw, k);
+                } else {
+                    const hist = p.hist;
+                    if (hist && hist.length >= 2) {
+                        const target = nowMs - 120;
+                        let a = hist[0], b = hist[hist.length - 1];
+                        for (let i = 0; i < hist.length - 1; i++) {
+                            if (hist[i].t <= target && hist[i + 1].t >= target) { a = hist[i]; b = hist[i + 1]; break; }
+                        }
+                        let f = (b.t - a.t) > 0.001 ? (target - a.t) / (b.t - a.t) : 1;
+                        if (target > b.t) {
+                            // Sin datos mas alla de la ultima muestra: si el
+                            // ultimo mensaje es viejo (micro-corte del broker)
+                            // nos quedamos en la ultima posicion conocida;
+                            // si no, extrapolamos un tramo corto para que el
+                            // movimiento no se congele entre mensajes.
+                            const stale = nowMs - (p.lastStateAt || 0) > 350;
+                            f = stale ? 1 : Math.min(1 + (target - b.t) / Math.max(0.001, b.t - a.t), 1.4);
+                        } else if (target < a.t) {
+                            f = 0;
+                        }
+                        p.x = a.x + (b.x - a.x) * f;
+                        p.y = a.y + (b.y - a.y) * f;
+                        p.z = a.z + (b.z - a.z) * f;
+                        p.yaw = lerpAngleShort(a.yaw, b.yaw, f);
+                    }
                 }
                 // Red de seguridad: el modelo remoto SIEMPRE con los pies en el
                 // suelo (ninguna version vieja de otro jugador puede hacerlo

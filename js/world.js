@@ -958,8 +958,14 @@
             const N = CHUNK_SIZE;
             const g = ch.grid;
             const r = ch.rng;
-            if (r() >= 0.25) return;
-            const sizes = [[3, 3], [3, 4], [4, 4]];
+            // Las salas pequenas se cuelan en casi cualquier bolsillo de
+            // pared: con el 25% de antes salian ~1 de cada 4 chunks (demasiado
+            // comunes para un refugio raro). Con 0.15 vuelven a ~1 de cada 7.
+            if (r() >= 0.15) return;
+            // Sala PEQUEÑA a proposito (como la oficina de FNAF): 2x2, 2x3 o
+            // 3x2 celdas (5,6-8,4 m). Antes eran de 3x3 a 4x4 celdas
+            // (8,4-11,2 m) y no parecia un refugio, sino una sala mas.
+            const sizes = [[2, 2], [2, 3], [3, 2]];
             const order = [0, 1, 2];
             for (let i = order.length - 1; i > 0; i--) {
                 const j = Math.floor(r() * (i + 1));
@@ -2180,6 +2186,12 @@
             this.scene.add(doorModel);
             ch.meshes.push(doorModel);
 
+            // Limites de la sala en el mundo (se usan para colocar los
+            // monitores ANTES de rellenar sr):
+            const rmMinX = ox + sr.rx * C, rmMaxX = ox + (sr.rx + sr.w) * C;
+            const rmMinZ = oz + sr.rz * C, rmMaxZ = oz + (sr.rz + sr.h) * C;
+            const rmCX = (rmMinX + rmMaxX) / 2, rmCZ = (rmMinZ + rmMaxZ) / 2;
+
             // Panel de control (pantalla de pila) en la pared interior, junto
             // a la puerta, mirando hacia dentro de la sala
             const panelCanvas = document.createElement('canvas');
@@ -2211,15 +2223,48 @@
             this.scene.add(panelGroup);
             ch.meshes.push(panelGroup);
 
-            // Monitor de camaras en la pared opuesta a la puerta
-            const monitor = createMonitorScreenModel();
+            // Monitores de camaras: UNO EN CADA PARED (todas menos la de la
+            // puerta). En la sala pequena quedan 3 paredes libres -> 3
+            // monitores CRT gruesos, cada uno con su camara DISTINTA y
+            // barrido lateral ("en todos lados una pantalla gorda"). Cada
+            // monitor mira HACIA DENTRO de la sala (local +z = cara con
+            // pantalla): N -> rotY 0, S -> rotY PI, O -> rotY PI/2,
+            // E -> rotY -PI/2. (Antes solo habia uno y, con la puerta al
+            // norte, se giraba hacia la pared: se veia el dorso.)
+            const monitors = [];
             const my = 0.75;
-            if (dc === sr.rx - 1) { monitor.position.set(ox + (sr.rx + sr.w) * C - 0.1, my, dcz0 + C / 2); monitor.rotation.y = -Math.PI / 2; }
-            else if (dc === sr.rx + sr.w) { monitor.position.set(ox + sr.rx * C + 0.1, my, dcz0 + C / 2); monitor.rotation.y = Math.PI / 2; }
-            else if (dz === sr.rz - 1) { monitor.position.set(dcx0 + C / 2, my, oz + (sr.rz + sr.h) * C - 0.1); monitor.rotation.y = 0; }
-            else { monitor.position.set(dcx0 + C / 2, my, oz + sr.rz * C + 0.1); monitor.rotation.y = Math.PI; }
-            this.scene.add(monitor);
-            ch.meshes.push(monitor);
+            const monOff = 0.13;
+            const addMonitor = (mx, mz, ry) => {
+                const m = createMonitorScreenModel(monitors.length + 1);
+                m.position.set(mx, my, mz);
+                m.rotation.y = ry;
+                this.scene.add(m);
+                ch.meshes.push(m);
+                monitors.push(m);
+            };
+            const west = rmMinX + monOff, east = rmMaxX - monOff;
+            const north = rmMinZ + monOff, south = rmMaxZ - monOff;
+            if (dc === sr.rx - 1) {
+                // Puerta al OESTE: opuesto = pared ESTE; laterales = N y S
+                addMonitor(east, rmCZ, -Math.PI / 2);
+                addMonitor(rmCX, north, 0);
+                addMonitor(rmCX, south, Math.PI);
+            } else if (dc === sr.rx + sr.w) {
+                // Puerta al ESTE: opuesto = pared OESTE; laterales = N y S
+                addMonitor(west, rmCZ, Math.PI / 2);
+                addMonitor(rmCX, north, 0);
+                addMonitor(rmCX, south, Math.PI);
+            } else if (dz === sr.rz - 1) {
+                // Puerta al NORTE: opuesto = pared SUR; laterales = E y O
+                addMonitor(rmCX, south, Math.PI);
+                addMonitor(west, rmCZ, Math.PI / 2);
+                addMonitor(east, rmCZ, -Math.PI / 2);
+            } else {
+                // Puerta al SUR: opuesto = pared NORTE; laterales = E y O
+                addMonitor(rmCX, north, 0);
+                addMonitor(west, rmCZ, Math.PI / 2);
+                addMonitor(east, rmCZ, -Math.PI / 2);
+            }
 
             // Caja de colision de la puerta cerrada (bloquea jugador y entidad)
             const doorBox = plane === 'x'
@@ -2235,7 +2280,8 @@
             sr.doorWorldZ = doorZ;
             sr.panelCanvas = panelCanvas;
             sr.panelTex = panelTex;
-            sr.monitor = monitor;
+            sr.monitors = monitors;
+            sr.monitor = monitors[0] || null;
             sr.minX = ox + sr.rx * C;
             sr.maxX = ox + (sr.rx + sr.w) * C;
             sr.minZ = oz + sr.rz * C;
@@ -2894,15 +2940,27 @@
                 quad(d, c, gg, h);
                 quad(a, e, f, b);
             }
-            // Tapas de los extremos, enrasadas con las paredes rectas vecinas
+            // Tapas de los extremos, enrasadas con las paredes rectas vecinas.
+            // La tapa abarca TODA la celda de la pared (del borde TRASERO de
+            // la celda a la cara del arco): antes solo cubria el grosor T del
+            // arco y, al terminar el tramo, quedaba abierto el resto de la
+            // celda (hasta ~1 m) por el que se colaba uno DETRAS de la pared
+            // curva ("al terminar detras no hay una pared completa").
+            const capEdge0 = kind === 'x'
+                ? [[fixed0 - dir * C / 2, sweep0], [fixed0 + dir * T / 2, sweep0]]
+                : [[sweep0, fixed0 - dir * C / 2], [sweep0, fixed0 + dir * T / 2]];
+            const capEdgeN = kind === 'x'
+                ? [[fixed0 - dir * C / 2, sweep1], [fixed0 + dir * T / 2, sweep1]]
+                : [[sweep1, fixed0 - dir * C / 2], [sweep1, fixed0 + dir * T / 2]];
+            const capU = (C / 2 + T / 2) / C;
             {
-                const A = edges[0];
-                const a = vert(A[0][0], y0, A[0][1], 0, 0), b = vert(A[1][0], y0, A[1][1], T / C, 0);
-                const c = vert(A[1][0], y1, A[1][1], T / C, H / C), d = vert(A[0][0], y1, A[0][1], 0, H / C);
+                const A = capEdge0;
+                const a = vert(A[0][0], y0, A[0][1], 0, 0), b = vert(A[1][0], y0, A[1][1], capU, 0);
+                const c = vert(A[1][0], y1, A[1][1], capU, H / C), d = vert(A[0][0], y1, A[0][1], 0, H / C);
                 quad(a, b, c, d);
-                const E = edges[n];
-                const e = vert(E[0][0], y0, E[0][1], 0, 0), f = vert(E[1][0], y0, E[1][1], T / C, 0);
-                const gg = vert(E[1][0], y1, E[1][1], T / C, H / C), h = vert(E[0][0], y1, E[0][1], 0, H / C);
+                const E = capEdgeN;
+                const e = vert(E[0][0], y0, E[0][1], 0, 0), f = vert(E[1][0], y0, E[1][1], capU, 0);
+                const gg = vert(E[1][0], y1, E[1][1], capU, H / C), h = vert(E[0][0], y1, E[0][1], 0, H / C);
                 quad(f, e, h, gg);
             }
 
@@ -2914,6 +2972,7 @@
             const mat = Materials.wall.clone();
             mat.side = THREE.DoubleSide;
             const mesh = new THREE.Mesh(geo, mat);
+            mesh.userData.isCurvedWall = true;   // util para debug/inspeccion
             this.scene.add(mesh);
             ch.meshes.push(mesh);
 
@@ -2948,10 +3007,19 @@
                 if (tt0 < 0.5 && tt1 > 0.5) offs.push(offAt(0.5)); // pico de la curva
                 const minOff = Math.min(...offs) - T / 2;
                 const maxOff = Math.max(...offs) + T / 2;
+                // La caja se extiende tambien por DETRAS del arco hasta el
+                // borde TRASERO de la celda: el hueco que dejaba el arco entre
+                // su cara trasera y el final de la celda (hasta ~1 m de ancho,
+                // mas que el jugador) era transitable y permitia caminar por
+                // detras de la pared curva. Ahora la celda entera de la pared
+                // es solida: solo queda abierto el paso del lado del arco.
+                const backF = fixed0 - dir * C / 2;
+                const bx0 = Math.min(fixed0 + minOff, backF);
+                const bx1 = Math.max(fixed0 + maxOff, backF);
                 if (kind === 'x') {
-                    boxes.push({ minX: fixed0 + minOff, maxX: fixed0 + maxOff, minZ: cellStart, maxZ: cellEnd });
+                    boxes.push({ minX: bx0, maxX: bx1, minZ: cellStart, maxZ: cellEnd });
                 } else {
-                    boxes.push({ minX: cellStart, maxX: cellEnd, minZ: fixed0 + minOff, maxZ: fixed0 + maxOff });
+                    boxes.push({ minX: cellStart, maxX: cellEnd, minZ: bx0, maxZ: bx1 });
                 }
             }
             return { cells, boxes, kind, along0, along1, sweep0, sweep1, fixed0, dir, B, T, ext0, ext1 };
@@ -3372,23 +3440,36 @@
             const G = [-T1 / 2, y1, hL], HH = [T1 / 2, y1, hL];
             const vert = (p, u, v) => { pos.push(p[0], p[1], p[2]); uv.push(u, v); return pos.length / 3 - 1; };
             const tri = (a, b, c) => idx.push(a, b, c);
-            const u0 = 0, u1 = L / CELL_SIZE, v0 = 0, v1 = H / CELL_SIZE;
+            const u1 = L / CELL_SIZE, v1 = H / CELL_SIZE;
             const t0u = T0 / CELL_SIZE, t1u = T1 / CELL_SIZE;
-            // Laterales: el papel pintado se repite cada celda a lo largo (u)
-            // y en vertical (v). Estos 8 vertices SOLO los usan las laterales.
-            const a = vert(A, u0, v0), b = vert(B, u0, v0);
-            const c = vert(C, u1, v0), d = vert(D, u1, v0);
-            const e = vert(E, u0, v1), f = vert(F, u0, v1);
-            const g = vert(G, u1, v1), h = vert(HH, u1, v1);
-            // Laterales (x- y x+)
-            tri(a, g, e); tri(a, c, g);
-            tri(b, f, h); tri(b, f, d);
-            // Tapas de los extremos (z- y z+): antes compartian los vertices
-            // de las laterales y toda la cara muestreaba la columna u=0 de la
-            // textura (una franja estirada de un pixel: "una parte mal hecha
-            // de la textura" en las paredes sueltas). Ahora cada tapa usa sus
-            // propios vertices con u repartido a lo largo del GROSOR, como
-            // una pared de verdad.
+            // Laterales POR SEGMENTOS (~1 m). Antes toda la cara lateral era
+            // UN solo trapezoide con la textura mapeada de esquina a esquina:
+            // en los tabiques con un extremo mas grueso el papel pintado
+            // salia torcido/estirado en diagonal ("la pared diagonal tiene una
+            // parte de su textura mal hecha"). Cada segmento repite el
+            // estampado y, como el grosor apenas cambia entre segmentos, el
+            // papel queda recto en toda la cara.
+            const nSeg = Math.max(2, Math.round(L / 1.0));
+            for (let s = 0; s < nSeg; s++) {
+                const z0 = -hL + (L / nSeg) * s;
+                const z1 = z0 + L / nSeg;
+                const t0 = T0 + (T1 - T0) * (s / nSeg);
+                const t1 = T0 + (T1 - T0) * ((s + 1) / nSeg);
+                const ua = (s / nSeg) * u1, ub = ((s + 1) / nSeg) * u1;
+                // Cara x- (lateral izquierda)
+                const a = vert([-t0 / 2, y0, z0], ua, 0), b = vert([-t1 / 2, y0, z1], ub, 0);
+                const c = vert([-t1 / 2, y1, z1], ub, v1), d = vert([-t0 / 2, y1, z0], ua, v1);
+                tri(a, b, c); tri(a, c, d);
+                // Cara x+ (lateral derecha)
+                const e = vert([t0 / 2, y0, z0], ua, 0), f = vert([t1 / 2, y0, z1], ub, 0);
+                const g = vert([t1 / 2, y1, z1], ub, v1), h = vert([t0 / 2, y1, z0], ua, v1);
+                tri(f, e, h); tri(f, h, g);
+            }
+            // Tapas de los extremos (z- y z+): cada tapa usa sus propios
+            // vertices con u repartido a lo largo del GROSOR, como una pared
+            // de verdad (antes compartian los vertices de las laterales y
+            // toda la cara muestreaba la columna u=0 de la textura: una
+            // franja estirada de un pixel).
             const na = vert(A, 0, 0), nb = vert(B, t0u, 0), nf = vert(F, t0u, v1), ne = vert(E, 0, v1);
             tri(na, ne, nb); tri(nb, ne, nf);
             const fc = vert(C, 0, 0), fd = vert(D, t1u, 0), fh = vert(HH, t1u, v1), fg = vert(G, 0, v1);
@@ -3698,6 +3779,26 @@
                         yaw = -Math.atan2(tangentZ, tangentX);
                     }
                 }
+
+                // La pared debe seguir existiendo DETRAS de todo el ancho del
+                // armario (antes solo se comprobaba la celda central: si el
+                // muro era corto o estaba junto a una puerta, el armario se
+                // apoyaba en una pared de 1 celda y sus lados quedaban sobre
+                // suelo libre: "armario inclinado en la pared sin pared
+                // detras"). Tambien exige cara REAL (nada de celdas curvas).
+                const halfW = fallen ? 1.2 : 0.55;
+                const wRowX = Math.floor((faceCoord - d[0] * C / 2) / C);
+                const wRowZ = Math.floor((faceCoord - d[1] * C / 2) / C);
+                let wallOk = true;
+                for (let ti = Math.floor((tan - halfW) / C); ti <= Math.floor((tan + halfW) / C); ti++) {
+                    const wcx2 = tanAxis === 'x' ? ti : wRowZ;
+                    const wcz2 = tanAxis === 'x' ? wRowX : ti;
+                    if (this.gridAt(wcx2, wcz2) !== 1 || this.wallFaceAt(wcx2, wcz2, d) === null) {
+                        wallOk = false;
+                        break;
+                    }
+                }
+                if (!wallOk) continue;
 
                 const gcx = Math.floor(cx / C);
                 const gcz = Math.floor(cz / C);
