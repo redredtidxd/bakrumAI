@@ -1015,13 +1015,16 @@
                             }
                         }
                         if (ringOpen.length === 1 && ringOpen[0][2]) {
+                            // Alcoba real: exactamente una abertura frontal
+                            // que ya conecta con el pasillo.
                             spots.push([rx, rz, w, h, [ringOpen[0][0], ringOpen[0][1]]]);
-                        } else if (ringOpen.length === 0 || (ringOpen.length === 1 && !ringOpen[0][2])) {
-                            // Sellado (o solo abierto en una esquina, que no
-                            // conecta con el interior): tallar la puerta en
-                            // una celda NO-esquina del anillo cuya cara
-                            // exterior de a una celda transitable (si no, el
-                            // jugador no podria entrar)
+                        } else if (ringOpen.length === 0) {
+                            // Bolsillo completamente cerrado: se talla UNA
+                            // abertura frontal hacia una celda transitable.
+                            // No se aceptan aberturas diagonales: aunque no
+                            // conectasen por 4-neighbor, se veian desde el
+                            // pasillo y hacian parecer la cabina una caja
+                            // plantada con un lateral abierto.
                             for (let dx = -1; dx <= w; dx++) {
                                 for (let dz = -1; dz <= h; dz++) {
                                     if (dx >= 0 && dx < w && dz >= 0 && dz < h) continue;
@@ -1054,6 +1057,11 @@
                 ch.securityRoom = {
                     rx: rx2, rz: rz2, w: rw2, h: rh2,
                     doorX: doorCell[0], doorZ: doorCell[1],
+                    // Metadatos de alcoba: el build 3D solapa la carcasa con
+                    // el anillo de muro y conserva el lado de acceso. Sirven
+                    // también para validar que no se genere en un pasillo.
+                    embeddedInWall: true,
+                    pocketOnly: true,
                     state: { battery: 100, doorOpen: true }
                 };
                 return;
@@ -2186,11 +2194,24 @@
             // del laberinto parezcan cerrar la sala.
             const rmMinX = ox + sr.rx * C, rmMaxX = ox + (sr.rx + sr.w) * C;
             const rmMinZ = oz + sr.rz * C, rmMaxZ = oz + (sr.rz + sr.h) * C;
-            const rmCX = (rmMinX + rmMaxX) / 2, rmCZ = (rmMinZ + rmMaxZ) / 2;
+            // El refugio se construye DENTRO de un bolsillo de muro real.
+            // La carcasa penetra 12 cm en el anillo de pared que rodea la
+            // cavidad: queda anclada a los muros originales y no puede
+            // aparecer como una caja plantada en mitad de un pasillo.
+            const pocketPad = 0.12;
             const shellT = 0.16;
-            const shellInset = 0.08;
-            const shellX0 = rmMinX + shellInset, shellX1 = rmMaxX - shellInset;
-            const shellZ0 = rmMinZ + shellInset, shellZ1 = rmMaxZ - shellInset;
+            let doorSide = 'W', plane = 'x';
+            if (dc === sr.rx - 1) doorSide = 'W';
+            else if (dc === sr.rx + sr.w) doorSide = 'E';
+            else if (doorCellZ === sr.rz - 1) doorSide = 'N';
+            else doorSide = 'S';
+            plane = doorSide === 'W' || doorSide === 'E' ? 'x' : 'z';
+            const shellX0 = rmMinX - pocketPad, shellX1 = rmMaxX + pocketPad;
+            const shellZ0 = rmMinZ - pocketPad, shellZ1 = rmMaxZ + pocketPad;
+            const rmCX = (shellX0 + shellX1) / 2, rmCZ = (shellZ0 + shellZ1) / 2;
+            sr.pocketPad = pocketPad;
+            sr.embedded = true;
+            sr.embedSide = doorSide;
             const shellH = WALL_HEIGHT - 0.02;
             // La cabina es deliberadamente estrecha: la puerta no puede
             // ocupar casi toda la pared ni dejar una falsa sensacion de sala
@@ -2198,13 +2219,6 @@
             const doorWidth = 1.18;
             const doorHeight = 2.46;
             const hasWideWall = sr.w >= 2 || sr.h >= 2;
-
-            let doorSide = 'W', plane = 'x', doorX = 0, doorZ = 0;
-            if (dc === sr.rx - 1) doorSide = 'W';
-            else if (dc === sr.rx + sr.w) doorSide = 'E';
-            else if (doorCellZ === sr.rz - 1) doorSide = 'N';
-            else doorSide = 'S';
-            plane = doorSide === 'W' || doorSide === 'E' ? 'x' : 'z';
 
             // La celda de la boca puede quedar pegada a una esquina. Se
             // centra dentro de la pared de la cabina y se limita para que las
@@ -2214,6 +2228,7 @@
             const rawDoorT = plane === 'x' ? dcz0 + C / 2 : dcx0 + C / 2;
             const doorT = Math.max(tangent0 + doorWidth / 2 + 0.08,
                 Math.min(tangent1 - doorWidth / 2 - 0.08, rawDoorT));
+            let doorX = 0, doorZ = 0;
             if (plane === 'x') {
                 doorX = doorSide === 'W' ? shellX0 : shellX1;
                 doorZ = doorT;
@@ -2240,7 +2255,7 @@
                 mesh.userData.isSecurityStructure = true;
                 this.scene.add(mesh);
                 ch.meshes.push(mesh);
-                ch.wallBoxes.push({ minX, maxX, minZ, maxZ, securityStructure: true });
+                ch.wallBoxes.push({ minX, maxX, minZ, maxZ, securityStructure: true, securityRoomId: sr.id || null });
             };
             const addXWall = (x0, x1, z0, z1) => addShellPanel(x0, x1, z0, z1);
             const addZWall = (x0, x1, z0, z1) => addShellPanel(x0, x1, z0, z1);
@@ -2346,19 +2361,28 @@
             panelBox.add(panelScreen);
             panelGroup.add(panelBox);
             const py = 1.08;
-            // Panel de bateria en la pared contigua a la puerta, nunca delante
-            // del vano: queda al alcance de la mano nada mas entrar.
+            // Panel de bateria en la misma pared de la puerta, junto a una
+            // jamba y NUNCA flotando delante del vano. El plano de su pantalla
+            // queda a 1,2 cm de la cara interior de la carcasa; el cuerpo se
+            // embute parcialmente en el metal.
+            const wallT0 = plane === 'x' ? shellZ0 : shellX0;
+            const wallT1 = plane === 'x' ? shellZ1 : shellX1;
+            let panelT = doorT - doorWidth / 2 - 0.28;
+            if (panelT < wallT0 + 0.22) panelT = doorT + doorWidth / 2 + 0.28;
+            panelT = Math.max(wallT0 + 0.22, Math.min(wallT1 - 0.22, panelT));
+            const panelScreenDepth = 0.052;
+            const panelFace = 0.012;
             if (doorSide === 'W') {
-                panelGroup.position.set(shellX0 + shellT + 0.055, py, shellZ0 + shellT + 0.42);
+                panelGroup.position.set(shellX0 + shellT + panelFace - panelScreenDepth, py, panelT);
                 panelGroup.rotation.y = Math.PI / 2;
             } else if (doorSide === 'E') {
-                panelGroup.position.set(shellX1 - shellT - 0.055, py, shellZ0 + shellT + 0.42);
+                panelGroup.position.set(shellX1 - shellT - panelFace + panelScreenDepth, py, panelT);
                 panelGroup.rotation.y = -Math.PI / 2;
             } else if (doorSide === 'N') {
-                panelGroup.position.set(shellX0 + shellT + 0.42, py, shellZ0 + shellT + 0.055);
+                panelGroup.position.set(panelT, py, shellZ0 + shellT + panelFace - panelScreenDepth);
                 panelGroup.rotation.y = 0;
             } else {
-                panelGroup.position.set(shellX0 + shellT + 0.42, py, shellZ1 - shellT - 0.055);
+                panelGroup.position.set(panelT, py, shellZ1 - shellT - panelFace + panelScreenDepth);
                 panelGroup.rotation.y = Math.PI;
             }
             panelGroup.userData.isSecurityPanel = true;
@@ -2377,9 +2401,16 @@
             const my = 0.95;
             // El centro se separa del panel por el grosor de la pared: la caja
             // queda embutida y la pantalla sobresale, asi no vuelve a flotar.
-            const monitorMount = shellT + 0.155 + 0.012;
-            const west = shellX0 + monitorMount, east = shellX1 - monitorMount;
-            const north = shellZ0 + monitorMount, south = shellZ1 - monitorMount;
+            // El origen del CRT se mete en la pared. Su pantalla esta a
+            // 0,182 m en +Z local; con estas posiciones la pantalla queda
+            // justo sobre la cara interior y la carcasa queda embutida, no
+            // suspendida ~35 cm dentro de la sala.
+            const monitorScreenDepth = 0.182;
+            const monitorFace = 0.012;
+            const west = shellX0 + shellT + monitorFace - monitorScreenDepth;
+            const east = shellX1 - shellT - monitorFace + monitorScreenDepth;
+            const north = shellZ0 + shellT + monitorFace - monitorScreenDepth;
+            const south = shellZ1 - shellT - monitorFace + monitorScreenDepth;
             // En una cabina de una celda no caben tres CRT de 1,5 m: se
             // montan en paredes opuestas/laterales alternas, centrados y sin
             // salir de la carcasa. En las cabinas 1x2/1x3 caben tres, pero
@@ -2443,10 +2474,12 @@
             sr.panelTex = panelTex;
             sr.monitors = monitors;
             sr.monitor = monitors[0] || null;
-            sr.minX = ox + sr.rx * C;
-            sr.maxX = ox + (sr.rx + sr.w) * C;
-            sr.minZ = oz + sr.rz * C;
-            sr.maxZ = oz + (sr.rz + sr.h) * C;
+            // Bounds de la carcasa (no solo de las celdas lógicas): sirven
+            // para la colisión, el marcador del mapa y para excluir cámaras.
+            sr.minX = shellX0;
+            sr.maxX = shellX1;
+            sr.minZ = shellZ0;
+            sr.maxZ = shellZ1;
             sr.centerX = (sr.minX + sr.maxX) / 2;
             sr.centerZ = (sr.minZ + sr.maxZ) / 2;
             // Al recargar el chunk la malla se reconstruye: la lista se
@@ -2464,11 +2497,14 @@
             const N = CHUNK_SIZE;
             const C = CELL_SIZE;
             const rng = mulberry32(hash2(ch.cx * 9001 + 7, ch.cz * 7001 + 313));
-            // Reset al reconstruir el chunk: sin duplicados al recargar. Una
-            // cabina de seguridad siempre obtiene cámaras exteriores para sus
-            // monitores; los chunks normales siguen teniendo cámaras raras.
+            // Reset al reconstruir el chunk: sin duplicados al recargar.
             ch.cameras = [];
             const sr = ch.securityRoom;
+            // El refugio ocupa el bolsillo interior y se hunde en las tres
+            // paredes de respaldo; las cámaras solo pueden vivir fuera de
+            // esta envolvente, nunca dentro de la cabina ni en sus paneles.
+            const outsideBooth = (wx, wz) => !sr || wx < sr.shellMinX - 0.05 || wx > sr.shellMaxX + 0.05 ||
+                wz < sr.shellMinZ - 0.05 || wz > sr.shellMaxZ + 0.05;
             const insideRoom = (x, z) => !!sr && x >= sr.rx && x < sr.rx + sr.w && z >= sr.rz && z < sr.rz + sr.h;
             if (!sr && rng() >= 0.45) return;
             const g = ch.grid;
@@ -2478,6 +2514,9 @@
                 for (let z = 1; z < N - 1; z++) {
                     const k = key(x, z);
                     if (g[x][z] !== 1 || curvedCells.has(k) || insideRoom(x, z)) continue;
+                    const wallWorldX = ch.cx * N * C + (x + 0.5) * C;
+                    const wallWorldZ = ch.cz * N * C + (z + 0.5) * C;
+                    if (!outsideBooth(wallWorldX, wallWorldZ)) continue;
                     const kind = wallKind.get(k);
                     if (kind !== 'x' && kind !== 'z') continue;
                     if (ch.graffitiCells && ch.graffitiCells.has(x + ',' + z)) continue;
@@ -2487,6 +2526,9 @@
                         const nx = x + dx, nz = z + dz;
                         if (nx < 0 || nx >= N || nz < 0 || nz >= N) continue;
                         if (g[nx][nz] !== 0 && g[nx][nz] !== 2) continue;
+                        const targetWorldX = ch.cx * N * C + (nx + 0.5) * C;
+                        const targetWorldZ = ch.cz * N * C + (nz + 0.5) * C;
+                        if (!outsideBooth(targetWorldX, targetWorldZ)) continue;
                         // Una cámara cuyo objetivo sería una celda de la cabina
                         // queda dentro de la sala de seguridad (aunque la pared
                         // original del laberinto siga debajo de la estructura):
@@ -2519,6 +2561,7 @@
                 else if (c[2] === 'S') { m.position.set(mx, 2.28, box.minZ - off); ry = Math.PI; }
                 else { m.position.set(mx, 2.28, box.maxZ + off); ry = 0; }
                 m.rotation.y = ry;
+                if (!outsideBooth(m.position.x, m.position.z)) continue;
                 m.userData.isExteriorSecurityCamera = !!sr;
                 this.scene.add(m);
                 ch.meshes.push(m);

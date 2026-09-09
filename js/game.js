@@ -10,7 +10,12 @@
     // VERSION DEL JUEGO: se muestra en el menú principal y en el HUD.
     // Al subirla, actualiza también el ?v=... de index.html (cache busting:
     // así el navegador no se queda con los js antiguos en caché).
-    const GAME_VERSION = '1.11.0';
+    const GAME_VERSION = '1.12.0';
+    // Esta entrega incorpora renderizado CCTV por turnos, caché de cámaras y
+    // lectura GPU->CPU solo para el visor abierto. La etiqueta "Opt" solo se
+    // muestra cuando estas optimizaciones están activadas.
+    const GAME_OPTIMIZED = true;
+    const GAME_VERSION_LABEL = 'v' + GAME_VERSION + (GAME_OPTIMIZED ? ' Opt' : '');
 
     class BackroomsGame {
         constructor() {
@@ -159,11 +164,28 @@
             // render target y su barrido lateral). Clave: id de sala + indice.
             this._monFeeds = new Map();
             this._feedTime = 0;
+            this._feedFrame = 0;
+            this._feedRoundRobin = 0;
+            this._feedReadbackEvery = 2; // solo el feed que esta viendo el jugador
+            this._feedCaptureDistance = 42;
+            this._feedMinInterval = 0.22; // una captura por ranura, sin renderizar 3 CRT a la vez
+            this._feedOverlayStamp = '';
             this._noSignalTex = null;
             this._panelTimer = 0;
             this._iRechargeAcc = 0;
             this.cameraFeedView = { open: false, room: null, monitorIndex: 0 };
             this._entSpawnNotified = false;
+
+            // Avatar local exclusivo para CCTV. El jugador real es la cámara
+            // y no tiene cuerpo en la escena; sin este proxy las cámaras solo
+            // podían mostrar a compañeros y nunca al explorador que las estaba
+            // mirando. Permanece oculto en la vista normal y se activa solo
+            // durante el render de una señal.
+            const localCctvModel = createExplorerModel(0xffd166);
+            this.cctvLocalActor = localCctvModel.group;
+            this.cctvLocalActor.visible = false;
+            this.cctvLocalActor.userData.isCctvActor = true;
+            this.scene.add(this.cctvLocalActor);
 
             window.addEventListener('beforeunload', () => this.net.leave());
             window.addEventListener('pagehide', () => this.net.leave());
@@ -622,9 +644,9 @@
         initUI() {
             // Version en el menu principal y en el HUD (unica fuente: GAME_VERSION)
             const mv = document.getElementById('menu-version');
-            if (mv) mv.textContent = 'THE BACKROOMS v' + GAME_VERSION;
+            if (mv) mv.textContent = 'THE BACKROOMS ' + GAME_VERSION_LABEL;
             const hv = document.getElementById('hud-version');
-            if (hv) hv.textContent = 'v' + GAME_VERSION;
+            if (hv) hv.textContent = GAME_VERSION_LABEL;
 
             // Recuerda el nombre entre partidas
             const nameInput = document.getElementById('name-input');
@@ -2166,9 +2188,15 @@
         // el jugador siempre ve la señal completa y puede cambiar de cámara.
         getRoomFeedCameras(room) {
             const cams = this.worldSystem.cameras || [];
-            return cams.slice().sort((a, b) =>
+            // Las posiciones de las cámaras solo cambian cuando se reconstruye
+            // el conjunto de chunks. No ordenamos toda la lista en cada frame:
+            // se conserva la lista mientras la referencia siga siendo la misma.
+            if (room._feedCamerasSource === cams && room._feedCameras) return room._feedCameras;
+            room._feedCamerasSource = cams;
+            room._feedCameras = cams.slice().sort((a, b) =>
                 Math.hypot(a.x - room.centerX, a.z - room.centerZ) -
                 Math.hypot(b.x - room.centerX, b.z - room.centerZ));
+            return room._feedCameras;
         }
 
         openCameraFeed(room, monitorIndex = 0) {
@@ -2197,6 +2225,7 @@
         }
 
         closeCameraFeed() {
+            this._feedOverlayStamp = '';
             const overlay = document.getElementById('camera-feed-overlay');
             if (overlay) {
                 overlay.classList.remove('open');
@@ -2240,6 +2269,10 @@
             const title = document.getElementById('camera-feed-title');
             const status = document.getElementById('camera-feed-status');
             if (!canvas) return;
+            const stamp = room.id + ':' + i + ':' + pick + ':' +
+                (feed ? feed.revision : 0) + ':' + (room.state.battery <= 0 ? 1 : 0);
+            if (stamp === this._feedOverlayStamp) return;
+            this._feedOverlayStamp = stamp;
             const ctx = canvas.getContext('2d');
             ctx.fillStyle = '#061007';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -2292,6 +2325,61 @@
             }
         }
 
+        // Actores que solo se muestran durante una captura CCTV. La vista
+        // normal conserva exactamente las visibilidades que decide el juego:
+        // el avatar local se oculta, los remotos pueden estar fuera del radio
+        // del jugador y el fantasma puede estar desactivado. La cámara CCTV,
+        // en cambio, debe recibir los actores del mundo para que jugadores y
+        // Entidad aparezcan en la señal cuando están dentro de su encuadre.
+        prepareCctvActors() {
+            const restore = [];
+            const remember = (object) => {
+                if (object) restore.push({ object, visible: object.visible });
+            };
+            const local = this.cctvLocalActor;
+            const localState = local ? {
+                object: local,
+                visible: local.visible,
+                position: local.position.clone(),
+                rotationY: local.rotation.y
+            } : null;
+            if (local) {
+                local.position.set(this.player.pos.x, 0, this.player.pos.z);
+                local.rotation.y = this.yaw + Math.PI;
+                local.visible = true;
+            }
+
+            for (const remote of (this.net.remotePlayers || new Map()).values()) {
+                if (!remote || !remote.group) continue;
+                remember(remote.group);
+                remote.group.visible = true;
+                // El fantasma X-RAY es una ayuda para la vista normal, no una
+                // segunda persona que deba salir en una grabación CCTV.
+                if (remote.ghost) {
+                    remember(remote.ghost);
+                    remote.ghost.visible = false;
+                }
+            }
+
+            if (this.entity && this.entity.active && this.entity.mesh) {
+                remember(this.entity.mesh);
+                this.entity.mesh.visible = true;
+            }
+            if (this.net.entityGhost && this.net.entityActive) {
+                remember(this.net.entityGhost);
+                this.net.entityGhost.visible = true;
+            }
+
+            return () => {
+                for (const item of restore) item.object.visible = item.visible;
+                if (localState) {
+                    localState.object.visible = localState.visible;
+                    localState.object.position.copy(localState.position);
+                    localState.object.rotation.y = localState.rotationY;
+                }
+            };
+        }
+
         // Monitores de las salas de seguridad (FNAF): UNO POR PARED, cada
         // uno con su camara DISTINTA (las mas cercanas a la sala, sin
         // repetir) y su propio render target. La camara del feed BARRE de
@@ -2312,11 +2400,23 @@
                 this._noSignalTex = new THREE.CanvasTexture(c);
             }
             this._feedTime += dt;
+            this._feedFrame++;
             const cams = this.worldSystem.cameras;
             const px = this.player.pos.x, pz = this.player.pos.z;
-            for (const r of this.worldSystem.securityRooms) {
-                if (!r.monitors || !r.monitors.length || !r.doorModel) continue;
-                if (Math.hypot(r.centerX - px, r.centerZ - pz) > 32) continue;
+            const activeRooms = this.worldSystem.securityRooms.filter(r =>
+                r.monitors && r.monitors.length && r.doorModel &&
+                Math.hypot(r.centerX - px, r.centerZ - pz) <= this._feedCaptureDistance
+            );
+            if (!activeRooms.length || !cams.length) return;
+            // Un solo render target por frame: el índice se elige UNA vez por
+            // actualización, no dentro del bucle de monitores. Antes se
+            // incrementaba dentro del bucle y, por coincidencia, cada CRT
+            // obtenía su propio turno en el mismo frame (tres renders completos
+            // por frame y una caída de FPS justo al acercarse a la cabina).
+            const totalSlots = activeRooms.reduce((n, room) => n + room.monitors.length, 0);
+            const refreshSlot = this._feedRoundRobin++ % Math.max(1, totalSlots);
+            let slotIndex = 0;
+            for (const r of activeRooms) {
                 r._monPicks = r._monPicks || [0, 1, 2];
                 // Cámaras ordenadas por cercanía a la SALA, igual que en el
                 // visor: así la imagen del monitor y la ampliada siempre son
@@ -2342,7 +2442,8 @@
                             ctx: null,
                             buf: null,
                             img: null,
-                            tex: null
+                            tex: null,
+                            revision: 0
                         };
                         feed.canvas.width = 256;
                         feed.canvas.height = 192;
@@ -2376,14 +2477,19 @@
                     }
                     const mat = mon.userData.screenMat;
                     if (r.state.battery <= 0 || pick >= near.length) {
-                        mat.map = this._noSignalTex;
-                        mat.needsUpdate = true;
+                        if (mat.uniforms) mat.uniforms.map.value = this._noSignalTex;
+                        else { mat.map = this._noSignalTex; mat.needsUpdate = true; }
                         continue;
                     }
                     feed.timer += dt;
-                    if (feed.timer < 0.55) {
-                        mat.map = feed.tex || feed.rt.texture;
-                        mat.needsUpdate = true;
+                    // Un solo CRT se actualiza por frame de juego (round-robin)
+                    // y no tres render targets completos a la vez. La señal
+                    // sigue siendo fluida y el coste baja mucho en salas con
+                    // varias pantallas.
+                    const thisSlot = slotIndex++;
+                    if (feed.timer < this._feedMinInterval || thisSlot !== refreshSlot) {
+                        if (mat.uniforms) mat.uniforms.map.value = feed.tex || feed.rt.texture;
+                        else { mat.map = feed.tex || feed.rt.texture; mat.needsUpdate = true; }
                         continue;
                     }
                     feed.timer = 0;
@@ -2412,33 +2518,49 @@
                     // descarta el frame (GL_INVALID_OPERATION) y la pantalla
                     // puede quedarse negra.
                     const hidden = [];
-                    for (const r2 of this.worldSystem.securityRooms) {
-                        for (const m of r2.monitors || []) { hidden.push(m); m.visible = false; }
-                    }
-                    this.renderer.setRenderTarget(feed.rt);
-                    this.renderer.render(this.scene, cam);
-                    this.renderer.setRenderTarget(null);
-                    for (const m of hidden) m.visible = true;
-                    // Tinte verde de vision nocturna + contraste (FNAF)
-                    this.renderer.readRenderTargetPixels(feed.rt, 0, 0, 256, 192, feed.buf);
-                    const d = feed.img.data;
-                    // WebGL devuelve las filas desde abajo; invertir Y evita
-                    // que la señal aparezca cabeza abajo en el CRT y el visor.
-                    for (let y = 0; y < 192; y++) {
-                        for (let x = 0; x < 256; x++) {
-                            const p = (y * 256 + x) * 4;
-                            const src = ((191 - y) * 256 + x) * 4;
-                            const lum = (feed.buf[src] * 0.299 + feed.buf[src + 1] * 0.587 + feed.buf[src + 2] * 0.114) | 0;
-                            d[p] = (lum * 0.22) | 0;
-                            d[p + 1] = Math.min(255, lum * 1.35 + 34) | 0;
-                            d[p + 2] = (lum * 0.4) | 0;
-                            d[p + 3] = 255;
+                    for (const r2 of activeRooms) {
+                        for (const m of r2.monitors || []) {
+                            hidden.push({ object: m, visible: m.visible });
+                            m.visible = false;
                         }
                     }
-                    feed.ctx.putImageData(feed.img, 0, 0);
-                    feed.tex.needsUpdate = true;
-                    mat.map = feed.tex;
-                    mat.needsUpdate = true;
+                    const restoreActors = this.prepareCctvActors();
+                    try {
+                        this.renderer.setRenderTarget(feed.rt);
+                        this.renderer.render(this.scene, cam);
+                    } finally {
+                        this.renderer.setRenderTarget(null);
+                        for (const item of hidden) item.object.visible = item.visible;
+                        restoreActors();
+                    }
+                    // El CRT usa el shader verde en GPU: no hacemos
+                    // readRenderTargetPixels para cada pantalla. Solo se lee
+                    // un frame ocasional si el visor está abierto.
+                    if (this.cameraFeedView.open && this._feedFrame % this._feedReadbackEvery === 0) {
+                        this.renderer.readRenderTargetPixels(feed.rt, 0, 0, 256, 192, feed.buf);
+                        const d = feed.img.data;
+                        for (let y = 0; y < 192; y++) {
+                            for (let x = 0; x < 256; x++) {
+                                const p = (y * 256 + x) * 4;
+                                const src = ((191 - y) * 256 + x) * 4;
+                                const lum = (feed.buf[src] * 0.299 + feed.buf[src + 1] * 0.587 + feed.buf[src + 2] * 0.114) * 1.12;
+                                d[p] = Math.min(255, lum * 0.22) | 0;
+                                d[p + 1] = Math.min(255, lum * 1.35 + 34) | 0;
+                                d[p + 2] = Math.min(255, lum * 0.40) | 0;
+                                d[p + 3] = 255;
+                            }
+                        }
+                        feed.ctx.putImageData(feed.img, 0, 0);
+                        feed.revision++;
+                        feed.tex.needsUpdate = true;
+                    }
+                    if (mat.uniforms) {
+                        mat.uniforms.map.value = feed.rt.texture;
+                        mat.uniforms.gain.value = 1.12;
+                    } else {
+                        mat.map = feed.tex || feed.rt.texture;
+                        mat.needsUpdate = true;
+                    }
                 }
             }
         }

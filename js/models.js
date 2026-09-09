@@ -881,8 +881,35 @@
         bevel.position.set(0, 0.56, 0.155);
         group.add(bevel);
 
-        // Pantalla (el material se cambia por el render target del feed)
-        const screenMat = new THREE.MeshBasicMaterial({ color: 0x0a0d12 });
+        // Pantalla: el feed se procesa en GPU (tinte nocturno y ganancia)
+        // para no leer los pixeles de la tarjeta grafica en cada monitor.
+        // La lectura CPU queda reservada al visor CCTV que el jugador abre.
+        const screenMat = new THREE.ShaderMaterial({
+            uniforms: {
+                map: { value: null },
+                gain: { value: 1.0 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D map;
+                uniform float gain;
+                varying vec2 vUv;
+                void main() {
+                    vec3 raw = texture2D(map, vUv).rgb * gain;
+                    float lum = dot(raw, vec3(0.299, 0.587, 0.114));
+                    vec3 night = vec3(lum * 0.22, min(1.0, lum * 1.35 + 0.13), lum * 0.40);
+                    gl_FragColor = vec4(night, 1.0);
+                }
+            `,
+            depthWrite: true,
+            depthTest: true
+        });
         const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.22, 0.66), screenMat);
         screen.position.set(0, 0.57, 0.182);
         group.add(screen);
